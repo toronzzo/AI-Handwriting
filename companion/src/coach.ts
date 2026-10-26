@@ -24,12 +24,12 @@ export function coachUnlockLine(
   }
   if (id === "pyrax") {
     return {
-      emotion: "fierce",
+      emotion: "angry",
       text: `${unlocked.title} burned in. ${more}`,
     };
   }
   return {
-    emotion: "mysterious",
+    emotion: "neutral",
     text: `${unlocked.title}. Logged. ${more}`,
   };
 }
@@ -41,7 +41,7 @@ export function coachNextLine(
   partnerName: string | null,
 ): CoachLine {
   const n = who(partnerName);
-  return { emotion: "curious", text: nextHint(id, next, n) };
+  return { emotion: "thinking", text: nextHint(id, next, n) };
 }
 
 function nextHint(id: BakuganId, next: Drill, n: string): string {
@@ -72,18 +72,18 @@ export function coachIdleLine(
   const n = who(partnerName);
   if (id === "preyas") {
     return {
-      emotion: "curious",
+      emotion: "thinking",
       text: `Hey ${n}… still here. Wanna etch ${next.title}? ${next.how}`,
     };
   }
   if (id === "pyrax") {
     return {
-      emotion: "calm",
+      emotion: "neutral",
       text: `Core's warm. ${next.title} when you're ready. ${next.how}`,
     };
   }
   return {
-    emotion: "mysterious",
+    emotion: "neutral",
     text: `…${next.title} is waiting. ${next.how}`,
   };
 }

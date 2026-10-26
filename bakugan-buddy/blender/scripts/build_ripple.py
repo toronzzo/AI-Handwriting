@@ -394,7 +394,7 @@ def build_meshes(arm: bpy.types.Object, mats: dict) -> list[bpy.types.Object]:
 def add_brain_properties(arm: bpy.types.Object) -> None:
     """Custom props the AI driver reads/writes — Ripple 'knows' its state."""
     props = {
-        "ai_mood": "idle",
+        "ai_mood": "neutral",
         "ai_intent": "REST",
         "ai_line": "",
         "ai_open": 0.0,

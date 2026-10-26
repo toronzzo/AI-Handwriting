@@ -181,17 +181,17 @@ function buildNodes(w: number, h: number): Node[] {
 function emotionHeat(e: Emotion): number {
   switch (e) {
     case "excited":
-    case "fierce":
+    case "angry":
+    case "battle":
       return 1;
     case "happy":
-    case "amused":
+    case "surprised":
       return 0.85;
     case "sad":
       return 0.35;
     case "thinking":
       return 0.7;
     case "listening":
-    case "curious":
       return 0.65;
     default:
       return 0.4;

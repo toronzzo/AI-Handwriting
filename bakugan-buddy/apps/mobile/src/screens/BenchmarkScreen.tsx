@@ -11,7 +11,7 @@ import { BodyWebViewAPI, type BodyMetrics } from "../body/BodyWebView";
 
 const LOG_KEY = "bakugan-buddy/metrics-v1";
 
-const MOODS = ["happy", "excited", "fierce", "sad", "listening", "calm"] as const;
+const MOODS = ["happy", "excited", "angry", "sad", "listening", "neutral", "thinking", "battle"] as const;
 
 type Props = {
   latest: BodyMetrics | null;

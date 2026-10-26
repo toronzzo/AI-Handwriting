@@ -1,16 +1,28 @@
+import {
+  CANONICAL_MOODS,
+  normalizeMood,
+  parseTagged,
+  react,
+  splitSentences,
+  stripThink,
+  StreamingMoodParser,
+  moodPromptLine,
+  type Mood,
+} from "../../bakugan-buddy/packages/mood/src/index.ts";
+
+export type Emotion = Mood;
+export {
+  CANONICAL_MOODS,
+  normalizeMood,
+  parseTagged,
+  react,
+  splitSentences,
+  stripThink,
+  StreamingMoodParser,
+  moodPromptLine,
+};
+
 export type Attribute = "pyrus" | "aquos" | "darkus";
-export type Emotion =
-  | "idle"
-  | "listening"
-  | "thinking"
-  | "happy"
-  | "excited"
-  | "calm"
-  | "sad"
-  | "curious"
-  | "fierce"
-  | "mysterious"
-  | "amused";
 
 export type BakuganId = "preyas" | "pyrax" | "vexar";
 
@@ -117,57 +129,23 @@ export function findBakuganByUtterance(text: string): BakuganId | null {
 }
 
 export const EMOTION_TAGS: Emotion[] = [
-  "idle",
-  "listening",
-  "thinking",
+  "neutral",
   "happy",
   "excited",
-  "calm",
+  "angry",
   "sad",
-  "curious",
-  "fierce",
-  "mysterious",
-  "amused",
+  "surprised",
+  "thinking",
+  "listening",
+  "battle",
 ];
 
-function normalizeEmotionTag(tag: string): Emotion {
-  const lower = tag.toLowerCase();
-  if (lower === "angry") return "fierce";
-  if (lower === "idle") return "calm";
-  return EMOTION_TAGS.includes(lower as Emotion) ? (lower as Emotion) : "curious";
-}
-
-/** Incremental `[mood] text` parser — complete only once the closing `]` arrives. */
+/** Incremental `[mood] text` parser — mood fires as soon as `]` arrives. */
 export function parseEmotionPrefix(raw: string): {
   emotion: Emotion;
   text: string;
   complete: boolean;
 } {
-  const s = raw.trimStart();
-  if (!s) {
-    return { emotion: "thinking", text: "", complete: false };
-  }
-  if (s.startsWith("[")) {
-    const close = s.indexOf("]");
-    if (close === -1) {
-      return { emotion: "thinking", text: "", complete: false };
-    }
-    const tag = s.slice(1, close);
-    if (!/^[a-z]+$/i.test(tag)) {
-      return { emotion: "curious", text: s.trim(), complete: true };
-    }
-    return {
-      emotion: normalizeEmotionTag(tag),
-      text: s.slice(close + 1).trim(),
-      complete: true,
-    };
-  }
-  return { emotion: "curious", text: s.trim(), complete: true };
-}
-
-export function splitSentences(text: string): string[] {
-  const cleaned = text.replace(/\*[^*]+\*/g, " ").replace(/\s+/g, " ").trim();
-  if (!cleaned) return [];
-  const parts = cleaned.match(/[^.!?]+[.!?]+|[^.!?]+$/g);
-  return (parts ?? [cleaned]).map((s) => s.trim()).filter(Boolean);
+  const p = parseTagged(raw);
+  return { emotion: p.mood, text: p.text, complete: p.complete };
 }

@@ -34,13 +34,13 @@
     <div id="controls">
       <button data-e="happy">happy</button>
       <button data-e="excited">excited</button>
-      <button data-e="fierce">angry</button>
+      <button data-e="angry">angry</button>
       <button data-e="sad">sad</button>
       <button data-e="listening">listen</button>
       <button data-e="thinking">think</button>
       <button data-e="surprised">surprise</button>
-      <button data-e="determined">battle</button>
-      <button data-e="calm">calm</button>
+      <button data-e="battle">battle</button>
+      <button data-e="neutral">neutral</button>
       <button data-a="react">react demo</button>
       <button data-a="talk">talk pulse</button>
       <button data-a="theme">cycle theme</button>
@@ -124,23 +124,25 @@
     },
   };
 
+  // Canonical moods (@bakugan-buddy/mood) — keep in sync with packages/mood
   const MOODS = new Set([
-    "idle", "listening", "thinking", "happy", "excited", "calm",
-    "sad", "curious", "fierce", "angry", "mysterious", "amused",
-    "surprised", "determined",
+    "neutral", "happy", "excited", "angry", "sad",
+    "surprised", "thinking", "listening", "battle",
   ]);
 
   const ALIASES = {
-    angry: "fierce", mad: "fierce", rage: "fierce",
-    neutral: "idle", normal: "idle", joy: "happy", glad: "happy",
+    fierce: "angry", mad: "angry", rage: "angry",
+    calm: "neutral", idle: "neutral", mysterious: "neutral", normal: "neutral",
+    curious: "thinking", determined: "battle",
+    amused: "happy", joy: "happy", glad: "happy",
     hype: "excited", hyped: "excited", wow: "excited",
     upset: "sad", cry: "sad", shocked: "surprised", shock: "surprised",
     think: "thinking", listen: "listening",
-    battle: "determined", brave: "determined", fight: "determined",
+    brave: "battle", fight: "battle",
   };
 
   const state = {
-    emotion: "idle",
+    emotion: "neutral",
     theme: { ...THEMES.aquos },
     talking: false,
     talkVol: 0,
@@ -181,10 +183,10 @@
   window.addEventListener("resize", resize);
 
   function normalizeMood(m) {
-    if (!m) return "idle";
+    if (!m) return "thinking";
     const x = String(m).toLowerCase().trim();
     if (ALIASES[x]) return ALIASES[x];
-    return MOODS.has(x) ? (x === "angry" ? "fierce" : x) : "curious";
+    return MOODS.has(x) ? x : "thinking";
   }
 
   function setEmotion(mood) {
@@ -194,13 +196,13 @@
     // Anime: big feelings snap open; calm/sad prefer sphere
     if (
       state.emotion === "excited" ||
-      state.emotion === "fierce" ||
-      state.emotion === "determined" ||
+      state.emotion === "angry" ||
+      state.emotion === "battle" ||
       state.emotion === "surprised"
     ) {
       state.form = "battle";
     }
-    if (state.emotion === "calm" || state.emotion === "sad" || state.emotion === "idle") {
+    if (state.emotion === "neutral" || state.emotion === "sad") {
       state.form = "sphere";
     }
     // Impulse when mood changes (toy spring / jump)
@@ -210,9 +212,9 @@
         motion.squash = Math.max(motion.squash, 0.55);
       } else if (state.emotion === "excited") {
         motion.openV += 12;
-      } else if (state.emotion === "happy" || state.emotion === "amused") {
+      } else if (state.emotion === "happy") {
         motion.spin += Math.PI * 0.35;
-      } else if (state.emotion === "fierce") {
+      } else if (state.emotion === "angry") {
         motion.flash = 1;
       }
     }
@@ -240,13 +242,16 @@
   }
 
   function react(tagged) {
-    const m = String(tagged || "").trim().match(/^\[([a-z]+)\]\s*([\s\S]*)$/i);
+    const raw = String(tagged || "");
+    // Strip optional <think>...</think> — never shown / never "spoken" by body path
+    const noThink = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/<think>[\s\S]*$/i, "");
+    const m = noThink.trim().match(/^\[([a-z]+)\]\s*([\s\S]*)$/i);
     if (m) {
       setEmotion(m[1]);
       return { emotion: state.emotion, text: m[2].trim() };
     }
-    setEmotion("curious");
-    return { emotion: state.emotion, text: String(tagged || "") };
+    setEmotion("thinking");
+    return { emotion: state.emotion, text: noThink.trim() };
   }
 
   function targets(emotion, form, listening, talking) {
@@ -256,23 +261,21 @@
     let lean = listening ? 0.55 : 0, rock = 0.12, aura = 0, openSnap = 0.75;
 
     switch (emotion) {
-      case "happy": case "amused":
+      case "happy":
         hopDrive = 7.5; hopAmp = 0.85; eye = 1; wobble = 0.2; rock = 0.14; aura = 0.15; break;
       case "excited":
         open = Math.max(open, 1); claw = 1; eye = 1; hopDrive = 5; hopAmp = 0.35;
         aura = 0.45; openSnap = 0.95; rock = 0; break;
-      case "determined":
+      case "battle":
         open = Math.max(open, 1); claw = 0.35; eye = 1; aura = 1; lean = 0.4;
         openSnap = 0.92; rock = 0; break;
-      case "fierce":
+      case "angry":
         shake = 0.55; eye = 0.95; open = Math.max(open, 0.45); lean = 0.7;
         aura = 0.7; rock = 0; break;
       case "sad":
         droop = 1; eye = 0.22; wobble = 0.05; rock = 0.04; lean = -0.12; break;
-      case "calm": case "idle":
+      case "neutral":
         eye = 0.5; rock = 0.16; break;
-      case "curious":
-        eye = 0.8; wobble = 0.25; open = Math.max(open, 0.15); break;
       case "surprised":
         open = Math.max(open, 1); eye = 1; hopDrive = 2; hopAmp = 0.22;
         aura = 0.35; openSnap = 1; rock = 0; break;
@@ -280,8 +283,6 @@
         eye = 0.85; wobble = 0.4; lean = 0.8; open = Math.max(open, 0.12); rock = 0.05; break;
       case "thinking":
         eye = 0.45; wobble = 0.15; lean = -0.08; rock = 0.2; break;
-      case "mysterious":
-        eye = 0.4; wobble = 0.12; rock = 0.08; break;
       default: break;
     }
     if (talking && open < 0.2) open = Math.max(open, 0.12);
@@ -813,7 +814,7 @@
     } else m.bob = ease(m.bob, 0, 7);
 
     if (state.emotion === "thinking") m.spin += dt * 1.2;
-    else if (state.emotion === "happy" || state.emotion === "amused") m.spin *= 1 - Math.min(1, dt * 0.8);
+    else if (state.emotion === "happy") m.spin *= 1 - Math.min(1, dt * 0.8);
     else m.spin *= 1 - Math.min(1, dt * 2);
 
     const w = canvas.clientWidth || window.innerWidth;

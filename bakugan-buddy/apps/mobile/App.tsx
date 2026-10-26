@@ -52,8 +52,10 @@ export default function App() {
             [
               ["happy", "happy"],
               ["excited", "excited"],
-              ["fierce", "angry"],
+              ["angry", "angry"],
               ["sad", "sad"],
+              ["thinking", "think"],
+              ["battle", "battle"],
             ] as const
           ).map(([mood, label]) => (
             <Pressable

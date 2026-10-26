@@ -38,7 +38,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [voiceOn, setVoiceOn] = useState(true);
   const [micOn, setMicOn] = useState(false);
-  const [emotion, setEmotion] = useState<Emotion>("idle");
+  const [emotion, setEmotion] = useState<Emotion>("neutral");
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [streamText, setStreamText] = useState("");
@@ -378,7 +378,7 @@ export default function App() {
           role: "bakugan",
           bakuganId: mem.activeId,
           text: "Ears need the studio sidecar (sherpa-onnx). Type for now — I'll still hop.",
-          emotion: "calm",
+          emotion: "neutral",
           at: Date.now(),
         },
       ]);
@@ -423,7 +423,7 @@ export default function App() {
       ...m,
       forms: { ...m.forms, [m.activeId]: next },
     }));
-    setEmotion(next === "battle" ? "excited" : "calm");
+    setEmotion(next === "battle" ? "excited" : "neutral");
     if (next === "battle") {
       playEmotionSound("excited");
       pushNeural("body", "pop-open");
@@ -458,7 +458,7 @@ export default function App() {
           </p>
           <BakuganBall
             profile={profile}
-            emotion={emotion === "idle" ? "happy" : emotion}
+            emotion={emotion === "neutral" ? "happy" : emotion}
             form={form}
             listening={false}
             speaking={false}
