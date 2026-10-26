@@ -339,12 +339,12 @@ function drawClosedSphere(
   const sockW = r * 0.42;
   const sockH = r * 0.28;
   const sockY = -r * 0.42;
-  ctx.fillStyle = "#0a0614";
+  ctx.fillStyle = "#050505";
   ctx.beginPath();
   ctx.ellipse(0, sockY, sockW * 0.55, sockH * 0.55, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Twin red eyes
+  // Twin eyes
   const eyeBright = 0.35 + m.eye * 0.65;
   for (const sx of [-1, 1]) {
     const ex = sx * r * 0.11;
@@ -493,11 +493,11 @@ function drawOpenShell(
   }
 
   // Head dome
-  ctx.fillStyle = "#140a1c";
+  ctx.fillStyle = "#0a0a0a";
   ctx.beginPath();
   ctx.ellipse(0, -r * 0.42, r * 0.38, r * 0.32, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = hexA("#8b6bb8", 0.7);
+  ctx.fillStyle = hexA("#9a9a9a", 0.7);
   ctx.beginPath();
   ctx.ellipse(0, -r * 0.28, r * 0.34, r * 0.1, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -514,7 +514,7 @@ function drawOpenShell(
   }
   ctx.shadowBlur = 0;
 
-  // Toothy teal grin when open / excited
+  // Toothy grin when open / excited
   if (m.open > 0.45) {
     ctx.fillStyle = hexA(accent, 0.95 * dim);
     ctx.beginPath();

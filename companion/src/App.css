@@ -1,26 +1,31 @@
 :root {
-  --bg0: #030b14;
-  --bg1: #071825;
-  --c-primary: #1a4fd6;
-  --c-secondary: #5dfff0;
-  --c-glow: #3de8ff;
-  --c-deep: #0b2a8c;
-  --c-ash: #d8f3ff;
+  --bg0: #050505;
+  --bg1: #121212;
+  --c-primary: #c8c8c8;
+  --c-secondary: #f2f2f2;
+  --c-glow: #ffffff;
+  --c-deep: #2a2a2a;
+  --c-ash: #e8e8e8;
   --ash-dim: color-mix(in srgb, var(--c-ash) 55%, transparent);
   --line: color-mix(in srgb, var(--c-primary) 28%, transparent);
-  --ink: #0a0608;
+  --ink: #0a0a0a;
   --font-display: "Syne", sans-serif;
   --font-body: "Outfit", sans-serif;
 }
 
 html[data-attr="aquos"] {
-  --bg0: #030b14;
-  --bg1: #071825;
+  --bg0: #050505;
+  --bg1: #121212;
 }
 
 html[data-attr="darkus"] {
-  --bg0: #07040f;
-  --bg1: #12081c;
+  --bg0: #000000;
+  --bg1: #0e0e0e;
+}
+
+html[data-attr="pyrus"] {
+  --bg0: #0a0a0a;
+  --bg1: #161616;
 }
 
 * {
@@ -57,7 +62,7 @@ body {
     radial-gradient(ellipse 90% 60% at 50% -10%, color-mix(in srgb, var(--c-primary) 35%, transparent), transparent 55%),
     radial-gradient(ellipse 70% 50% at 80% 90%, color-mix(in srgb, var(--c-deep) 40%, transparent), transparent 50%),
     radial-gradient(ellipse 50% 40% at 10% 70%, color-mix(in srgb, var(--c-secondary) 14%, transparent), transparent 45%),
-    linear-gradient(180deg, var(--bg1), var(--bg0) 55%, #050304);
+    linear-gradient(180deg, var(--bg1), var(--bg0) 55%, #000000);
   animation: sky-shift 14s ease-in-out infinite alternate;
 }
 
@@ -130,7 +135,7 @@ body {
   font-size: clamp(3.2rem, 12vw, 5.8rem);
   letter-spacing: 0.04em;
   line-height: 0.95;
-  background: linear-gradient(180deg, #fff3e6 10%, var(--c-secondary) 45%, var(--c-primary) 85%);
+  background: linear-gradient(180deg, #ffffff 10%, var(--c-secondary) 45%, var(--c-primary) 85%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -256,7 +261,7 @@ body {
   height: auto;
   max-height: 220px;
   object-fit: contain;
-  background: rgba(2, 10, 24, 0.65);
+  background: rgba(0, 0, 0, 0.65);
 }
 
 .train-panel {
@@ -264,7 +269,7 @@ body {
   overflow-y: auto;
   padding: 0.9rem 0.95rem 1.25rem;
   border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--bg0) 80%, #021018);
+  background: color-mix(in srgb, var(--bg0) 80%, #000000);
   scrollbar-width: thin;
 }
 

@@ -214,21 +214,21 @@ function draw(
 
   // Panel backdrop
   const bg = ctx.createLinearGradient(0, 0, 0, h);
-  bg.addColorStop(0, "rgba(3, 20, 40, 0.55)");
-  bg.addColorStop(1, "rgba(2, 10, 24, 0.75)");
+  bg.addColorStop(0, "rgba(18, 18, 18, 0.55)");
+  bg.addColorStop(1, "rgba(0, 0, 0, 0.75)");
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, w, h);
 
   // Layer rails
   for (const layer of LAYERS) {
     const y = h * layer.y;
-    ctx.strokeStyle = "rgba(93, 255, 240, 0.12)";
+    ctx.strokeStyle = "rgba(242, 242, 242, 0.12)";
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(w * 0.08, y);
     ctx.lineTo(w * 0.92, y);
     ctx.stroke();
-    ctx.fillStyle = "rgba(93, 255, 240, 0.55)";
+    ctx.fillStyle = "rgba(242, 242, 242, 0.55)";
     ctx.font = "600 11px Outfit, sans-serif";
     ctx.fillText(layer.label, 8, y + 4);
   }
@@ -242,7 +242,7 @@ function draw(
       const n0 = a[i]!;
       const n1 = b[Math.min(i, b.length - 1)]!;
       const strength = (n0.a + n1.a) * 0.5;
-      ctx.strokeStyle = `rgba(61, 232, 255, ${0.05 + strength * 0.25})`;
+      ctx.strokeStyle = `rgba(224, 224, 224, ${0.05 + strength * 0.25})`;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(n0.x, n0.y);
@@ -257,15 +257,15 @@ function draw(
     const y1 = h * LAYERS[sp.to]!.y;
     const x = w * (0.2 + (sp.progress % 1) * 0.6);
     const y = y0 + (y1 - y0) * Math.min(1, sp.progress);
-    ctx.fillStyle = `rgba(255, 240, 180, ${sp.life})`;
-    ctx.shadowColor = "rgba(255, 200, 80, 0.9)";
+    ctx.fillStyle = `rgba(255, 255, 255, ${sp.life})`;
+    ctx.shadowColor = "rgba(255, 255, 255, 0.9)";
     ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.arc(x, y, 3.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
     if (sp.progress < 0.85) {
-      ctx.fillStyle = `rgba(216, 243, 255, ${sp.life * 0.85})`;
+      ctx.fillStyle = `rgba(232, 232, 232, ${sp.life * 0.85})`;
       ctx.font = "500 10px Outfit, sans-serif";
       ctx.fillText(sp.label.slice(0, 42), x + 8, y - 4);
     }
@@ -274,21 +274,21 @@ function draw(
   // Neurons
   for (const n of s.nodes) {
     const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 4);
-    g.addColorStop(0, `rgba(157, 255, 246, ${0.15 + n.a * 0.7})`);
+    g.addColorStop(0, `rgba(255, 255, 255, ${0.15 + n.a * 0.7})`);
     g.addColorStop(1, "transparent");
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(n.x, n.y, n.r * 4, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = `rgba(93, 255, 240, ${0.35 + n.a * 0.65})`;
+    ctx.fillStyle = `rgba(242, 242, 242, ${0.35 + n.a * 0.65})`;
     ctx.beginPath();
     ctx.arc(n.x, n.y, n.r * (0.7 + n.a * 0.5), 0, Math.PI * 2);
     ctx.fill();
   }
 
   // Emotion badge
-  ctx.fillStyle = "rgba(216, 243, 255, 0.7)";
+  ctx.fillStyle = "rgba(232, 232, 232, 0.7)";
   ctx.font = "600 11px Outfit, sans-serif";
   ctx.fillText(`mood · ${s.emotion}`, w - 110, 18);
 }
