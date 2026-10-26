@@ -317,7 +317,6 @@ export function applyLocalEffects(
   const lower = text.toLowerCase();
   let next = { ...mem };
   const id = next.activeId;
-  let switchedTo: BakuganId | undefined;
 
   const switchTo = findBakuganByUtterance(text);
   if (

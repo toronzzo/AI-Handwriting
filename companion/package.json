@@ -3,13 +3,14 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "Live Preyas-style Bakugan — feelings through motion",
+  "description": "Live Preyas-style Bakugan \u2014 feelings through motion",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/parseMood.test.ts && node --experimental-strip-types --disable-warning=ExperimentalWarning src/training.test.ts"
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/parseMood.test.ts && node --experimental-strip-types --disable-warning=ExperimentalWarning src/training.test.ts",
+    "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
     "react": "^19.3.1",
