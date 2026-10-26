@@ -434,40 +434,59 @@ function drawOpenShell(
     ctx.stroke();
   }
 
-  // Side panels (wings / ears) — fold out with open amount
-  const flap = 0.55 + o * 0.85;
+  // Side shell flaps — big Aquos “ear” panels like Preyas
+  const flap = 0.75 + o * 1.05;
   for (const side of [-1, 1]) {
     ctx.save();
-    ctx.translate(side * r * 0.15, -r * 0.05);
-    ctx.rotate(side * flap * (0.9 + m.claw * 0.25 * Math.sin(m.breath * 9)));
+    ctx.translate(side * r * 0.08, -r * 0.02);
+    ctx.rotate(side * flap * (0.95 + m.claw * 0.2 * Math.sin(m.breath * 9)));
+    // Outer blue panel
     ctx.fillStyle = shell;
     ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.quadraticCurveTo(side * r * 0.7, -r * 0.55, side * r * 0.95, r * 0.1);
-    ctx.quadraticCurveTo(side * r * 0.55, r * 0.25, 0, r * 0.2);
+    ctx.moveTo(0, r * 0.05);
+    ctx.quadraticCurveTo(side * r * 0.55, -r * 0.75, side * r * 1.15, -r * 0.15);
+    ctx.quadraticCurveTo(side * r * 1.05, r * 0.35, side * r * 0.35, r * 0.45);
+    ctx.quadraticCurveTo(side * r * 0.12, r * 0.3, 0, r * 0.2);
     ctx.closePath();
     ctx.fill();
+    ctx.strokeStyle = hexA(shellDeep, 0.5);
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
-    // Teal stripes inside flap
-    ctx.strokeStyle = hexA(accent, 0.7 * dim);
-    ctx.lineWidth = r * 0.045;
+    // Teal stripe plate on the flap
+    ctx.fillStyle = hexA(accent, 0.82 * dim);
+    ctx.beginPath();
+    ctx.moveTo(side * r * 0.22, -r * 0.05);
+    ctx.lineTo(side * r * 0.72, -r * 0.35);
+    ctx.lineTo(side * r * 0.68, r * 0.12);
+    ctx.lineTo(side * r * 0.2, r * 0.22);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = hexA(shellDeep, 0.45);
+    ctx.lineWidth = r * 0.035;
     for (let i = 0; i < 3; i++) {
       ctx.beginPath();
-      ctx.moveTo(side * r * (0.2 + i * 0.12), -r * 0.15);
-      ctx.lineTo(side * r * (0.35 + i * 0.15), r * 0.05);
+      ctx.moveTo(side * r * (0.28 + i * 0.12), -r * (0.08 + i * 0.06));
+      ctx.lineTo(side * r * (0.28 + i * 0.12), r * (0.14 - i * 0.02));
       ctx.stroke();
     }
 
-    // Purple claw at tip — waves when excited
-    const wave = m.claw * Math.sin(m.breath * 10 + side) * 0.35;
-    ctx.translate(side * r * 0.82, r * 0.02);
-    ctx.rotate(wave);
+    // Purple claw — waves when excited
+    const wave = (0.35 + m.claw) * Math.sin(m.breath * 10 + side) * 0.4;
+    ctx.translate(side * r * 0.95, -r * 0.05);
+    ctx.rotate(side * 0.4 + wave);
     ctx.fillStyle = claw;
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.lineTo(side * r * 0.12, r * 0.08);
-    ctx.lineTo(side * r * 0.02, r * 0.18);
-    ctx.lineTo(-side * r * 0.06, r * 0.1);
+    ctx.lineTo(side * r * 0.18, r * 0.06);
+    ctx.lineTo(side * r * 0.08, r * 0.22);
+    ctx.lineTo(-side * r * 0.04, r * 0.12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(side * r * 0.02, r * 0.08);
+    ctx.lineTo(side * r * 0.2, r * 0.16);
+    ctx.lineTo(side * r * 0.06, r * 0.2);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
