@@ -45,6 +45,15 @@ Use Expo Dev Build / `npx expo run:android`. Expo Go may load WebView HTML; nati
 Start pack: `packages/character-packs/ripple.json` (**original** Aquos joker for public-safe releases).  
 Private Bakugan-inspired skins stay in a private pack folder — never ship Spin Master IP publicly.
 
+## Concepts
+
+Interactive 2D model sheet (SVG) for Ripple: [`docs/concepts/`](./docs/concepts/).
+
+```bash
+python3 -m http.server 8765 --directory bakugan-buddy/docs/concepts
+# → http://127.0.0.1:8765/ripple-2d-model.html
+```
+
 ## Milestones
 
 See `docs/MILESTONES.md`. Next: **M2** voice I/O + barge-in.
