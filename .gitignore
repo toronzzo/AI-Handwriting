@@ -5,3 +5,17 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# Bakugan Buddy — never commit models, anime audio, or private packs
+*.gguf
+*.onnx
+*.wav
+*.mp3
+*.mp4
+*.mkv
+bakugan-buddy/studio/models/
+characters/preyas/
+!characters/preyas/.gitkeep
+!**/persona.template.json
+!**/lore.template.md
+!**/examples.template.jsonl

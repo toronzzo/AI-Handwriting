@@ -1,33 +1,64 @@
 import type { BakuganProfile } from "../bakugans";
+import { bargeInAudio, playWav } from "./speech";
+import { fetchTtsWav } from "../studio";
 
 /**
- * Queues utterances so each sentence starts as soon as it's enqueued,
- * without cancelling earlier sentences. cancel() barges in mid-sentence.
+ * Queues Piper/Kokoro sentences. cancel() barges in mid-sentence.
  */
 export class SpeechQueue {
-  private cancelled = false;
+  private gen = 0;
   private chain: Promise<void> = Promise.resolve();
   private speaking = false;
   private onSpeakingChange?: (speaking: boolean) => void;
+  private onVolume?: (v: number) => void;
 
-  constructor(onSpeakingChange?: (speaking: boolean) => void) {
+  constructor(
+    onSpeakingChange?: (speaking: boolean) => void,
+    onVolume?: (v: number) => void,
+  ) {
     this.onSpeakingChange = onSpeakingChange;
+    this.onVolume = onVolume;
   }
 
-  enqueue(sentence: string, profile: BakuganProfile, voiceOn: boolean) {
-    if (!voiceOn || !("speechSynthesis" in window) || !sentence.trim()) return;
+  enqueue(
+    sentence: string,
+    _profile: BakuganProfile,
+    voiceOn: boolean,
+    mood = "happy",
+  ) {
+    if (!voiceOn || !sentence.trim()) return;
+    const gen = this.gen;
     this.chain = this.chain.then(async () => {
-      if (this.cancelled) return;
-      await this.speakOne(sentence, profile);
+      if (this.gen !== gen) return;
+      try {
+        const wav = await fetchTtsWav(sentence, mood);
+        if (this.gen !== gen) return;
+        this.setSpeaking(true);
+        await playWav(wav, {
+          cancelled: () => this.gen !== gen,
+          onVolume: this.onVolume,
+          onSpeakingChange: (on) => {
+            if (this.gen !== gen) return;
+            this.setSpeaking(on);
+          },
+        });
+      } catch {
+        /* sidecar down — typed chat still works */
+      } finally {
+        if (this.gen === gen) this.setSpeaking(false);
+      }
     });
   }
 
   cancel() {
-    this.cancelled = true;
-    window.speechSynthesis?.cancel();
+    const t0 = performance.now();
+    this.gen += 1;
+    bargeInAudio();
     this.setSpeaking(false);
-    this.cancelled = false;
+    this.onVolume?.(0);
     this.chain = Promise.resolve();
+    const ms = performance.now() - t0;
+    console.info(`[speech] barge-in ${ms.toFixed(1)} ms`);
   }
 
   private setSpeaking(v: boolean) {
@@ -35,40 +66,4 @@ export class SpeechQueue {
     this.speaking = v;
     this.onSpeakingChange?.(v);
   }
-
-  private speakOne(text: string, profile: BakuganProfile): Promise<void> {
-    return new Promise((resolve) => {
-      if (this.cancelled) {
-        resolve();
-        return;
-      }
-      this.setSpeaking(true);
-      const u = new SpeechSynthesisUtterance(text);
-      u.pitch = profile.voice.pitch;
-      u.rate = profile.voice.rate;
-      const voice = pickVoice(profile);
-      if (voice) u.voice = voice;
-      u.onend = () => {
-        if (!window.speechSynthesis.speaking) this.setSpeaking(false);
-        resolve();
-      };
-      u.onerror = () => {
-        if (!window.speechSynthesis.speaking) this.setSpeaking(false);
-        resolve();
-      };
-      window.speechSynthesis.speak(u);
-    });
-  }
-}
-
-function pickVoice(profile: BakuganProfile): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return null;
-  const prefer =
-    profile.attribute === "aquos"
-      ? /female|samantha|victoria|karen|moira|zira/i
-      : profile.attribute === "darkus"
-        ? /male|daniel|alex|david|fred|google uk english male/i
-        : /male|daniel|alex|david|fred|google us english/i;
-  return voices.find((v) => prefer.test(v.name)) ?? voices[0] ?? null;
 }

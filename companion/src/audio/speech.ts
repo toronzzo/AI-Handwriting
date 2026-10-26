@@ -1,38 +1,127 @@
 import type { BakuganProfile } from "../bakugans";
+import { fetchTtsWav, pingStudio } from "../studio";
 
 export type SpeakHandle = {
   cancel: () => void;
   done: Promise<void>;
 };
 
+let ctx: AudioContext | null = null;
+let currentSource: AudioBufferSourceNode | null = null;
+
+function audioCtx(): AudioContext {
+  if (!ctx || ctx.state === "closed") ctx = new AudioContext();
+  if (ctx.state === "suspended") void ctx.resume();
+  return ctx;
+}
+
+export function warmVoices() {
+  void pingStudio();
+  try {
+    audioCtx();
+  } catch {
+    /* ignore */
+  }
+}
+
+export function bargeInAudio() {
+  try {
+    currentSource?.stop();
+  } catch {
+    /* already stopped */
+  }
+  currentSource = null;
+}
+
+export async function playWav(
+  wav: ArrayBuffer,
+  opts?: {
+    cancelled?: () => boolean;
+    onVolume?: (v: number) => void;
+    onSpeakingChange?: (on: boolean) => void;
+  },
+): Promise<void> {
+  const ac = audioCtx();
+  const buf = await ac.decodeAudioData(wav.slice(0));
+  if (opts?.cancelled?.()) {
+    opts?.onVolume?.(0);
+    return;
+  }
+
+  const src = ac.createBufferSource();
+  const analyser = ac.createAnalyser();
+  analyser.fftSize = 256;
+  src.buffer = buf;
+  src.connect(analyser);
+  analyser.connect(ac.destination);
+  currentSource = src;
+  opts?.onSpeakingChange?.(true);
+
+  const data = new Uint8Array(analyser.fftSize);
+  let raf = 0;
+  const tick = () => {
+    analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = (data[i]! - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / data.length);
+    opts?.onVolume?.(Math.min(1, rms * 4));
+    raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+
+  await new Promise<void>((resolve) => {
+    src.onended = () => resolve();
+    try {
+      src.start();
+    } catch {
+      resolve();
+    }
+  });
+  cancelAnimationFrame(raf);
+  if (currentSource === src) currentSource = null;
+  opts?.onSpeakingChange?.(false);
+  opts?.onVolume?.(0);
+}
+
 /**
- * Speak sentences as soon as each is ready. cancel() = barge-in mid-sentence.
+ * Speak sentences via studio Piper/Kokoro (one setting per mood).
  */
 export function speakSentences(
   sentences: string[],
-  profile: BakuganProfile,
+  _profile: BakuganProfile,
   opts?: {
     voiceOn?: boolean;
+    mood?: string;
     onStartSentence?: (i: number) => void;
     onSpeakingChange?: (speaking: boolean) => void;
+    onVolume?: (v: number) => void;
   },
 ): SpeakHandle {
   let cancelled = false;
+  const mood = opts?.mood || "happy";
   const voiceOn = opts?.voiceOn !== false;
 
   const done = (async () => {
-    if (!voiceOn || !("speechSynthesis" in window) || sentences.length === 0) {
+    if (!voiceOn || sentences.length === 0) {
       opts?.onSpeakingChange?.(false);
       return;
     }
-    opts?.onSpeakingChange?.(true);
     try {
       for (let i = 0; i < sentences.length; i++) {
         if (cancelled) break;
         opts?.onStartSentence?.(i);
-        await speakOne(sentences[i]!, profile, () => cancelled);
+        const wav = await fetchTtsWav(sentences[i]!, mood);
+        if (cancelled) break;
+        await playWav(wav, {
+          cancelled: () => cancelled,
+          onVolume: opts?.onVolume,
+          onSpeakingChange: opts?.onSpeakingChange,
+        });
       }
-    } finally {
+    } catch {
       opts?.onSpeakingChange?.(false);
     }
   })();
@@ -40,49 +129,8 @@ export function speakSentences(
   return {
     cancel() {
       cancelled = true;
-      window.speechSynthesis?.cancel();
+      bargeInAudio();
     },
     done,
-  };
-}
-
-function speakOne(
-  text: string,
-  profile: BakuganProfile,
-  isCancelled: () => boolean,
-): Promise<void> {
-  return new Promise((resolve) => {
-    if (isCancelled()) {
-      resolve();
-      return;
-    }
-    const u = new SpeechSynthesisUtterance(text);
-    u.pitch = profile.voice.pitch;
-    u.rate = profile.voice.rate;
-    const voice = pickVoice(profile);
-    if (voice) u.voice = voice;
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
-    window.speechSynthesis.speak(u);
-  });
-}
-
-function pickVoice(profile: BakuganProfile): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return null;
-  const prefer =
-    profile.attribute === "aquos"
-      ? /female|samantha|victoria|karen|moira|zira/i
-      : profile.attribute === "darkus"
-        ? /male|daniel|alex|david|fred|google uk english male/i
-        : /male|daniel|alex|david|fred|google us english/i;
-  return voices.find((v) => prefer.test(v.name)) ?? voices[0] ?? null;
-}
-
-export function warmVoices() {
-  if (!("speechSynthesis" in window)) return;
-  window.speechSynthesis.getVoices();
-  window.speechSynthesis.onvoiceschanged = () => {
-    window.speechSynthesis.getVoices();
   };
 }
