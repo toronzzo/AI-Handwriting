@@ -45,6 +45,17 @@ Use Expo Dev Build / `npx expo run:android`. Expo Go may load WebView HTML; nati
 Start pack: `packages/character-packs/ripple.json` (**original** Aquos joker for public-safe releases).  
 Private Bakugan-inspired skins stay in a private pack folder — never ship Spin Master IP publicly.
 
+## Home Studio v0 (offline LLM / STT / TTS)
+
+```bash
+cd bakugan-buddy/studio
+npm install
+bash download-models.sh          # Piper + sherpa (skip 2GB GGUF)
+npm start                        # 127.0.0.1:8787
+```
+
+LLM: run `llama-server` on port 8080. Companion web app proxies `/studio`.
+
 ## Milestones
 
-See `docs/MILESTONES.md`. Next: **M2** voice I/O + barge-in.
+See `docs/MILESTONES.md`. M1 body; studio sidecar is the PC half of M2–M4.

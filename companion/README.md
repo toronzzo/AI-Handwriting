@@ -15,4 +15,13 @@ npm install
 npm run dev
 ```
 
+Offline brain (llama.cpp Qwen2.5-3B), ears (sherpa-onnx), voice (Piper per mood):
+
+```bash
+cd ../bakugan-buddy/studio && npm install && npm start
+# optional: llama-server -m models/qwen2.5-3b-instruct-q4_k_m.gguf --port 8080
+```
+
+Vite proxies `/studio` → `127.0.0.1:8787`. If the sidecar is down, the ball still runs on the local mock core.
+
 Try: `I'm Alex` → `pop open` → `I feel sad` → `remember I like tides` → `real body`

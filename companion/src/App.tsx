@@ -8,9 +8,10 @@ import { BakuganBall } from "./face/BakuganBall";
 import { NeuralCore, type NeuralPulse } from "./face/NeuralCore";
 import { TrainingPanel } from "./TrainingPanel";
 import { playEmotionSound } from "./audio/emotionSounds";
-import { createListener, speechRecognitionAvailable } from "./audio/listen";
+import { createListener } from "./audio/listen";
 import { warmVoices } from "./audio/speech";
 import { SpeechQueue } from "./audio/speechQueue";
+import { pingStudio, type StudioHealth } from "./studio";
 import {
   applyTrainEvent,
   loadTraining,
@@ -41,6 +42,9 @@ export default function App() {
   const [pulses, setPulses] = useState<NeuralPulse[]>([]);
   const [trace, setTrace] = useState<{ layer: string; label: string }[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [studio, setStudio] = useState<StudioHealth | null>(null);
+  const [talkVolume, setTalkVolume] = useState(0);
+  const liveEmotionRef = useRef<Emotion>("happy");
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -70,12 +74,18 @@ export default function App() {
 
   useEffect(() => {
     warmVoices();
-    queueRef.current = new SpeechQueue((on) => {
-      setSpeaking(on);
-      if (on) {
-        patchTrain({ kind: "voice" });
-      }
-    });
+    queueRef.current = new SpeechQueue(
+      (on) => {
+        setSpeaking(on);
+        if (on) {
+          patchTrain({ kind: "voice" });
+        } else {
+          setTalkVolume(0);
+        }
+      },
+      (v) => setTalkVolume(v),
+    );
+    void pingStudio().then(setStudio);
   }, []);
 
   useEffect(() => {
@@ -142,15 +152,21 @@ export default function App() {
 
     const spoken: string[] = [];
     let activeId = memRef.current.activeId;
+    liveEmotionRef.current = "thinking";
 
     try {
       for await (const ev of streamReply(text, memRef.current, { signal: ac.signal })) {
         if (ev.type === "neural") {
           pushNeural(ev.layer, ev.label);
+          if (ev.label.includes("offline core")) {
+            setToast("Core's offline — bouncing local. Start studio for llama.cpp.");
+            window.setTimeout(() => setToast(null), 3200);
+          }
         } else if (ev.type === "preview") {
           setWillSay(ev.willSay);
         } else if (ev.type === "emotion") {
           activeId = ev.memory.activeId;
+          liveEmotionRef.current = ev.emotion;
           setEmotion(ev.emotion);
           setMem(ev.memory);
           playEmotionSound(ev.emotion);
@@ -159,7 +175,12 @@ export default function App() {
         } else if (ev.type === "sentence") {
           spoken.push(ev.sentence);
           setStreamText(spoken.join(" "));
-          queueRef.current?.enqueue(ev.sentence, BAKUGANS[activeId], voiceOnRef.current);
+          queueRef.current?.enqueue(
+            ev.sentence,
+            BAKUGANS[activeId],
+            voiceOnRef.current,
+            liveEmotionRef.current,
+          );
         } else if (ev.type === "done") {
           setMem(ev.result.memory);
           patchTrain({ kind: "emotion", emotion: ev.result.emotion, mem: ev.result.memory });
@@ -216,13 +237,20 @@ export default function App() {
       },
     ]);
     if (voiceOnRef.current) {
-      queueRef.current?.enqueue(body, p, true);
+      queueRef.current?.enqueue(body, p, true, "happy");
       patchTrain({ kind: "voice" });
     }
+    void pingStudio().then((h) => {
+      setStudio(h);
+      if (!h?.llm?.ready) {
+        setToast("Core's offline — bounce anyway. Studio: npm start on :8787.");
+        window.setTimeout(() => setToast(null), 3600);
+      }
+    });
     setTimeout(() => inputRef.current?.focus(), 350);
   }
 
-  function toggleMic() {
+  async function toggleMic() {
     if (micOn) {
       micRef.current?.stop();
       micRef.current = null;
@@ -231,14 +259,16 @@ export default function App() {
       setPartial("");
       return;
     }
-    if (!speechRecognitionAvailable()) {
+    const health = (await pingStudio()) ?? studio;
+    setStudio(health);
+    if (!health?.stt?.ready) {
       setMessages((m) => [
         ...m,
         {
           id: uid(),
           role: "bakugan",
           bakuganId: mem.activeId,
-          text: "Mic needs Chrome or Edge. Type away — neurons still fire.",
+          text: "Ears need the studio sidecar (sherpa-onnx). Type for now — I'll still hop.",
           emotion: "calm",
           at: Date.now(),
         },
@@ -355,6 +385,8 @@ export default function App() {
                   Bond {mem.bonds[mem.activeId]}
                   {mem.partnerName ? ` · ${mem.partnerName}` : ""} · {form} · {emotion} · XP{" "}
                   {training.xp}
+                  {studio?.llm?.ready ? " · llama" : " · local"}
+                  {studio?.tts?.ready ? ` · ${studio.tts.engine}` : ""}
                 </p>
               </div>
               <div className="controls">
@@ -406,6 +438,7 @@ export default function App() {
               form={form}
               listening={listening}
               speaking={speaking}
+              talkVolume={talkVolume}
               compact
             />
 

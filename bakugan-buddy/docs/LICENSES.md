@@ -25,7 +25,18 @@ Use only what matches personal / eventual Play Store distribution. **Re-verify**
 | Piper / VITS (ONNX) | Tier-1 TTS | MIT (Piper) | Per-mood fine-tunes you train |
 | ONNX Runtime Mobile | Voice packs | MIT | |
 
-## Home Studio (M6)
+## Home Studio v0 (`bakugan-buddy/studio`)
+
+| Component | Role | License | Notes |
+|---|---|---|---|
+| llama.cpp `llama-server` | Local LLM HTTP | MIT | Loopback only |
+| Qwen2.5-3B-Instruct GGUF Q4 | Chat model | Apache-2.0 | Optional download (`download-models.sh --llm`) |
+| sherpa-onnx Zipformer EN | Streaming STT | Apache-2.0 | `WS /v1/stt` |
+| Piper | Tier-1 TTS | MIT | One voice setting per mood (`voices.json`) |
+| Kokoro | Alt TTS | Apache-2.0 (check) | Same `/v1/tts` if `KOKORO_CMD` set |
+| espeak-ng | TTS fallback | GPL-3.0 | Dev fallback only, not ship voice |
+
+## Home Studio (M6 expressive)
 
 | Component | Role | License | Notes |
 |---|---|---|---|
