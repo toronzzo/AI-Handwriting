@@ -71,3 +71,13 @@ bakugan-buddy/
 | LLM / TTS latency | Not in M1 | M3–M4 |
 
 Cold start & battery are **out of M1** until models ship.
+
+## Home Studio (PC sidecar, web lab)
+
+Optional loopback process under `bakugan-buddy/studio/` (binds `127.0.0.1:8787`):
+
+- `POST /v1/chat` — NDJSON token stream from `llama-server`
+- `POST /v1/tts` — Piper (mood → length/pitch) or espeak fallback
+- `WS /v1/stt` — sherpa-onnx streaming Zipformer
+
+The `companion/` Vite app proxies `/studio`. If the sidecar is down, `brain.ts` uses the offline regex fallback — body animation never waits on the AI path.

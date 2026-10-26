@@ -1,0 +1,4 @@
+# SHA-256 of optional model artifacts (paths relative to studio/models/).
+# Unknown files are skipped with a warning by download-models.sh.
+# Record hashes after a trusted first download:
+#   sha256sum models/piper-voices/*.onnx models/qwen2.5-3b-instruct-q4_k_m.gguf

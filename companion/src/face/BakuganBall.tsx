@@ -8,6 +8,8 @@ type Props = {
   form: Form;
   listening: boolean;
   speaking: boolean;
+  /** RMS from Web Audio — scales talk-bob to real speech. */
+  talkVolume?: number;
   compact?: boolean;
 };
 
@@ -35,6 +37,7 @@ export function BakuganBall({
   form,
   listening,
   speaking,
+  talkVolume = 0,
   compact,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -44,6 +47,7 @@ export function BakuganBall({
     form,
     listening,
     speaking,
+    talkVolume,
     m: {
       hop: 0,
       open: 0,
@@ -64,6 +68,7 @@ export function BakuganBall({
   live.current.form = form;
   live.current.listening = listening;
   live.current.speaking = speaking;
+  live.current.talkVolume = talkVolume;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -109,9 +114,10 @@ export function BakuganBall({
         m.flash = ease(m.flash, 0, 6);
       }
 
-      // Talk bob — rides the voice clock
+      // Talk bob — rides analyser RMS when we have real WAV audio
       if (s.speaking) {
-        m.bob = Math.sin(m.breath * 11) * 0.55 + Math.sin(m.breath * 17) * 0.2;
+        const amp = 0.2 + Math.min(1, s.talkVolume || 0.45) * 0.7;
+        m.bob = Math.sin(m.breath * 11) * amp + Math.sin(m.breath * 17) * 0.18;
       } else {
         m.bob = ease(m.bob, 0, 7);
       }

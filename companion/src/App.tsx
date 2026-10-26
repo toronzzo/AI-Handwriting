@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { FormEvent } from "react";
 import { BAKUGANS, BAKUGAN_LIST, type BakuganId, type Emotion } from "./bakugans";
 import { streamReply } from "./brain";
@@ -8,15 +9,19 @@ import { BakuganBall } from "./face/BakuganBall";
 import { NeuralCore, type NeuralPulse } from "./face/NeuralCore";
 import { TrainingPanel } from "./TrainingPanel";
 import { playEmotionSound } from "./audio/emotionSounds";
-import { createListener, speechRecognitionAvailable } from "./audio/listen";
+import { createListener } from "./audio/listen";
 import { warmVoices } from "./audio/speech";
 import { SpeechQueue } from "./audio/speechQueue";
+import { pingStudio, type StudioHealth } from "./studio";
 import {
   applyTrainEvent,
   loadTraining,
+  nextDrill,
   saveTraining,
+  type Drill,
   type TrainingState,
 } from "./training";
+import { coachIdleLine, coachNextLine, coachUnlockLine, type CoachLine } from "./coach";
 import "./App.css";
 
 function uid() {
@@ -41,6 +46,9 @@ export default function App() {
   const [pulses, setPulses] = useState<NeuralPulse[]>([]);
   const [trace, setTrace] = useState<{ layer: string; label: string }[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [studio, setStudio] = useState<StudioHealth | null>(null);
+  const [talkVolume, setTalkVolume] = useState(0);
+  const liveEmotionRef = useRef<Emotion>("happy");
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -50,6 +58,9 @@ export default function App() {
   const abortRef = useRef<AbortController | null>(null);
   const queueRef = useRef<SpeechQueue | null>(null);
   const micRef = useRef<ReturnType<typeof createListener> | null>(null);
+  const lastActRef = useRef(Date.now());
+  const idleHintedRef = useRef(false);
+  const busyRef = useRef(false);
 
   const profile = BAKUGANS[mem.activeId];
   const form = mem.forms[mem.activeId];
@@ -70,12 +81,18 @@ export default function App() {
 
   useEffect(() => {
     warmVoices();
-    queueRef.current = new SpeechQueue((on) => {
-      setSpeaking(on);
-      if (on) {
-        patchTrain({ kind: "voice" });
-      }
-    });
+    queueRef.current = new SpeechQueue(
+      (on) => {
+        setSpeaking(on);
+        if (on) {
+          patchTrain({ kind: "voice" });
+        } else {
+          setTalkVolume(0);
+        }
+      },
+      (v) => setTalkVolume(v),
+    );
+    void pingStudio().then(setStudio);
   }, []);
 
   useEffect(() => {
@@ -99,15 +116,86 @@ export default function App() {
     };
   }, []);
 
+  function bumpActivity() {
+    lastActRef.current = Date.now();
+  }
+
   function patchTrain(
     ev: Parameters<typeof applyTrainEvent>[1],
-  ) {
+  ): Drill[] {
     const { state, newly } = applyTrainEvent(trainingRef.current, ev);
     trainingRef.current = state;
     setTraining(state);
     if (newly.length) {
       setToast(`Unlocked: ${newly.map((d) => d.title).join(", ")}`);
       window.setTimeout(() => setToast(null), 3200);
+    }
+    return newly;
+  }
+
+  function speakCoach(line: CoachLine, reason: string) {
+    const id = memRef.current.activeId;
+    const p = BAKUGANS[id];
+    pushNeural("feel", `[${line.emotion}]`);
+    pushNeural("intend", reason);
+    pushNeural("speak", line.text.slice(0, 40));
+    setEmotion(line.emotion);
+    setWillSay(line.text);
+    playEmotionSound(line.emotion);
+    setMessages((m) => [
+      ...m,
+      {
+        id: uid(),
+        role: "bakugan",
+        bakuganId: id,
+        text: line.text,
+        emotion: line.emotion,
+        at: Date.now(),
+      },
+    ]);
+    if (voiceOnRef.current) {
+      queueRef.current?.enqueue(line.text, p, true, line.emotion);
+      patchTrain({ kind: "voice" });
+    }
+  }
+
+  useEffect(() => {
+    if (!awake) return;
+    const tick = window.setInterval(() => {
+      if (idleHintedRef.current || busyRef.current) return;
+      if (Date.now() - lastActRef.current < 28000) return;
+      const upcoming = nextDrill(trainingRef.current);
+      if (!upcoming) return;
+      idleHintedRef.current = true;
+      const line = coachIdleLine(
+        memRef.current.activeId,
+        upcoming,
+        memRef.current.partnerName,
+      );
+      speakCoach(line, "idle coach");
+    }, 4000);
+    return () => window.clearInterval(tick);
+  }, [awake]);
+
+  function pickDrill(drill: Drill) {
+    bumpActivity();
+    bargeIn();
+    if (drill.id === "mic_listen") {
+      void toggleMic();
+      return;
+    }
+    if (drill.autoSend && drill.prompt) {
+      void runTurn(drill.prompt);
+      return;
+    }
+    if (drill.prompt) {
+      flushSync(() => setDraft(drill.prompt!));
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        const n = el.value.length;
+        el.setSelectionRange(n, n);
+      }
     }
   }
 
@@ -128,6 +216,7 @@ export default function App() {
     if (!text || busy) return;
 
     bargeIn();
+    bumpActivity();
     const ac = new AbortController();
     abortRef.current = ac;
 
@@ -135,34 +224,55 @@ export default function App() {
     setPartial("");
     setWillSay("");
     setMessages((m) => [...m, { id: uid(), role: "you", text, at: Date.now() }]);
+    busyRef.current = true;
     setBusy(true);
     setEmotion("thinking");
     setStreamText("");
-    patchTrain({ kind: "user", text, mem: memRef.current });
+    const unlockedThisTurn: Drill[] = [
+      ...patchTrain({ kind: "user", text, mem: memRef.current }),
+    ];
 
     const spoken: string[] = [];
     let activeId = memRef.current.activeId;
+    liveEmotionRef.current = "thinking";
 
     try {
-      for await (const ev of streamReply(text, memRef.current, { signal: ac.signal })) {
+      for await (const ev of streamReply(text, memRef.current, {
+        signal: ac.signal,
+        nextDrill: nextDrill(trainingRef.current),
+      })) {
         if (ev.type === "neural") {
           pushNeural(ev.layer, ev.label);
+          if (ev.label.includes("offline core")) {
+            setToast("Core's offline — bouncing local. Start studio for llama.cpp.");
+            window.setTimeout(() => setToast(null), 3200);
+          }
         } else if (ev.type === "preview") {
           setWillSay(ev.willSay);
         } else if (ev.type === "emotion") {
           activeId = ev.memory.activeId;
+          liveEmotionRef.current = ev.emotion;
           setEmotion(ev.emotion);
           setMem(ev.memory);
           playEmotionSound(ev.emotion);
-          patchTrain({ kind: "emotion", emotion: ev.emotion, mem: ev.memory });
+          unlockedThisTurn.push(
+            ...patchTrain({ kind: "emotion", emotion: ev.emotion, mem: ev.memory }),
+          );
           if (ev.switchedTo) setStreamText("");
         } else if (ev.type === "sentence") {
           spoken.push(ev.sentence);
           setStreamText(spoken.join(" "));
-          queueRef.current?.enqueue(ev.sentence, BAKUGANS[activeId], voiceOnRef.current);
+          queueRef.current?.enqueue(
+            ev.sentence,
+            BAKUGANS[activeId],
+            voiceOnRef.current,
+            liveEmotionRef.current,
+          );
         } else if (ev.type === "done") {
           setMem(ev.result.memory);
-          patchTrain({ kind: "emotion", emotion: ev.result.emotion, mem: ev.result.memory });
+          unlockedThisTurn.push(
+            ...patchTrain({ kind: "emotion", emotion: ev.result.emotion, mem: ev.result.memory }),
+          );
           setMessages((m) => [
             ...m,
             {
@@ -183,7 +293,19 @@ export default function App() {
         console.error(err);
       }
     } finally {
+      busyRef.current = false;
       setBusy(false);
+      const unique = [...new Map(unlockedThisTurn.map((d) => [d.id, d])).values()];
+      const upcoming = nextDrill(trainingRef.current);
+      if (unique.length && upcoming) {
+        const line = coachUnlockLine(
+          memRef.current.activeId,
+          unique[0]!,
+          upcoming,
+          memRef.current.partnerName,
+        );
+        window.setTimeout(() => speakCoach(line, "coach next drill"), 700);
+      }
     }
   }
 
@@ -196,14 +318,22 @@ export default function App() {
     pushNeural("sense", "wake");
     pushNeural("feel", "[happy]");
     pushNeural("body", "hop");
+    bumpActivity();
+    idleHintedRef.current = false;
     const p = BAKUGANS[next.activeId];
-    const body = next.partnerName
+    const upcoming = nextDrill(trainingRef.current);
+    const intro = next.partnerName
       ? next.activeId === "preyas"
         ? `${next.partnerName}-han! Preyas here — peek my neurons while we bounce.`
         : `${next.partnerName}. ${p.name} here — talk to me.`
       : next.activeId === "preyas"
         ? `Hey hey! I'm Preyas. Watch the core light up — then tell me your name.`
         : `I'm ${p.name}. Your Bakugan. What should I call you?`;
+    const hint =
+      upcoming && next.partnerName
+        ? ` ${coachNextLine(next.activeId, upcoming, next.partnerName).text}`
+        : "";
+    const body = `${intro}${hint}`;
     setWillSay(body);
     setMessages([
       {
@@ -216,13 +346,20 @@ export default function App() {
       },
     ]);
     if (voiceOnRef.current) {
-      queueRef.current?.enqueue(body, p, true);
+      queueRef.current?.enqueue(body, p, true, "happy");
       patchTrain({ kind: "voice" });
     }
+    void pingStudio().then((h) => {
+      setStudio(h);
+      if (!h?.llm?.ready) {
+        setToast("Core's offline — bounce anyway. Studio: npm start on :8787.");
+        window.setTimeout(() => setToast(null), 3600);
+      }
+    });
     setTimeout(() => inputRef.current?.focus(), 350);
   }
 
-  function toggleMic() {
+  async function toggleMic() {
     if (micOn) {
       micRef.current?.stop();
       micRef.current = null;
@@ -231,14 +368,16 @@ export default function App() {
       setPartial("");
       return;
     }
-    if (!speechRecognitionAvailable()) {
+    const health = (await pingStudio()) ?? studio;
+    setStudio(health);
+    if (!health?.stt?.ready) {
       setMessages((m) => [
         ...m,
         {
           id: uid(),
           role: "bakugan",
           bakuganId: mem.activeId,
-          text: "Mic needs Chrome or Edge. Type away — neurons still fire.",
+          text: "Ears need the studio sidecar (sherpa-onnx). Type for now — I'll still hop.",
           emotion: "calm",
           at: Date.now(),
         },
@@ -355,6 +494,8 @@ export default function App() {
                   Bond {mem.bonds[mem.activeId]}
                   {mem.partnerName ? ` · ${mem.partnerName}` : ""} · {form} · {emotion} · XP{" "}
                   {training.xp}
+                  {studio?.llm?.ready ? " · llama" : " · local"}
+                  {studio?.tts?.ready ? ` · ${studio.tts.engine}` : ""}
                 </p>
               </div>
               <div className="controls">
@@ -406,6 +547,7 @@ export default function App() {
               form={form}
               listening={listening}
               speaking={speaking}
+              talkVolume={talkVolume}
               compact
             />
 
@@ -460,6 +602,7 @@ export default function App() {
                 value={draft}
                 onChange={(e) => {
                   bargeIn();
+                  bumpActivity();
                   setDraft(e.target.value);
                 }}
                 placeholder={`Talk / train ${profile.name}… (${others}, or “real body”)`}
@@ -477,6 +620,8 @@ export default function App() {
             willSay={willSay}
             trace={trace}
             bond={mem.bonds[mem.activeId]}
+            facts={mem.facts}
+            onPickDrill={pickDrill}
           />
         </div>
       )}

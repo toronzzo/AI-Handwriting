@@ -13,7 +13,8 @@ Offline pocket companion — see [`bakugan-buddy/`](./bakugan-buddy). **M1 = bod
 | [`bakugan-buddy/`](./bakugan-buddy) | Product app (Expo) + `body.html` + docs |
 | [`body.html`](./body.html) | Canonical body runtime (hooks + FPS HUD) |
 | [`bakugan-buddy/docs/PREYAS_FROM_ANIME.md`](./bakugan-buddy/docs/PREYAS_FROM_ANIME.md) | Anime realism — mind, body, voice |
-| [`companion/`](./companion) | Earlier web lab (neurons / training) |
+| [`bakugan-buddy/studio/`](./bakugan-buddy/studio) | Home Studio sidecar (llama + STT + TTS, loopback) |
+| [`companion/`](./companion) | Earlier web lab (neurons / training / coach) |
 | [`bakugan/`](./bakugan) | Agent SDK playground partner |
 
 ```bash
@@ -24,6 +25,9 @@ python3 -m http.server 8765 --directory bakugan-buddy
 # Expo app
 cd bakugan-buddy/apps/mobile && npm install && npx expo start
 
-# Web lab (optional)
+# Web lab (optional) — falls back to regex brain if studio is off
 cd companion && npm install && npm run dev
+
+# Home Studio sidecar (optional)
+cd bakugan-buddy/studio && npm install && npm start
 ```

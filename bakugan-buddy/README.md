@@ -47,6 +47,18 @@ Private Bakugan-inspired skins stay in a private pack folder — never ship Spin
 
 **Feels real?** Read [`docs/PREYAS_FROM_ANIME.md`](./docs/PREYAS_FROM_ANIME.md) — anime body language, partner mind, and acted voice rules. Product spine: [`docs/CURSOR_PRODUCT_PROMPT.md`](./docs/CURSOR_PRODUCT_PROMPT.md).
 
+## Home Studio v0 (offline LLM / STT / TTS)
+
+```bash
+cd bakugan-buddy/studio
+npm install
+bash download-models.sh          # Piper + sherpa (skip 2GB GGUF)
+npm start                        # 127.0.0.1:8787
+```
+
+LLM: run `llama-server` on port 8080. Companion web app proxies `/studio`.  
+If the sidecar is off, the companion falls back to the regex brain and still runs at 60 fps.
+
 ## Concepts
 
 - Interactive SVG model: [`docs/concepts/`](./docs/concepts/)
@@ -63,4 +75,4 @@ python3 -m http.server 8765 --directory bakugan-buddy/docs/concepts
 
 ## Milestones
 
-See `docs/MILESTONES.md`. Next: **M2** voice I/O + barge-in.
+See `docs/MILESTONES.md`. M1 body; studio sidecar is the PC half of M2–M4.

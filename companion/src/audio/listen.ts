@@ -1,4 +1,5 @@
 import { playListenTick } from "./emotionSounds";
+import { pingStudio, studioSttWsUrl, lastStudioHealth } from "../studio";
 
 type ListenHandlers = {
   onPartial?: (text: string) => void;
@@ -7,92 +8,126 @@ type ListenHandlers = {
   onReact?: () => void;
 };
 
-type Rec = SpeechRecognition;
-
-declare global {
-  interface Window {
-    SpeechRecognition?: { new (): Rec };
-    webkitSpeechRecognition?: { new (): Rec };
-  }
+export function speechRecognitionAvailable(): boolean {
+  return Boolean(lastStudioHealth()?.stt?.ready);
 }
 
-export function speechRecognitionAvailable(): boolean {
-  return Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+function downsampleTo16k(input: Float32Array, fromRate: number): Int16Array {
+  const to = 16000;
+  if (fromRate === to) {
+    const out = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      const s = Math.max(-1, Math.min(1, input[i]!));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return out;
+  }
+  const ratio = fromRate / to;
+  const n = Math.floor(input.length / ratio);
+  const out = new Int16Array(n);
+  for (let i = 0; i < n; i++) {
+    const s = Math.max(-1, Math.min(1, input[Math.floor(i * ratio)]!));
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return out;
 }
 
 /**
- * Continuous listen with micro-reactions while the user is still talking.
+ * Offline listen: mic PCM → studio sherpa-onnx WebSocket.
  */
 export function createListener(handlers: ListenHandlers) {
-  const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Ctor) {
-    return {
-      supported: false as const,
-      start() {},
-      stop() {},
+  let active = false;
+  let ws: WebSocket | null = null;
+  let ctx: AudioContext | null = null;
+  let node: AudioWorkletNode | null = null;
+  let source: MediaStreamAudioSourceNode | null = null;
+  let stream: MediaStream | null = null;
+  let lastReact = 0;
+
+  async function start() {
+    const health = await pingStudio();
+    if (!health?.stt?.ready) {
+      handlers.onListeningChange?.(false);
+      return;
+    }
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+    });
+    ctx = new AudioContext();
+    await ctx.audioWorklet.addModule("/pcm-worklet.js");
+    source = ctx.createMediaStreamSource(stream);
+    node = new AudioWorkletNode(ctx, "pcm-capture");
+    source.connect(node);
+    const mute = ctx.createGain();
+    mute.gain.value = 0;
+    node.connect(mute);
+    mute.connect(ctx.destination);
+
+    const rate = ctx.sampleRate;
+    ws = new WebSocket(studioSttWsUrl());
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => {
+      active = true;
+      handlers.onListeningChange?.(true);
+    };
+    ws.onerror = () => handlers.onListeningChange?.(false);
+    ws.onclose = () => {
+      if (active) handlers.onListeningChange?.(false);
+    };
+    ws.onmessage = (ev) => {
+      let msg: { type: string; text?: string };
+      try {
+        msg = JSON.parse(String(ev.data));
+      } catch {
+        return;
+      }
+      if (msg.type === "partial" && msg.text) {
+        handlers.onPartial?.(msg.text);
+        const now = performance.now();
+        if (now - lastReact > 700) {
+          lastReact = now;
+          playListenTick();
+          handlers.onReact?.();
+        }
+      }
+      if (msg.type === "final" && msg.text?.trim()) {
+        handlers.onFinal?.(msg.text.trim());
+      }
+    };
+
+    node.port.onmessage = (ev) => {
+      if (!active || ws?.readyState !== WebSocket.OPEN) return;
+      const pcm = downsampleTo16k(ev.data as Float32Array, rate);
+      const copy = Int16Array.from(pcm);
+      ws.send(copy.buffer as ArrayBuffer);
     };
   }
 
-  const rec = new Ctor();
-  rec.continuous = true;
-  rec.interimResults = true;
-  rec.lang = "en-US";
-
-  let active = false;
-  let lastReact = 0;
-
-  rec.onstart = () => handlers.onListeningChange?.(true);
-  rec.onend = () => {
+  function stop() {
+    active = false;
+    try {
+      ws?.send(JSON.stringify({ type: "end" }));
+      ws?.close();
+    } catch {
+      /* ignore */
+    }
+    ws = null;
+    node?.disconnect();
+    source?.disconnect();
+    stream?.getTracks().forEach((t) => t.stop());
+    void ctx?.close();
+    node = null;
+    source = null;
+    stream = null;
+    ctx = null;
     handlers.onListeningChange?.(false);
-    // Chrome drops continuous mode — restart if still wanted
-    if (active) {
-      try {
-        rec.start();
-      } catch {
-        /* already started */
-      }
-    }
-  };
-  rec.onerror = () => handlers.onListeningChange?.(false);
-
-  rec.onresult = (ev: SpeechRecognitionEvent) => {
-    let interim = "";
-    let finalText = "";
-    for (let i = ev.resultIndex; i < ev.results.length; i++) {
-      const r = ev.results[i]!;
-      if (r.isFinal) finalText += r[0]!.transcript;
-      else interim += r[0]!.transcript;
-    }
-    if (interim) {
-      handlers.onPartial?.(interim);
-      const now = performance.now();
-      if (now - lastReact > 700) {
-        lastReact = now;
-        playListenTick();
-        handlers.onReact?.();
-      }
-    }
-    if (finalText.trim()) handlers.onFinal?.(finalText.trim());
-  };
+  }
 
   return {
     supported: true as const,
     start() {
-      active = true;
-      try {
-        rec.start();
-      } catch {
-        /* ignore */
-      }
+      void start();
     },
-    stop() {
-      active = false;
-      try {
-        rec.stop();
-      } catch {
-        /* ignore */
-      }
-      handlers.onListeningChange?.(false);
-    },
+    stop,
   };
 }
