@@ -6,14 +6,14 @@
   <title>Bakugan Buddy — Body Runtime</title>
   <style>
     :root { color-scheme: dark; }
-    html, body { margin: 0; height: 100%; background: #030b14; font-family: system-ui, sans-serif; }
+    html, body { margin: 0; height: 100%; background: #050505; font-family: system-ui, sans-serif; }
     #stage { position: relative; width: 100%; height: 100%; overflow: hidden; }
     canvas { display: block; width: 100%; height: 100%; touch-action: none; }
     #hud {
       position: absolute; left: 12px; top: 12px; z-index: 2;
       font: 600 12px/1.4 ui-monospace, monospace;
-      color: #9ffff6; background: rgba(0,0,0,.45); padding: 8px 10px;
-      border: 1px solid rgba(93,255,240,.25); pointer-events: none;
+      color: #f2f2f2; background: rgba(0,0,0,.45); padding: 8px 10px;
+      border: 1px solid rgba(200,200,200,.25); pointer-events: none;
       white-space: pre;
     }
     #controls {
@@ -22,8 +22,8 @@
       padding: 12px; background: linear-gradient(transparent, rgba(0,0,0,.7));
     }
     #controls button {
-      border: 1px solid rgba(93,255,240,.35); background: rgba(26,79,214,.25);
-      color: #d8f3ff; padding: 8px 10px; font: 600 12px system-ui; cursor: pointer;
+      border: 1px solid rgba(200,200,200,.35); background: rgba(255,255,255,.08);
+      color: #e8e8e8; padding: 8px 10px; font: 600 12px system-ui; cursor: pointer;
     }
   </style>
 </head>
@@ -64,63 +64,63 @@
   const THEMES = {
     aquos: {
       id: "aquos",
-      shell: "#1a4fd6",
-      shellDeep: "#0b2a8c",
-      accent: "#5dfff0",
-      accentHot: "#9ffff6",
-      core: "#3de8ff",
-      eye: "#ff2a2a",
-      claw: "#7b5cff",
+      shell: "#c8c8c8",
+      shellDeep: "#2a2a2a",
+      accent: "#f2f2f2",
+      accentHot: "#ffffff",
+      core: "#e0e0e0",
+      eye: "#ffffff",
+      claw: "#9a9a9a",
     },
     pyrus: {
       id: "pyrus",
-      shell: "#e03a12",
-      shellDeep: "#7a1408",
-      accent: "#ffb347",
-      accentHot: "#ffe08a",
-      core: "#ff6b1a",
-      eye: "#ffef5a",
-      claw: "#ff8a3d",
+      shell: "#ececec",
+      shellDeep: "#3a3a3a",
+      accent: "#ffffff",
+      accentHot: "#fafafa",
+      core: "#d4d4d4",
+      eye: "#f5f5f5",
+      claw: "#b0b0b0",
     },
     darkus: {
       id: "darkus",
-      shell: "#5b2d8e",
-      shellDeep: "#240046",
-      accent: "#c77dff",
-      accentHot: "#e0aaff",
-      core: "#b5179e",
-      eye: "#ff4d6d",
-      claw: "#9b5de5",
+      shell: "#6e6e6e",
+      shellDeep: "#141414",
+      accent: "#d0d0d0",
+      accentHot: "#ececec",
+      core: "#a8a8a8",
+      eye: "#e6e6e6",
+      claw: "#888888",
     },
     haos: {
       id: "haos",
-      shell: "#e9e5d6",
-      shellDeep: "#8f8870",
-      accent: "#ffd60a",
-      accentHot: "#fff3a6",
-      core: "#ffe14d",
-      eye: "#ff8a00",
-      claw: "#ffe680",
+      shell: "#f5f5f5",
+      shellDeep: "#6a6a6a",
+      accent: "#ffffff",
+      accentHot: "#fafafa",
+      core: "#e8e8e8",
+      eye: "#ffffff",
+      claw: "#c8c8c8",
     },
     subterra: {
       id: "subterra",
-      shell: "#8b5a2b",
-      shellDeep: "#3c220a",
-      accent: "#f2b45a",
-      accentHot: "#ffd29a",
-      core: "#ff9a2e",
-      eye: "#ffcf33",
-      claw: "#c48a55",
+      shell: "#9a9a9a",
+      shellDeep: "#2e2e2e",
+      accent: "#d8d8d8",
+      accentHot: "#efefef",
+      core: "#b8b8b8",
+      eye: "#eaeaea",
+      claw: "#7a7a7a",
     },
     ventus: {
       id: "ventus",
-      shell: "#2e9a4c",
-      shellDeep: "#0e431f",
-      accent: "#c9ff6e",
-      accentHot: "#e9ffb0",
-      core: "#46f07a",
-      eye: "#ff3b6b",
-      claw: "#63d47d",
+      shell: "#b0b0b0",
+      shellDeep: "#242424",
+      accent: "#e6e6e6",
+      accentHot: "#f5f5f5",
+      core: "#cccccc",
+      eye: "#ffffff",
+      claw: "#8e8e8e",
     },
   };
 
@@ -389,7 +389,7 @@
     }
 
     // Eye socket (dark recess) — conscious in ball form
-    ctx.fillStyle = "#0a0614";
+    ctx.fillStyle = "#050505";
     ctx.beginPath();
     ctx.ellipse(0, -r * 0.42, r * 0.23, r * 0.15, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -499,7 +499,7 @@
     }
 
     // Head dome + collar
-    ctx.fillStyle = "#140a1c";
+    ctx.fillStyle = "#0a0a0a";
     ctx.beginPath();
     ctx.ellipse(0, -r * 0.42, r * 0.38, r * 0.32, 0, 0, Math.PI * 2);
     ctx.fill();

@@ -4,7 +4,7 @@ Exploratory art and interactive mocks — not wired into the Expo app yet.
 
 ## Ripple 2D model (SVG)
 
-Original Aquos-style sphere companion (public-safe). Browser SVG + motion.
+Original Aquos-style sphere companion (public-safe). Browser SVG + motion (no Blender required).
 
 | File | What |
 | --- | --- |

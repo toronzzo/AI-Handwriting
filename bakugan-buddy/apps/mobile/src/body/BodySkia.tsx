@@ -30,8 +30,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 24,
-    backgroundColor: "#071825",
+    backgroundColor: "#121212",
   },
-  t: { color: "#5dfff0", fontSize: 18, fontWeight: "700", marginBottom: 8 },
-  s: { color: "#a8c5d4", textAlign: "center", lineHeight: 20 },
+  t: { color: "#f2f2f2", fontSize: 18, fontWeight: "700", marginBottom: 8 },
+  s: { color: "#b0b0b0", textAlign: "center", lineHeight: 20 },
 });
