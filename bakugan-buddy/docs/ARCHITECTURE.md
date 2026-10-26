@@ -20,12 +20,17 @@ bakugan-buddy/
   packages/
     body-core/              # shared motion + mood parser (TS)
     character-packs/        # JSON packs (swappable for legal)
+      examples/             # few-shot / eval lines per character
   docs/
     ARCHITECTURE.md
     LICENSES.md
     MILESTONES.md
+    PREYAS_FROM_ANIME.md    # anime realism: mind + body + voice
+    CURSOR_PRODUCT_PROMPT.md
     RECORDING_SCRIPT.md     # (M4) mood recording lines
 ```
+
+**Realism:** every body / character / voice change must pass the fake-test in `PREYAS_FROM_ANIME.md` §6. Emotion = body language + acted voice — never a cartoon face on the sphere.
 
 ## Runtime split
 
