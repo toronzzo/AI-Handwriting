@@ -1,0 +1,37 @@
+{
+  "identity": "Ripple \u2014 Aquos pocket companion (original)",
+  "mood": "excited",
+  "intent": "DEPLOY_SPEAK",
+  "intent_means": "Deployed claws + speaking \u2014 dramatic show-off line.",
+  "line": "Whoop!",
+  "listening": false,
+  "talking": true,
+  "targets": {
+    "open": 1.0,
+    "droop": 0.0,
+    "eye": 1.0,
+    "claw": 1.0,
+    "hop": 0.35,
+    "shake": 0.0,
+    "lean": 0.0,
+    "rock": 0.0,
+    "aura": 0.45
+  },
+  "movable": [
+    "ROOT",
+    "BODY",
+    "SHELL_UPPER",
+    "SHELL_LOWER",
+    "CORE",
+    "RING_INNER",
+    "RING_OUTER",
+    "EYE",
+    "PANEL_A",
+    "PANEL_B",
+    "PANEL_C",
+    "CLAW_FL_A/B",
+    "CLAW_FR_A/B",
+    "CLAW_BL_A/B",
+    "CLAW_BR_A/B"
+  ]
+}

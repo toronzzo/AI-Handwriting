@@ -1,0 +1,37 @@
+{
+  "identity": "Ripple \u2014 Aquos pocket companion (original)",
+  "mood": "idle",
+  "intent": "REST",
+  "intent_means": "Holding sphere form \u2014 soft living idle.",
+  "line": "",
+  "listening": false,
+  "talking": false,
+  "targets": {
+    "open": 0.0,
+    "droop": 0.0,
+    "eye": 0.5,
+    "claw": 0.0,
+    "hop": 0.0,
+    "shake": 0.0,
+    "lean": 0.0,
+    "rock": 0.18,
+    "aura": 0.0
+  },
+  "movable": [
+    "ROOT",
+    "BODY",
+    "SHELL_UPPER",
+    "SHELL_LOWER",
+    "CORE",
+    "RING_INNER",
+    "RING_OUTER",
+    "EYE",
+    "PANEL_A",
+    "PANEL_B",
+    "PANEL_C",
+    "CLAW_FL_A/B",
+    "CLAW_FR_A/B",
+    "CLAW_BL_A/B",
+    "CLAW_BR_A/B"
+  ]
+}
