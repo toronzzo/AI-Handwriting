@@ -1,11 +1,11 @@
 :root {
-  --bg0: #0c0604;
-  --bg1: #1a0c08;
-  --c-primary: #ff5a1f;
-  --c-secondary: #ffb347;
-  --c-glow: #ff6b1a;
-  --c-deep: #7a1c08;
-  --c-ash: #e8d5c4;
+  --bg0: #030b14;
+  --bg1: #071825;
+  --c-primary: #1a4fd6;
+  --c-secondary: #5dfff0;
+  --c-glow: #3de8ff;
+  --c-deep: #0b2a8c;
+  --c-ash: #d8f3ff;
   --ash-dim: color-mix(in srgb, var(--c-ash) 55%, transparent);
   --line: color-mix(in srgb, var(--c-primary) 28%, transparent);
   --ink: #0a0608;
@@ -143,10 +143,10 @@ body {
   font-size: 1.02rem;
 }
 
-.face-canvas {
+.bakugan-ball {
   display: block;
-  margin: 0.25rem auto;
-  filter: drop-shadow(0 0 28px color-mix(in srgb, var(--c-primary) 45%, transparent));
+  margin: 0.15rem auto;
+  filter: drop-shadow(0 0 28px color-mix(in srgb, var(--c-secondary) 40%, transparent));
 }
 
 .roster {

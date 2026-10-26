@@ -12,7 +12,7 @@ export type Emotion =
   | "mysterious"
   | "amused";
 
-export type BakuganId = "pyrax" | "namiq" | "vexar";
+export type BakuganId = "preyas" | "pyrax" | "vexar";
 
 export type BakuganProfile = {
   id: BakuganId;
@@ -20,63 +20,75 @@ export type BakuganProfile = {
   attribute: Attribute;
   tagline: string;
   personality: string;
-  /** SpeechSynthesis pitch / rate */
   voice: { pitch: number; rate: number };
   colors: {
-    primary: string;
-    secondary: string;
-    glow: string;
-    deep: string;
+    shell: string;
+    shellDeep: string;
+    accent: string;
+    accentHot: string;
+    core: string;
+    eye: string;
+    claw: string;
     ash: string;
   };
   aliases: string[];
 };
 
+/** Preyas-first roster. Same ball language; attribute paints the shell. */
 export const BAKUGANS: Record<BakuganId, BakuganProfile> = {
+  preyas: {
+    id: "preyas",
+    name: "Preyas",
+    attribute: "aquos",
+    tagline: "Aquos ball. Voice + body do the talkin'.",
+    personality: "cheeky, warm, bounce-happy, Southern-flavored charm",
+    voice: { pitch: 1.18, rate: 1.08 },
+    colors: {
+      shell: "#1a4fd6",
+      shellDeep: "#0b2a8c",
+      accent: "#5dfff0",
+      accentHot: "#9ffff6",
+      core: "#3de8ff",
+      eye: "#ff2a2a",
+      claw: "#7b5cff",
+      ash: "#d8f3ff",
+    },
+    aliases: ["preyas", "aquos", "water", "blue"],
+  },
   pyrax: {
     id: "pyrax",
     name: "Pyrax",
     attribute: "pyrus",
-    tagline: "Fire in the core. Bold. Loud when it matters.",
+    tagline: "Pyrus shell. Same bounce language, hotter core.",
     personality: "fiery, bold, protective, a little cocky",
     voice: { pitch: 0.88, rate: 1.06 },
     colors: {
-      primary: "#ff5a1f",
-      secondary: "#ffb347",
-      glow: "#ff6b1a",
-      deep: "#7a1c08",
+      shell: "#e03a12",
+      shellDeep: "#7a1408",
+      accent: "#ffb347",
+      accentHot: "#ffe08a",
+      core: "#ff6b1a",
+      eye: "#ffef5a",
+      claw: "#ff8a3d",
       ash: "#e8d5c4",
     },
     aliases: ["pyrax", "pyrus", "fire", "ember"],
-  },
-  namiq: {
-    id: "namiq",
-    name: "Namiq",
-    attribute: "aquos",
-    tagline: "Tide-steady. Calm words. Deep focus.",
-    personality: "calm, thoughtful, gentle, precise",
-    voice: { pitch: 1.12, rate: 0.94 },
-    colors: {
-      primary: "#2ec4b6",
-      secondary: "#7bdff2",
-      glow: "#48cae4",
-      deep: "#023e8a",
-      ash: "#d8f3ff",
-    },
-    aliases: ["namiq", "aquos", "water", "tide"],
   },
   vexar: {
     id: "vexar",
     name: "Vexar",
     attribute: "darkus",
-    tagline: "Shadow edge. Quiet. Sees what others miss.",
+    tagline: "Darkus shell. Quiet bounce. Sharp eye.",
     personality: "mysterious, dry-witted, loyal, soft-spoken",
     voice: { pitch: 0.72, rate: 0.9 },
     colors: {
-      primary: "#9b5de5",
-      secondary: "#c77dff",
-      glow: "#b5179e",
-      deep: "#240046",
+      shell: "#5b2d8e",
+      shellDeep: "#240046",
+      accent: "#c77dff",
+      accentHot: "#e0aaff",
+      core: "#b5179e",
+      eye: "#ff4d6d",
+      claw: "#9b5de5",
       ash: "#e0d4f7",
     },
     aliases: ["vexar", "darkus", "shadow", "void"],
@@ -87,7 +99,6 @@ export const BAKUGAN_LIST = Object.values(BAKUGANS);
 
 export function findBakuganByUtterance(text: string): BakuganId | null {
   const lower = text.toLowerCase().trim();
-  // Prefer explicit names first
   for (const b of BAKUGAN_LIST) {
     if (new RegExp(`\\b${b.name.toLowerCase()}\\b`, "i").test(lower)) return b.id;
   }
@@ -95,8 +106,7 @@ export function findBakuganByUtterance(text: string): BakuganId | null {
     for (const a of b.aliases) {
       if (a === b.name.toLowerCase()) continue;
       if (
-        (/\b(switch|talk to|wake|summon|hey|call|hi)\b/.test(lower) ||
-          lower === a) &&
+        (/\b(switch|talk to|wake|summon|hey|call|hi)\b/.test(lower) || lower === a) &&
         new RegExp(`\\b${a}\\b`, "i").test(lower)
       ) {
         return b.id;
@@ -127,17 +137,12 @@ export function parseEmotionPrefix(raw: string): {
   const m = raw.trim().match(/^\[([a-z]+)\]\s*([\s\S]*)$/i);
   if (!m) return { emotion: "idle", text: raw.trim() };
   const tag = m[1]!.toLowerCase() as Emotion;
-  if (!EMOTION_TAGS.includes(tag) || tag === "idle" || tag === "listening" || tag === "thinking") {
-    // still accept happy/excited/etc.; idle/listening/thinking as reply moods map to calm/curious
-    if (EMOTION_TAGS.includes(tag)) {
-      return { emotion: tag === "idle" ? "calm" : tag, text: m[2]!.trim() };
-    }
-    return { emotion: "curious", text: m[2]!.trim() };
+  if (EMOTION_TAGS.includes(tag)) {
+    return { emotion: tag === "idle" ? "calm" : tag, text: m[2]!.trim() };
   }
-  return { emotion: tag, text: m[2]!.trim() };
+  return { emotion: "curious", text: m[2]!.trim() };
 }
 
-/** Split into speakable sentences, keeping punctuation. */
 export function splitSentences(text: string): string[] {
   const cleaned = text.replace(/\*[^*]+\*/g, " ").replace(/\s+/g, " ").trim();
   if (!cleaned) return [];

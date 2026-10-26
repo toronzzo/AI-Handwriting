@@ -1,16 +1,16 @@
-# Live Bakugan (web)
+# Live Bakugan — Preyas-first
 
-Talk with **Pyrax** (Pyrus), **Namiq** (Aquos), or **Vexar** (Darkus).
+Web companion where the **ball** does the acting: hops, wobbles, spins, pops open, and glows — no cartoon face.
 
-## Live loop
+## Default: Preyas (Aquos)
 
-- Face canvas runs its own **60fps** loop (never waits on the brain)
-- First token of each reply is a mood tag like `[excited]` → face + sound snap immediately
-- **Mic** mode: nods / eye-widen / soft ticks while you’re still talking
-- Sentences are **spoken as they arrive**; typing or a new turn barges in
-- Offline **emotion one-shots** (growl, laugh, blip) per mood
+Happy → little hops + bright eye  
+Excited → pops open + waves claws  
+Angry → shakes + flashes  
+Sad → droops + dims  
+Talking → bobs with the voice  
 
-## Run
+Also switchable: **Pyrax** (Pyrus), **Vexar** (Darkus) — same motion language, different shell paint.
 
 ```bash
 cd companion
@@ -18,4 +18,4 @@ npm install
 npm run dev
 ```
 
-Say or type a partner name (`switch to Namiq`) to swap. Shared memory remembers you across all three.
+Reference stills live in `public/refs/`.

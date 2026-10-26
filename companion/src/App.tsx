@@ -4,7 +4,7 @@ import { BAKUGANS, BAKUGAN_LIST, type BakuganId, type Emotion } from "./bakugans
 import { streamReply } from "./brain";
 import { loadMemory, saveMemory, type PartnerMemory } from "./memory";
 import type { ChatMessage, Form } from "./types";
-import { FaceCanvas } from "./face/FaceCanvas";
+import { BakuganBall } from "./face/BakuganBall";
 import { playEmotionSound } from "./audio/emotionSounds";
 import { createListener, speechRecognitionAvailable } from "./audio/listen";
 import { warmVoices } from "./audio/speech";
@@ -56,10 +56,10 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.attr = profile.attribute;
-    document.documentElement.style.setProperty("--c-primary", profile.colors.primary);
-    document.documentElement.style.setProperty("--c-secondary", profile.colors.secondary);
-    document.documentElement.style.setProperty("--c-glow", profile.colors.glow);
-    document.documentElement.style.setProperty("--c-deep", profile.colors.deep);
+    document.documentElement.style.setProperty("--c-primary", profile.colors.shell);
+    document.documentElement.style.setProperty("--c-secondary", profile.colors.accent);
+    document.documentElement.style.setProperty("--c-glow", profile.colors.core);
+    document.documentElement.style.setProperty("--c-deep", profile.colors.shellDeep);
     document.documentElement.style.setProperty("--c-ash", profile.colors.ash);
   }, [profile]);
 
@@ -105,18 +105,11 @@ export default function App() {
           setEmotion(ev.emotion);
           setMem(ev.memory);
           playEmotionSound(ev.emotion);
-          // Snap theme/face immediately on partner switch — don't wait for speech
-          if (ev.switchedTo) {
-            setStreamText("");
-          }
+          if (ev.switchedTo) setStreamText("");
         } else if (ev.type === "sentence") {
           spoken.push(ev.sentence);
           setStreamText(spoken.join(" "));
-          queueRef.current?.enqueue(
-            ev.sentence,
-            BAKUGANS[activeId],
-            voiceOnRef.current,
-          );
+          queueRef.current?.enqueue(ev.sentence, BAKUGANS[activeId], voiceOnRef.current);
         } else if (ev.type === "done") {
           setMem(ev.result.memory);
           setMessages((m) => [
@@ -151,8 +144,12 @@ export default function App() {
     playEmotionSound("happy");
     const p = BAKUGANS[next.activeId];
     const body = next.partnerName
-      ? `${next.partnerName}. ${p.name} here — talk to me.`
-      : `I'm ${p.name}. Your Bakugan. What should I call you?`;
+      ? next.activeId === "preyas"
+        ? `${next.partnerName}-han! Preyas here — let's bounce.`
+        : `${next.partnerName}. ${p.name} here — talk to me.`
+      : next.activeId === "preyas"
+        ? `Hey hey! I'm Preyas — your Aquos ball. What do I call ya?`
+        : `I'm ${p.name}. Your Bakugan. What should I call you?`;
     setMessages([
       {
         id: uid(),
@@ -163,9 +160,7 @@ export default function App() {
         at: Date.now(),
       },
     ]);
-    if (voiceOnRef.current) {
-      queueRef.current?.enqueue(body, p, true);
-    }
+    if (voiceOnRef.current) queueRef.current?.enqueue(body, p, true);
     setTimeout(() => inputRef.current?.focus(), 350);
   }
 
@@ -185,7 +180,7 @@ export default function App() {
           id: uid(),
           role: "bakugan",
           bakuganId: mem.activeId,
-          text: "Mic listen needs Chrome or Edge. Typing still works — the face keeps moving either way.",
+          text: "Mic needs Chrome or Edge. Type away — I'll still hop and glow.",
           emotion: "calm",
           at: Date.now(),
         },
@@ -224,6 +219,8 @@ export default function App() {
       ...m,
       forms: { ...m.forms, [m.activeId]: next },
     }));
+    setEmotion(next === "battle" ? "excited" : "calm");
+    if (next === "battle") playEmotionSound("excited");
   }
 
   function selectPartner(id: BakuganId) {
@@ -233,6 +230,10 @@ export default function App() {
     }
     void runTurn(`switch to ${BAKUGANS[id].name}`);
   }
+
+  const others = BAKUGAN_LIST.filter((b) => b.id !== mem.activeId)
+    .map((b) => b.name)
+    .join(" / ");
 
   return (
     <div className={`app attr-${profile.attribute} form-${form} ${awake ? "awake" : "asleep"}`}>
@@ -244,9 +245,9 @@ export default function App() {
           <p className="eyebrow">Live Bakugan · web</p>
           <h1 className="brand">{profile.name.toUpperCase()}</h1>
           <p className="tagline">{profile.tagline}</p>
-          <FaceCanvas
+          <BakuganBall
             profile={profile}
-            emotion={emotion}
+            emotion={emotion === "idle" ? "happy" : emotion}
             form={form}
             listening={false}
             speaking={false}
@@ -257,7 +258,10 @@ export default function App() {
                 key={b.id}
                 type="button"
                 className={`roster-pill ${b.id === mem.activeId ? "active" : ""}`}
-                onClick={() => setMem((m) => ({ ...m, activeId: b.id }))}
+                onClick={() => {
+                  setMem((m) => ({ ...m, activeId: b.id }));
+                  setEmotion("happy");
+                }}
               >
                 {b.name}
                 <span>{b.attribute}</span>
@@ -267,7 +271,9 @@ export default function App() {
           <button type="button" className="cta" onClick={() => wake()}>
             Wake {profile.name}
           </button>
-          <p className="hint">Face runs at 60fps on its own. Mood hits before speech.</p>
+          <p className="hint">
+            No cartoon face — feelings are hops, wobbles, pops, and that little eye glow.
+          </p>
         </header>
       ) : (
         <main className="stage">
@@ -285,7 +291,7 @@ export default function App() {
                 className="ghost"
                 onClick={() => setForm(form === "battle" ? "sphere" : "battle")}
               >
-                {form === "battle" ? "Sphere" : "Open"}
+                {form === "battle" ? "Seal" : "Pop open"}
               </button>
               <button
                 type="button"
@@ -322,7 +328,7 @@ export default function App() {
             ))}
           </div>
 
-          <FaceCanvas
+          <BakuganBall
             profile={profile}
             emotion={emotion}
             form={form}
@@ -374,9 +380,7 @@ export default function App() {
                 bargeIn();
                 setDraft(e.target.value);
               }}
-              placeholder={`Talk to ${profile.name}… (or say ${BAKUGAN_LIST.filter((b) => b.id !== mem.activeId)
-                .map((b) => b.name)
-                .join(" / ")})`}
+              placeholder={`Talk to ${profile.name}… (or say ${others})`}
               aria-label={`Message ${profile.name}`}
               autoComplete="off"
             />
