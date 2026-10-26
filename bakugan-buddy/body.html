@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Bakugan Buddy — Body Runtime</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; height: 100%; background: #030b14; font-family: system-ui, sans-serif; }
+    #stage { position: relative; width: 100%; height: 100%; overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+    #hud {
+      position: absolute; left: 12px; top: 12px; z-index: 2;
+      font: 600 12px/1.4 ui-monospace, monospace;
+      color: #9ffff6; background: rgba(0,0,0,.45); padding: 8px 10px;
+      border: 1px solid rgba(93,255,240,.25); pointer-events: none;
+      white-space: pre;
+    }
+    #controls {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+      display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+      padding: 12px; background: linear-gradient(transparent, rgba(0,0,0,.7));
+    }
+    #controls button {
+      border: 1px solid rgba(93,255,240,.35); background: rgba(26,79,214,.25);
+      color: #d8f3ff; padding: 8px 10px; font: 600 12px system-ui; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="body"></canvas>
+    <div id="hud">fps — · emotion idle</div>
+    <div id="controls">
+      <button data-e="happy">happy</button>
+      <button data-e="excited">excited</button>
+      <button data-e="fierce">angry</button>
+      <button data-e="sad">sad</button>
+      <button data-e="listening">listen</button>
+      <button data-e="calm">calm</button>
+      <button data-a="react">react demo</button>
+      <button data-a="talk">talk pulse</button>
+      <button data-a="theme">cycle theme</button>
+    </div>
+  </div>
+  <script>
+/**
+ * Bakugan Buddy — body runtime (M1 reference)
+ * Public API (also exposed on window.BakuganBody):
+ *   setEmotion(mood)
+ *   setTheme(themeId | themeObject)
+ *   setTalking(boolean | volume01)
+ *   react("[mood] text")
+ * Decoupled from AI: rAF loop only reads shared state.
+ */
+(function () {
+  "use strict";
+
+  const THEMES = {
+    aquos: {
+      id: "aquos",
+      shell: "#1a4fd6",
+      shellDeep: "#0b2a8c",
+      accent: "#5dfff0",
+      accentHot: "#9ffff6",
+      core: "#3de8ff",
+      eye: "#ff2a2a",
+      claw: "#7b5cff",
+    },
+    pyrus: {
+      id: "pyrus",
+      shell: "#e03a12",
+      shellDeep: "#7a1408",
+      accent: "#ffb347",
+      accentHot: "#ffe08a",
+      core: "#ff6b1a",
+      eye: "#ffef5a",
+      claw: "#ff8a3d",
+    },
+    darkus: {
+      id: "darkus",
+      shell: "#5b2d8e",
+      shellDeep: "#240046",
+      accent: "#c77dff",
+      accentHot: "#e0aaff",
+      core: "#b5179e",
+      eye: "#ff4d6d",
+      claw: "#9b5de5",
+    },
+  };
+
+  const MOODS = new Set([
+    "idle", "listening", "thinking", "happy", "excited", "calm",
+    "sad", "curious", "fierce", "angry", "mysterious", "amused",
+  ]);
+
+  const state = {
+    emotion: "idle",
+    theme: { ...THEMES.aquos },
+    talking: false,
+    talkVol: 0,
+    listening: false,
+    form: "sphere", // sphere | battle
+    debug: true,
+  };
+
+  const motion = {
+    hop: 0, open: 0, shake: 0, droop: 0, bob: 0, spin: 0,
+    eye: 0.55, flash: 0, claw: 0, wobble: 0, breath: 0,
+  };
+
+  const metrics = {
+    frames: 0,
+    fps: 0,
+    fpsWindowStart: performance.now(),
+    lastFrameMs: 0,
+    dropped: 0,
+    reactionMs: null,
+    log: [],
+  };
+
+  const canvas = document.getElementById("body");
+  const ctx = canvas.getContext("2d", { alpha: true });
+  const hud = document.getElementById("hud");
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = canvas.clientWidth || window.innerWidth;
+    const h = canvas.clientHeight || window.innerHeight;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener("resize", resize);
+
+  function normalizeMood(m) {
+    if (!m) return "idle";
+    const x = String(m).toLowerCase();
+    if (x === "angry") return "fierce";
+    return MOODS.has(x) ? x : "curious";
+  }
+
+  function setEmotion(mood) {
+    const t0 = performance.now();
+    state.emotion = normalizeMood(mood);
+    if (state.emotion === "excited" || state.emotion === "fierce") state.form = "battle";
+    if (state.emotion === "calm" || state.emotion === "sad") state.form = "sphere";
+    metrics.reactionMs = performance.now() - t0;
+    return state.emotion;
+  }
+
+  function setTheme(theme) {
+    if (typeof theme === "string" && THEMES[theme]) {
+      state.theme = { ...THEMES[theme] };
+    } else if (theme && typeof theme === "object") {
+      state.theme = { ...state.theme, ...theme };
+    }
+    return state.theme.id || "custom";
+  }
+
+  function setTalking(v) {
+    if (typeof v === "number") {
+      state.talkVol = Math.max(0, Math.min(1, v));
+      state.talking = state.talkVol > 0.04;
+    } else {
+      state.talking = Boolean(v);
+      state.talkVol = state.talking ? 0.6 : 0;
+    }
+  }
+
+  function react(tagged) {
+    const m = String(tagged || "").trim().match(/^\[([a-z]+)\]\s*([\s\S]*)$/i);
+    if (m) {
+      setEmotion(m[1]);
+      return { emotion: state.emotion, text: m[2].trim() };
+    }
+    setEmotion("curious");
+    return { emotion: state.emotion, text: String(tagged || "") };
+  }
+
+  function targets(emotion, form, listening, talking, breath) {
+    const forceOpen = form === "battle" ? 1 : 0;
+    let open = forceOpen, droop = 0, eye = 0.55, wobble = listening ? 0.4 : 0.08;
+    let claw = 0, hopDrive = 0, hopAmp = 0, shake = 0;
+    switch (emotion) {
+      case "happy": case "amused":
+        hopDrive = 7.5; hopAmp = 0.85; eye = 1; wobble = 0.2; break;
+      case "excited":
+        open = Math.max(open, 1); claw = 1; eye = 1; hopDrive = 5; hopAmp = 0.35; break;
+      case "fierce":
+        shake = 0.55; eye = 0.95; open = Math.max(open, 0.35); break;
+      case "sad":
+        droop = 1; eye = 0.22; wobble = 0.05; break;
+      case "calm":
+        eye = 0.5; break;
+      case "curious":
+        eye = 0.8; wobble = 0.25; open = Math.max(open, 0.15); break;
+      case "listening":
+        eye = 0.85; wobble = 0.4; break;
+      case "thinking":
+        eye = 0.45; wobble = 0.15; break;
+      default: break;
+    }
+    if (talking && open < 0.2) open = Math.max(open, 0.12);
+    if (listening) state.listening = true; else if (emotion !== "listening") state.listening = false;
+    return { open, droop, eye, wobble, claw, hopDrive, hopAmp, shake };
+  }
+
+  function hexA(hex, a) {
+    const h = hex.replace("#", "");
+    const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+    const n = parseInt(full, 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${Math.max(0, Math.min(1, a))})`;
+  }
+
+  function draw(w, h) {
+    const c = state.theme;
+    const m = motion;
+    ctx.clearRect(0, 0, w, h);
+
+    // Atmosphere
+    const g = ctx.createRadialGradient(w / 2, h * 0.35, 20, w / 2, h * 0.5, Math.max(w, h) * 0.55);
+    g.addColorStop(0, hexA(c.accent, 0.18));
+    g.addColorStop(0.5, hexA(c.shell, 0.08));
+    g.addColorStop(1, "transparent");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+
+    const cx = w / 2 + m.shake * 14 + Math.sin(m.breath * 2.2) * m.wobble * 10;
+    const baseY = h * 0.56;
+    const hopPx = m.hop * h * 0.1;
+    const droopPx = m.droop * h * 0.04;
+    const bobPx = m.bob * h * 0.028;
+    const cy = baseY - hopPx + droopPx + bobPx;
+    const dim = 1 - m.droop * 0.45;
+    const r = Math.min(w, h) * 0.22 * (1 - m.droop * 0.08) * (1 + Math.sin(m.breath * 2) * 0.012);
+
+    ctx.fillStyle = `rgba(0,0,0,${0.22 + m.hop * 0.08})`;
+    ctx.beginPath();
+    ctx.ellipse(cx, baseY + r * 0.95, r * (0.7 - m.hop * 0.15), r * 0.16, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const glow = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 1.55);
+    glow.addColorStop(0, hexA(c.accent, 0.28 * m.eye * dim));
+    glow.addColorStop(0.55, hexA(c.shell, 0.12 * dim));
+    glow.addColorStop(1, "transparent");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 1.55, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(m.spin * 0.15 + m.shake * 0.08);
+    ctx.scale(1, 1 - m.droop * 0.12);
+
+    if (m.open > 0.08) drawOpen(r, m, c, dim);
+    else drawSphere(r, m, c, dim);
+
+    if (m.flash > 0.05) {
+      ctx.fillStyle = hexA(c.accentHot, 0.12 * m.flash);
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.05, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawSphere(r, m, c, dim) {
+    const body = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.1, 0, 0, r);
+    body.addColorStop(0, c.accentHot);
+    body.addColorStop(0.35, c.shell);
+    body.addColorStop(1, c.shellDeep);
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 3; i++) {
+        const y = -r * 0.15 + i * r * 0.18;
+        ctx.fillStyle = hexA(c.accent, (0.55 + m.eye * 0.35) * dim);
+        ctx.fillRect(side * r * 0.62 - (side < 0 ? r * 0.16 : 0), y, r * 0.16, r * 0.07);
+      }
+    }
+
+    ctx.fillStyle = "#0a0614";
+    ctx.beginPath();
+    ctx.ellipse(0, -r * 0.42, r * 0.23, r * 0.15, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const bright = 0.35 + m.eye * 0.65;
+    for (const sx of [-1, 1]) {
+      ctx.shadowColor = hexA(c.eye, 0.9 * bright);
+      ctx.shadowBlur = 8 + m.eye * 14;
+      ctx.fillStyle = hexA(c.eye, bright * dim);
+      ctx.beginPath();
+      ctx.arc(sx * r * 0.11, -r * 0.42, r * (0.035 + m.eye * 0.015), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+
+    const cg = ctx.createRadialGradient(0, r * 0.08, 1, 0, r * 0.12, r * 0.16);
+    cg.addColorStop(0, c.accentHot);
+    cg.addColorStop(0.45, c.core);
+    cg.addColorStop(1, hexA(c.shellDeep, 0.9));
+    ctx.fillStyle = cg;
+    ctx.shadowColor = hexA(c.core, 0.7 * m.eye * dim);
+    ctx.shadowBlur = 12 + m.eye * 10;
+    ctx.beginPath();
+    ctx.arc(0, r * 0.12, r * 0.16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  function drawOpen(r, m, c, dim) {
+    const o = m.open;
+    const bowl = ctx.createLinearGradient(0, 0, 0, r);
+    bowl.addColorStop(0, c.shell);
+    bowl.addColorStop(1, c.shellDeep);
+    ctx.fillStyle = bowl;
+    ctx.beginPath();
+    ctx.ellipse(0, r * 0.15, r * 0.85, r * 0.55, 0, 0, Math.PI);
+    ctx.fill();
+
+    ctx.fillStyle = hexA(c.accent, 0.85 * dim);
+    ctx.fillRect(-r * 0.28, -r * 0.15, r * 0.56, r * 0.55);
+
+    const flap = 0.75 + o * 1.05;
+    for (const side of [-1, 1]) {
+      ctx.save();
+      ctx.translate(side * r * 0.08, -r * 0.02);
+      ctx.rotate(side * flap * (0.95 + m.claw * 0.2 * Math.sin(m.breath * 9)));
+      ctx.fillStyle = c.shell;
+      ctx.beginPath();
+      ctx.moveTo(0, r * 0.05);
+      ctx.quadraticCurveTo(side * r * 0.55, -r * 0.75, side * r * 1.15, -r * 0.15);
+      ctx.quadraticCurveTo(side * r * 1.05, r * 0.35, side * r * 0.35, r * 0.45);
+      ctx.quadraticCurveTo(side * r * 0.12, r * 0.3, 0, r * 0.2);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = hexA(c.accent, 0.82 * dim);
+      ctx.beginPath();
+      ctx.moveTo(side * r * 0.22, -r * 0.05);
+      ctx.lineTo(side * r * 0.72, -r * 0.35);
+      ctx.lineTo(side * r * 0.68, r * 0.12);
+      ctx.lineTo(side * r * 0.2, r * 0.22);
+      ctx.closePath();
+      ctx.fill();
+
+      const wave = (0.35 + m.claw) * Math.sin(m.breath * 10 + side) * 0.4;
+      ctx.translate(side * r * 0.95, -r * 0.05);
+      ctx.rotate(side * 0.4 + wave);
+      ctx.fillStyle = c.claw;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(side * r * 0.18, r * 0.06);
+      ctx.lineTo(side * r * 0.08, r * 0.22);
+      ctx.lineTo(-side * r * 0.04, r * 0.12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.fillStyle = "#140a1c";
+    ctx.beginPath();
+    ctx.ellipse(0, -r * 0.42, r * 0.38, r * 0.32, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const bright = 0.4 + m.eye * 0.6;
+    ctx.shadowColor = hexA(c.eye, 0.95 * bright);
+    ctx.shadowBlur = 10 + m.eye * 16;
+    for (const sx of [-1, 1]) {
+      ctx.fillStyle = hexA(c.eye, bright * dim);
+      ctx.beginPath();
+      ctx.ellipse(sx * r * 0.12, -r * 0.48, r * 0.045, r * 0.035, sx * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    metrics.lastFrameMs = now - last;
+    if (metrics.lastFrameMs > 22) metrics.dropped++;
+    last = now;
+    metrics.frames++;
+    if (now - metrics.fpsWindowStart >= 500) {
+      metrics.fps = (metrics.frames * 1000) / (now - metrics.fpsWindowStart);
+      metrics.frames = 0;
+      metrics.fpsWindowStart = now;
+    }
+
+    const m = motion;
+    m.breath += dt;
+    const t = targets(state.emotion, state.form, state.listening || state.emotion === "listening", state.talking, m.breath);
+    const ease = (cur, goal, k) => cur + (goal - cur) * Math.min(1, dt * k);
+    m.open = ease(m.open, t.open, 7);
+    m.droop = ease(m.droop, t.droop, 5);
+    m.eye = ease(m.eye, t.eye, 8);
+    m.wobble = ease(m.wobble, t.wobble, 6);
+    m.claw = ease(m.claw, t.claw, 10);
+    if (t.hopDrive > 0) m.hop = Math.abs(Math.sin(m.breath * t.hopDrive)) * t.hopAmp;
+    else m.hop = ease(m.hop, 0, 8);
+    if (t.shake) {
+      m.shake = Math.sin(m.breath * 38) * t.shake;
+      m.flash = 0.5 + 0.5 * Math.sin(m.breath * 22);
+    } else {
+      m.shake = ease(m.shake, 0, 12);
+      m.flash = ease(m.flash, 0, 6);
+    }
+    if (state.talking) {
+      m.bob = Math.sin(m.breath * 11) * (0.45 + state.talkVol * 0.4)
+        + Math.sin(m.breath * 17) * 0.15;
+    } else m.bob = ease(m.bob, 0, 7);
+    if (state.emotion === "thinking") m.spin += dt * 1.6;
+    else m.spin *= 1 - Math.min(1, dt * 2);
+
+    const w = canvas.clientWidth || window.innerWidth;
+    const h = canvas.clientHeight || window.innerHeight;
+    draw(w, h);
+
+    if (state.debug && hud) {
+      hud.textContent =
+        `fps ${metrics.fps.toFixed(1)}  drop~${metrics.dropped}\n` +
+        `emotion ${state.emotion}  form ${state.form}\n` +
+        `talk ${state.talking ? state.talkVol.toFixed(2) : "off"}  theme ${state.theme.id}\n` +
+        `setEmotion react ${metrics.reactionMs != null ? metrics.reactionMs.toFixed(2) + "ms" : "—"}`;
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // Demo controls
+  document.getElementById("controls").addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    if (btn.dataset.e) {
+      if (btn.dataset.e === "listening") state.listening = true;
+      else state.listening = false;
+      setEmotion(btn.dataset.e);
+    }
+    if (btn.dataset.a === "react") react("[excited] Whoop — poppin' open!");
+    if (btn.dataset.a === "talk") {
+      setTalking(true);
+      let t = 0;
+      const id = setInterval(() => {
+        t += 0.05;
+        setTalking(0.35 + Math.abs(Math.sin(t * 8)) * 0.55);
+        if (t > 2.2) { clearInterval(id); setTalking(false); }
+      }, 50);
+    }
+    if (btn.dataset.a === "theme") {
+      const ids = Object.keys(THEMES);
+      const i = ids.indexOf(state.theme.id);
+      setTheme(ids[(i + 1) % ids.length]);
+    }
+  });
+
+  const api = {
+    setEmotion, setTheme, setTalking, react,
+    getState: () => ({ ...state }),
+    getMetrics: () => ({ ...metrics, fps: metrics.fps, droppedApprox: metrics.dropped }),
+    setDebug: (v) => { state.debug = Boolean(v); },
+  };
+  window.BakuganBody = api;
+  console.info("[BakuganBody] ready", Object.keys(api));
+})();
+  </script>
+</body>
+</html>
