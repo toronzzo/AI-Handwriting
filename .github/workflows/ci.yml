@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bakugan-buddy:
+    name: typecheck · lint · test · packs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            companion/package-lock.json
+            bakugan-buddy/studio/package-lock.json
+
+      - name: Character pack schema
+        run: node bakugan-buddy/scripts/validate-packs.mjs
+
+      - name: Mood unit tests
+        run: npm --prefix bakugan-buddy/packages/mood test
+
+      - name: Body-core unit tests
+        run: npm --prefix bakugan-buddy/packages/body-core test
+
+      - name: Install companion
+        run: npm ci
+        working-directory: companion
+
+      - name: Lint companion
+        run: npm run lint
+        working-directory: companion
+
+      - name: Typecheck companion
+        run: npm run typecheck
+        working-directory: companion
+
+      - name: Unit tests companion
+        run: npm test
+        working-directory: companion
+
+      - name: Build companion
+        run: npm run build
+        working-directory: companion
+
+      - name: Studio syntax check
+        run: |
+          node --check bakugan-buddy/studio/server.mjs
+          node --check bakugan-buddy/studio/lib/chat.mjs
+          node --check bakugan-buddy/studio/lib/tts.mjs
+          node --check bakugan-buddy/studio/lib/stt.mjs
+          node --check bakugan-buddy/studio/lib/paths.mjs
+
+      - name: Install studio (lockfile)
+        run: npm ci
+        working-directory: bakugan-buddy/studio

@@ -317,7 +317,6 @@ export function applyLocalEffects(
   const lower = text.toLowerCase();
   let next = { ...mem };
   const id = next.activeId;
-  let switchedTo: BakuganId | undefined;
 
   const switchTo = findBakuganByUtterance(text);
   if (
@@ -354,7 +353,7 @@ export function applyLocalEffects(
     }
   }
   next = bump(next, id, 1);
-  return { memory: next, switchedTo };
+  return { memory: next };
 }
 
 export type NeuralEvent =

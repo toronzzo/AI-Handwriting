@@ -80,3 +80,14 @@ python3 -m http.server 8765 --directory bakugan-buddy/docs/concepts
 ## Milestones
 
 See `docs/MILESTONES.md`. M1 body; studio sidecar is the PC half of M2–M4.
+
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every PR:
+
+- character pack JSON schema (`scripts/validate-packs.mjs`)
+- `@bakugan-buddy/mood` + `body-core` unit tests
+- companion lint / typecheck / unit tests / production build
+- studio `node --check` syntax
+
+Local mirror: `npm run ci` from the repo root (after `npm install` in `companion/`).
