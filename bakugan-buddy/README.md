@@ -47,6 +47,15 @@ Private Bakugan-inspired skins stay in a private pack folder — never ship Spin
 
 **Feels real?** Read [`docs/PREYAS_FROM_ANIME.md`](./docs/PREYAS_FROM_ANIME.md) — anime body language, partner mind, and acted voice rules. Product spine: [`docs/CURSOR_PRODUCT_PROMPT.md`](./docs/CURSOR_PRODUCT_PROMPT.md).
 
+## Concepts
+
+Interactive 2D model sheet (SVG) for Ripple: [`docs/concepts/`](./docs/concepts/).
+
+```bash
+python3 -m http.server 8765 --directory bakugan-buddy/docs/concepts
+# → http://127.0.0.1:8765/ripple-2d-model.html
+```
+
 ## Milestones
 
 See `docs/MILESTONES.md`. Next: **M2** voice I/O + barge-in.
