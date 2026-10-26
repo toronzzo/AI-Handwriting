@@ -4,15 +4,15 @@ Neural network classifier (CNN variant) trained with backpropagation.
 
 ---
 
-## Live Bakugan (web-first)
+## Live Bakugan (web-first) — Preyas
 
-Talk with **Pyrax** (Pyrus), **Namiq** (Aquos), or **Vexar** (Darkus).
-Face runs at 60fps separately from the brain; mood tags fire first; speech is sentence-streamed.
+**Preyas** (Aquos) is the default: a ball that acts with hops, wobbles, pops, and eye glow — no cartoon face.
+Also switchable: Pyrax (Pyrus), Vexar (Darkus).
 
 | Path | What |
 | --- | --- |
-| [`companion/`](./companion) | Live web companion (face + mic + voices) |
-| [`bakugan/`](./bakugan) | Agent SDK Pyrax for Cursor playground / hosting |
+| [`companion/`](./companion) | Live web companion (motion ball + mic + voices) |
+| [`bakugan/`](./bakugan) | Agent SDK partner for Cursor playground / hosting |
 
 ```bash
 # Live web companion
