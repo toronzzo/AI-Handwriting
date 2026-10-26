@@ -1,0 +1,37 @@
+{
+  "identity": "Ripple \u2014 Aquos pocket companion (original)",
+  "mood": "sad",
+  "intent": "DROOP",
+  "intent_means": "Sad sink \u2014 energy low, loyal soft.",
+  "line": "Aw, partner\u2026",
+  "listening": false,
+  "talking": true,
+  "targets": {
+    "open": 0.12,
+    "droop": 1.0,
+    "eye": 0.22,
+    "claw": 0.0,
+    "hop": 0.0,
+    "shake": 0.0,
+    "lean": -0.15,
+    "rock": 0.04,
+    "aura": 0.0
+  },
+  "movable": [
+    "ROOT",
+    "BODY",
+    "SHELL_UPPER",
+    "SHELL_LOWER",
+    "CORE",
+    "RING_INNER",
+    "RING_OUTER",
+    "EYE",
+    "PANEL_A",
+    "PANEL_B",
+    "PANEL_C",
+    "CLAW_FL_A/B",
+    "CLAW_FR_A/B",
+    "CLAW_BL_A/B",
+    "CLAW_BR_A/B"
+  ]
+}

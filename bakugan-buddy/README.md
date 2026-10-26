@@ -49,11 +49,16 @@ Private Bakugan-inspired skins stay in a private pack folder — never ship Spin
 
 ## Concepts
 
-Interactive 2D model sheet (SVG) for Ripple: [`docs/concepts/`](./docs/concepts/).
+- Interactive SVG model: [`docs/concepts/`](./docs/concepts/)
+- **Blender AI rig** (every part movable + mood→intent driver): [`blender/`](./blender/)
 
 ```bash
 python3 -m http.server 8765 --directory bakugan-buddy/docs/concepts
 # → http://127.0.0.1:8765/ripple-2d-model.html
+
+# Blender (set BLENDER to your 4.x binary)
+./bakugan-buddy/blender/run.sh build
+./bakugan-buddy/blender/run.sh drive --react "[excited] Let's make a splash!" --render
 ```
 
 ## Milestones
