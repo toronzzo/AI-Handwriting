@@ -130,17 +130,39 @@ export const EMOTION_TAGS: Emotion[] = [
   "amused",
 ];
 
+function normalizeEmotionTag(tag: string): Emotion {
+  const lower = tag.toLowerCase();
+  if (lower === "angry") return "fierce";
+  if (lower === "idle") return "calm";
+  return EMOTION_TAGS.includes(lower as Emotion) ? (lower as Emotion) : "curious";
+}
+
+/** Incremental `[mood] text` parser — complete only once the closing `]` arrives. */
 export function parseEmotionPrefix(raw: string): {
   emotion: Emotion;
   text: string;
+  complete: boolean;
 } {
-  const m = raw.trim().match(/^\[([a-z]+)\]\s*([\s\S]*)$/i);
-  if (!m) return { emotion: "idle", text: raw.trim() };
-  const tag = m[1]!.toLowerCase() as Emotion;
-  if (EMOTION_TAGS.includes(tag)) {
-    return { emotion: tag === "idle" ? "calm" : tag, text: m[2]!.trim() };
+  const s = raw.trimStart();
+  if (!s) {
+    return { emotion: "thinking", text: "", complete: false };
   }
-  return { emotion: "curious", text: m[2]!.trim() };
+  if (s.startsWith("[")) {
+    const close = s.indexOf("]");
+    if (close === -1) {
+      return { emotion: "thinking", text: "", complete: false };
+    }
+    const tag = s.slice(1, close);
+    if (!/^[a-z]+$/i.test(tag)) {
+      return { emotion: "curious", text: s.trim(), complete: true };
+    }
+    return {
+      emotion: normalizeEmotionTag(tag),
+      text: s.slice(close + 1).trim(),
+      complete: true,
+    };
+  }
+  return { emotion: "curious", text: s.trim(), complete: true };
 }
 
 export function splitSentences(text: string): string[] {

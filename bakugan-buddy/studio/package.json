@@ -1,0 +1,14 @@
+{
+  "name": "@bakugan-buddy/studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Loopback Home Studio v0 — llama.cpp, sherpa-onnx, Piper/Kokoro",
+  "scripts": {
+    "start": "node server.mjs",
+    "download": "bash download-models.sh"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

@@ -5,3 +5,7 @@ dist/
 .DS_Store
 apps/mobile/.expo/
 apps/mobile/dist/
+studio/models/**
+!studio/models/.gitignore
+*.gguf
+*.onnx

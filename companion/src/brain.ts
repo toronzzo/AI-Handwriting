@@ -1,12 +1,14 @@
 import {
   BAKUGANS,
   findBakuganByUtterance,
+  parseEmotionPrefix,
   splitSentences,
   type BakuganId,
   type Emotion,
 } from "./bakugans";
 import type { PartnerMemory } from "./memory";
 import type { Form } from "./types";
+import { pingStudio, streamStudioTokens } from "./studio";
 
 export type BrainResult = {
   tagged: string;
@@ -295,6 +297,55 @@ export function think(userText: string, mem: PartnerMemory): BrainResult {
   );
 }
 
+/** Deterministic memory/form/switch — never ask the LLM to mutate this. */
+export function applyLocalEffects(
+  userText: string,
+  mem: PartnerMemory,
+): { memory: PartnerMemory; switchedTo?: BakuganId } {
+  const text = userText.trim();
+  const lower = text.toLowerCase();
+  let next = { ...mem };
+  const id = next.activeId;
+  let switchedTo: BakuganId | undefined;
+
+  const switchTo = findBakuganByUtterance(text);
+  if (
+    switchTo &&
+    switchTo !== id &&
+    (/\b(switch|talk to|wake|summon|hey|call)\b/.test(lower) ||
+      lower.trim() === BAKUGANS[switchTo].name.toLowerCase() ||
+      BAKUGANS[switchTo].aliases.some((a) => lower.trim() === a) ||
+      lower.includes(BAKUGANS[switchTo].name.toLowerCase()))
+  ) {
+    next = bump({ ...next, activeId: switchTo }, switchTo, 2);
+    return { memory: next, switchedTo: switchTo };
+  }
+
+  const name = extractName(text);
+  if (name) {
+    next = bump(remember({ ...next, partnerName: name }, `Partner's name is ${name}`), id, 5);
+    return { memory: next };
+  }
+
+  if (/\b(open|battle|stand|transform|pop)\b/.test(lower)) {
+    next = setForm(bump(next, id, 2), id, "battle");
+    return { memory: next };
+  }
+  if (/\b(rest|sleep|sphere|close|fold|chill)\b/.test(lower)) {
+    next = setForm(next, id, "sphere");
+    return { memory: next };
+  }
+  if (/\bremember\b/.test(lower)) {
+    const fact = text.replace(/^.*remember\s+/i, "").trim();
+    if (fact.length > 2) {
+      next = bump(remember(next, fact), id, 2);
+      return { memory: next };
+    }
+  }
+  next = bump(next, id, 1);
+  return { memory: next, switchedTo };
+}
+
 export type NeuralEvent =
   | {
       type: "neural";
@@ -316,16 +367,146 @@ export async function* streamReply(
   mem: PartnerMemory,
   opts?: { signal?: AbortSignal; thinkMs?: number },
 ): AsyncGenerator<NeuralEvent> {
-  // Sense — hear partner first
   yield { type: "neural", layer: "sense", label: clip(userText, 48) };
-  await delay(90, opts?.signal);
 
+  const effects = applyLocalEffects(userText, mem);
+  const profile = BAKUGANS[effects.memory.activeId];
+
+  let usedLlm = false;
+  try {
+    const health = await pingStudio();
+    if (health?.llm?.ready) {
+      usedLlm = true;
+      yield* streamLlmReply(userText, effects, profile, opts?.signal);
+      return;
+    }
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    usedLlm = false;
+  }
+
+  if (!usedLlm) {
+    yield { type: "neural", layer: "intend", label: "offline core — local bounce" };
+  }
+  yield* streamMockReply(userText, mem, opts);
+}
+
+async function* streamLlmReply(
+  userText: string,
+  effects: { memory: PartnerMemory; switchedTo?: BakuganId },
+  profile: (typeof BAKUGANS)[BakuganId],
+  signal?: AbortSignal,
+): AsyncGenerator<NeuralEvent> {
+  yield { type: "neural", layer: "intend", label: "llama.cpp · Qwen2.5-3B" };
+
+  let buf = "";
+  let emotion: Emotion | null = null;
+  let spoken = "";
+  let emitted = 0;
+  let previewed = false;
+
+  const flushSentences = function* (final: boolean): Generator<NeuralEvent> {
+    const sentences = splitSentences(spoken);
+    const ready = final ? sentences : sentences.slice(0, -1);
+    while (emitted < ready.length) {
+      const sentence = ready[emitted]!;
+      yield { type: "sentence", sentence, index: emitted };
+      yield {
+        type: "neural",
+        layer: "body",
+        label: emitted === 0 ? "bob + glow" : "keep moving",
+      };
+      emitted += 1;
+    }
+  };
+
+  try {
+    for await (const tok of streamStudioTokens(
+      {
+        text: userText,
+        partnerName: effects.memory.partnerName,
+        facts: effects.memory.facts,
+        form: effects.memory.forms[effects.memory.activeId],
+        character: {
+          name: profile.name,
+          attribute: profile.attribute,
+          personality: profile.personality,
+        },
+        messages: [{ role: "user", content: userText }],
+      },
+      signal,
+    )) {
+      buf += tok;
+      if (!emotion) {
+        const parsed = parseEmotionPrefix(buf);
+        if (parsed.complete) {
+          emotion = parsed.emotion;
+          spoken = parsed.text;
+          yield { type: "neural", layer: "feel", label: `[${emotion}]` };
+          yield {
+            type: "emotion",
+            emotion,
+            memory: effects.memory,
+            switchedTo: effects.switchedTo,
+          };
+          yield {
+            type: "neural",
+            layer: "intend",
+            label: intentLabel(emotion, spoken, effects.switchedTo),
+          };
+        }
+        continue;
+      }
+      const parsed = parseEmotionPrefix(buf);
+      spoken = parsed.text;
+      if (!previewed && spoken.length > 8) {
+        previewed = true;
+        yield { type: "preview", willSay: spoken, emotion };
+        yield { type: "neural", layer: "speak", label: clip(spoken, 40) };
+      }
+      yield* flushSentences(false);
+    }
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    if (!emotion) {
+      yield* streamMockReply(userText, effects.memory, { signal });
+      return;
+    }
+  }
+
+  if (!emotion) {
+    yield* streamMockReply(userText, effects.memory, { signal });
+    return;
+  }
+
+  if (!previewed) {
+    yield { type: "preview", willSay: spoken, emotion };
+    yield { type: "neural", layer: "speak", label: clip(spoken, 40) };
+  }
+  yield* flushSentences(true);
+
+  yield {
+    type: "done",
+    result: {
+      tagged: `[${emotion}] ${spoken}`,
+      emotion,
+      text: spoken,
+      memory: effects.memory,
+      switchedTo: effects.switchedTo,
+    },
+  };
+}
+
+async function* streamMockReply(
+  userText: string,
+  mem: PartnerMemory,
+  opts?: { signal?: AbortSignal; thinkMs?: number },
+): AsyncGenerator<NeuralEvent> {
   const thinkMs = opts?.thinkMs ?? 160 + Math.random() * 140;
   await delay(thinkMs * 0.45, opts?.signal);
 
   const result = think(userText, mem);
 
-  // Feel — mood locks before words
   yield { type: "neural", layer: "feel", label: `[${result.emotion}]` };
   yield {
     type: "emotion",
@@ -333,25 +514,21 @@ export async function* streamReply(
     memory: result.memory,
     switchedTo: result.switchedTo,
   };
-  await delay(70, opts?.signal);
+  await delay(50, opts?.signal);
 
-  // Intent — what the body/speech will do
   yield {
     type: "neural",
     layer: "intend",
     label: intentLabel(result.emotion, result.text, result.switchedTo),
   };
-  await delay(60, opts?.signal);
 
-  // Preview whole reply so you see what he's about to say
   yield { type: "preview", willSay: result.text, emotion: result.emotion };
   yield { type: "neural", layer: "speak", label: clip(result.text, 40) };
-  await delay(50, opts?.signal);
 
   const sentences = splitSentences(result.text);
   for (let i = 0; i < sentences.length; i++) {
     if (opts?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    await delay(35 + sentences[i]!.length * 3, opts?.signal);
+    await delay(35 + sentences[i]!.length * 4, opts?.signal);
     yield { type: "sentence", sentence: sentences[i]!, index: i };
     yield {
       type: "neural",

@@ -81,9 +81,37 @@ export function normalizeMood(m: string): Mood {
 
 /** Parse `[mood] text` — product contract for every LLM reply. */
 export function react(tagged: string): { emotion: Mood; text: string } {
-  const m = tagged.trim().match(/^\[([a-z]+)\]\s*([\s\S]*)$/i);
-  if (m) return { emotion: normalizeMood(m[1]!), text: m[2]!.trim() };
-  return { emotion: "curious", text: tagged.trim() };
+  const parsed = parseMoodPrefix(tagged);
+  return { emotion: parsed.emotion, text: parsed.text };
+}
+
+/** Incremental parser for streamed llama.cpp tokens. */
+export function parseMoodPrefix(raw: string): {
+  emotion: Mood;
+  text: string;
+  complete: boolean;
+} {
+  const s = raw.trimStart();
+  // Wait for the first real token so FEEL does not fire on leading whitespace.
+  if (!s) {
+    return { emotion: "thinking", text: "", complete: false };
+  }
+  if (s.startsWith("[")) {
+    const close = s.indexOf("]");
+    if (close === -1) {
+      return { emotion: "thinking", text: "", complete: false };
+    }
+    const tag = s.slice(1, close);
+    if (!/^[a-z]+$/i.test(tag)) {
+      return { emotion: "curious", text: s.trim(), complete: true };
+    }
+    return {
+      emotion: normalizeMood(tag),
+      text: s.slice(close + 1).trim(),
+      complete: true,
+    };
+  }
+  return { emotion: "curious", text: s.trim(), complete: true };
 }
 
 export type MotionTargets = {
