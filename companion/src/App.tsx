@@ -105,6 +105,10 @@ export default function App() {
           setEmotion(ev.emotion);
           setMem(ev.memory);
           playEmotionSound(ev.emotion);
+          // Snap theme/face immediately on partner switch — don't wait for speech
+          if (ev.switchedTo) {
+            setStreamText("");
+          }
         } else if (ev.type === "sentence") {
           spoken.push(ev.sentence);
           setStreamText(spoken.join(" "));
@@ -370,7 +374,9 @@ export default function App() {
                 bargeIn();
                 setDraft(e.target.value);
               }}
-              placeholder={`Talk to ${profile.name}… (or say Namiq / Vexar)`}
+              placeholder={`Talk to ${profile.name}… (or say ${BAKUGAN_LIST.filter((b) => b.id !== mem.activeId)
+                .map((b) => b.name)
+                .join(" / ")})`}
               aria-label={`Message ${profile.name}`}
               autoComplete="off"
             />
