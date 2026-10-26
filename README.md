@@ -12,6 +12,7 @@ Offline pocket companion — see [`bakugan-buddy/`](./bakugan-buddy). **M1 = bod
 | --- | --- |
 | [`bakugan-buddy/`](./bakugan-buddy) | Product app (Expo) + `body.html` + docs |
 | [`body.html`](./body.html) | Canonical body runtime (hooks + FPS HUD) |
+| [`bakugan-buddy/docs/PREYAS_FROM_ANIME.md`](./bakugan-buddy/docs/PREYAS_FROM_ANIME.md) | Anime realism — mind, body, voice |
 | [`companion/`](./companion) | Earlier web lab (neurons / training) |
 | [`bakugan/`](./bakugan) | Agent SDK playground partner |
 
