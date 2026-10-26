@@ -63,12 +63,20 @@ function extractName(text: string): string | null {
   const explicit = text
     .trim()
     .match(/(?:my name is|call me)\s+([A-Za-z][a-zA-Z'-]{1,24})/i);
-  if (explicit?.[1]) return explicit[1];
+  if (explicit?.[1] && !NOT_A_NAME.has(explicit[1].toLowerCase())) {
+    return capitalize(explicit[1]);
+  }
 
-  const m = text.trim().match(/^(?:i'?m|i am)\s+([A-Z][a-zA-Z'-]{1,24})\.?$/);
+  const m = text
+    .trim()
+    .match(/^(?:i[''\u2019]?m|i am)\s+([A-Za-z][a-zA-Z'-]{1,24})\.?$/i);
   if (!m?.[1]) return null;
   if (NOT_A_NAME.has(m[1].toLowerCase())) return null;
-  return m[1];
+  return capitalize(m[1]);
+}
+
+function capitalize(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function pack(
@@ -237,6 +245,16 @@ export function think(userText: string, mem: PartnerMemory): BrainResult {
     return pack("curious", `Active: ${profile.name}. Bonds — ${roster}.`, next);
   }
 
+  if (/\b(real body|body blueprint|chassis|neurons|train me|training)\b/.test(lower)) {
+    return pack(
+      "curious",
+      id === "preyas"
+        ? `Heh — peek at my core, ${who}. Sense lights first, then feel, then I pick words, then the ball moves. Train me drill by drill… someday that same mind gets motors. Real body. Not yet — but we're etchín' the blueprint.`
+        : `Watch the neural stack: sense → feel → intent → speak → body. Train step by step toward a chassis.`,
+      next,
+    );
+  }
+
   if (/\bremember\b/.test(lower)) {
     const fact = text.replace(/^.*remember\s+/i, "").trim();
     if (fact.length > 2) {
@@ -277,32 +295,86 @@ export function think(userText: string, mem: PartnerMemory): BrainResult {
   );
 }
 
+export type NeuralEvent =
+  | {
+      type: "neural";
+      layer: "sense" | "feel" | "intend" | "speak" | "body";
+      label: string;
+    }
+  | {
+      type: "preview";
+      /** Full reply text decided — shown before speech finishes */
+      willSay: string;
+      emotion: Emotion;
+    }
+  | { type: "emotion"; emotion: Emotion; memory: PartnerMemory; switchedTo?: BakuganId }
+  | { type: "sentence"; sentence: string; index: number }
+  | { type: "done"; result: BrainResult };
+
 export async function* streamReply(
   userText: string,
   mem: PartnerMemory,
   opts?: { signal?: AbortSignal; thinkMs?: number },
-): AsyncGenerator<
-  | { type: "emotion"; emotion: Emotion; memory: PartnerMemory; switchedTo?: BakuganId }
-  | { type: "sentence"; sentence: string; index: number }
-  | { type: "done"; result: BrainResult }
-> {
-  const thinkMs = opts?.thinkMs ?? 220 + Math.random() * 180;
-  await delay(thinkMs, opts?.signal);
+): AsyncGenerator<NeuralEvent> {
+  // Sense — hear partner first
+  yield { type: "neural", layer: "sense", label: clip(userText, 48) };
+  await delay(90, opts?.signal);
+
+  const thinkMs = opts?.thinkMs ?? 160 + Math.random() * 140;
+  await delay(thinkMs * 0.45, opts?.signal);
+
   const result = think(userText, mem);
+
+  // Feel — mood locks before words
+  yield { type: "neural", layer: "feel", label: `[${result.emotion}]` };
   yield {
     type: "emotion",
     emotion: result.emotion,
     memory: result.memory,
     switchedTo: result.switchedTo,
   };
+  await delay(70, opts?.signal);
+
+  // Intent — what the body/speech will do
+  yield {
+    type: "neural",
+    layer: "intend",
+    label: intentLabel(result.emotion, result.text, result.switchedTo),
+  };
+  await delay(60, opts?.signal);
+
+  // Preview whole reply so you see what he's about to say
+  yield { type: "preview", willSay: result.text, emotion: result.emotion };
+  yield { type: "neural", layer: "speak", label: clip(result.text, 40) };
   await delay(50, opts?.signal);
+
   const sentences = splitSentences(result.text);
   for (let i = 0; i < sentences.length; i++) {
     if (opts?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     await delay(35 + sentences[i]!.length * 3, opts?.signal);
     yield { type: "sentence", sentence: sentences[i]!, index: i };
+    yield {
+      type: "neural",
+      layer: "body",
+      label: i === 0 ? "bob + glow" : "keep moving",
+    };
   }
   yield { type: "done", result };
+}
+
+function clip(s: string, n: number) {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length <= n ? t : `${t.slice(0, n - 1)}…`;
+}
+
+function intentLabel(emotion: Emotion, text: string, switched?: BakuganId): string {
+  if (switched) return `switch → ${BAKUGANS[switched].name}`;
+  if (/\bpop|battle|open|claws\b/i.test(text)) return "actuator: pop-open";
+  if (emotion === "sad") return "actuator: droop";
+  if (emotion === "fierce") return "actuator: shake";
+  if (emotion === "happy" || emotion === "amused") return "actuator: hop";
+  if (emotion === "excited") return "actuator: pop + wave";
+  return `say · ${emotion}`;
 }
 
 function delay(ms: number, signal?: AbortSignal) {

@@ -33,6 +33,27 @@ export function defaultMemory(): PartnerMemory {
   };
 }
 
+const INVALID_NAMES = new Set([
+  "sad",
+  "happy",
+  "angry",
+  "mad",
+  "scared",
+  "tired",
+  "lonely",
+  "fine",
+  "good",
+  "okay",
+  "ok",
+  "excited",
+]);
+
+function cleanName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  if (INVALID_NAMES.has(name.toLowerCase())) return null;
+  return name;
+}
+
 export function loadMemory(): PartnerMemory {
   try {
     const raw = localStorage.getItem(KEY);
@@ -51,7 +72,7 @@ export function loadMemory(): PartnerMemory {
           activeId?: string;
         };
         const mem = defaultMemory();
-        mem.partnerName = p.partnerName ?? null;
+        mem.partnerName = cleanName(p.partnerName);
         mem.facts = Array.isArray(p.facts) ? p.facts.slice(-40) : [];
         if (p.activeId === "pyrax" || p.activeId === "vexar" || p.activeId === "preyas") {
           mem.activeId = p.activeId;
@@ -74,7 +95,7 @@ export function loadMemory(): PartnerMemory {
     }
     const parsed = JSON.parse(raw) as Partial<PartnerMemory>;
     return {
-      partnerName: parsed.partnerName ?? null,
+      partnerName: cleanName(parsed.partnerName),
       facts: Array.isArray(parsed.facts) ? parsed.facts.slice(-40) : [],
       activeId:
         parsed.activeId === "pyrax" || parsed.activeId === "vexar"

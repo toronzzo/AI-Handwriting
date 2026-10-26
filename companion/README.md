@@ -1,16 +1,13 @@
 # Live Bakugan — Preyas-first
 
-Web companion where the **ball** does the acting: hops, wobbles, spins, pops open, and glows — no cartoon face.
+Web companion where the **ball** acts with motion, and you can **see the neurons** firing inside.
 
-## Default: Preyas (Aquos)
+## Outside
+Happy hops · excited pop-open · angry shake · sad droop · talk-bob
 
-Happy → little hops + bright eye  
-Excited → pops open + waves claws  
-Angry → shakes + flashes  
-Sad → droops + dims  
-Talking → bobs with the voice  
-
-Also switchable: **Pyrax** (Pyrus), **Vexar** (Darkus) — same motion language, different shell paint.
+## Inside
+Live neural stack: **SENSE → FEEL → INTENT → SPEAK → BODY**  
+“About to say” preview before speech · step-by-step training drills · body roadmap toward a future real chassis
 
 ```bash
 cd companion
@@ -18,4 +15,4 @@ npm install
 npm run dev
 ```
 
-Reference stills live in `public/refs/`.
+Try: `I'm Alex` → `pop open` → `I feel sad` → `remember I like tides` → `real body`

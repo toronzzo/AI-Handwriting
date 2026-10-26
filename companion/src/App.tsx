@@ -5,10 +5,18 @@ import { streamReply } from "./brain";
 import { loadMemory, saveMemory, type PartnerMemory } from "./memory";
 import type { ChatMessage, Form } from "./types";
 import { BakuganBall } from "./face/BakuganBall";
+import { NeuralCore, type NeuralPulse } from "./face/NeuralCore";
+import { TrainingPanel } from "./TrainingPanel";
 import { playEmotionSound } from "./audio/emotionSounds";
 import { createListener, speechRecognitionAvailable } from "./audio/listen";
 import { warmVoices } from "./audio/speech";
 import { SpeechQueue } from "./audio/speechQueue";
+import {
+  applyTrainEvent,
+  loadTraining,
+  saveTraining,
+  type TrainingState,
+} from "./training";
 import "./App.css";
 
 function uid() {
@@ -18,6 +26,7 @@ function uid() {
 export default function App() {
   const [awake, setAwake] = useState(false);
   const [mem, setMem] = useState<PartnerMemory>(() => loadMemory());
+  const [training, setTraining] = useState<TrainingState>(() => loadTraining());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [partial, setPartial] = useState("");
@@ -28,10 +37,15 @@ export default function App() {
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [streamText, setStreamText] = useState("");
+  const [willSay, setWillSay] = useState("");
+  const [pulses, setPulses] = useState<NeuralPulse[]>([]);
+  const [trace, setTrace] = useState<{ layer: string; label: string }[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const memRef = useRef(mem);
+  const trainingRef = useRef(training);
   const voiceOnRef = useRef(voiceOn);
   const abortRef = useRef<AbortController | null>(null);
   const queueRef = useRef<SpeechQueue | null>(null);
@@ -46,12 +60,22 @@ export default function App() {
   }, [mem]);
 
   useEffect(() => {
+    trainingRef.current = training;
+    saveTraining(training);
+  }, [training]);
+
+  useEffect(() => {
     voiceOnRef.current = voiceOn;
   }, [voiceOn]);
 
   useEffect(() => {
     warmVoices();
-    queueRef.current = new SpeechQueue(setSpeaking);
+    queueRef.current = new SpeechQueue((on) => {
+      setSpeaking(on);
+      if (on) {
+        patchTrain({ kind: "voice" });
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -75,6 +99,25 @@ export default function App() {
     };
   }, []);
 
+  function patchTrain(
+    ev: Parameters<typeof applyTrainEvent>[1],
+  ) {
+    const { state, newly } = applyTrainEvent(trainingRef.current, ev);
+    trainingRef.current = state;
+    setTraining(state);
+    if (newly.length) {
+      setToast(`Unlocked: ${newly.map((d) => d.title).join(", ")}`);
+      window.setTimeout(() => setToast(null), 3200);
+    }
+  }
+
+  function pushNeural(layer: NeuralPulse["layer"], label: string) {
+    const pulse = { layer, label, at: performance.now() };
+    setPulses((p) => [...p.slice(-24), pulse]);
+    setTrace((t) => [...t.slice(-20), { layer, label }]);
+    patchTrain({ kind: "neurons" });
+  }
+
   function bargeIn() {
     queueRef.current?.cancel();
     abortRef.current?.abort();
@@ -90,21 +133,28 @@ export default function App() {
 
     setDraft("");
     setPartial("");
+    setWillSay("");
     setMessages((m) => [...m, { id: uid(), role: "you", text, at: Date.now() }]);
     setBusy(true);
     setEmotion("thinking");
     setStreamText("");
+    patchTrain({ kind: "user", text, mem: memRef.current });
 
     const spoken: string[] = [];
     let activeId = memRef.current.activeId;
 
     try {
       for await (const ev of streamReply(text, memRef.current, { signal: ac.signal })) {
-        if (ev.type === "emotion") {
+        if (ev.type === "neural") {
+          pushNeural(ev.layer, ev.label);
+        } else if (ev.type === "preview") {
+          setWillSay(ev.willSay);
+        } else if (ev.type === "emotion") {
           activeId = ev.memory.activeId;
           setEmotion(ev.emotion);
           setMem(ev.memory);
           playEmotionSound(ev.emotion);
+          patchTrain({ kind: "emotion", emotion: ev.emotion, mem: ev.memory });
           if (ev.switchedTo) setStreamText("");
         } else if (ev.type === "sentence") {
           spoken.push(ev.sentence);
@@ -112,6 +162,7 @@ export default function App() {
           queueRef.current?.enqueue(ev.sentence, BAKUGANS[activeId], voiceOnRef.current);
         } else if (ev.type === "done") {
           setMem(ev.result.memory);
+          patchTrain({ kind: "emotion", emotion: ev.result.emotion, mem: ev.result.memory });
           setMessages((m) => [
             ...m,
             {
@@ -142,14 +193,18 @@ export default function App() {
     setAwake(true);
     setEmotion("happy");
     playEmotionSound("happy");
+    pushNeural("sense", "wake");
+    pushNeural("feel", "[happy]");
+    pushNeural("body", "hop");
     const p = BAKUGANS[next.activeId];
     const body = next.partnerName
       ? next.activeId === "preyas"
-        ? `${next.partnerName}-han! Preyas here — let's bounce.`
+        ? `${next.partnerName}-han! Preyas here — peek my neurons while we bounce.`
         : `${next.partnerName}. ${p.name} here — talk to me.`
       : next.activeId === "preyas"
-        ? `Hey hey! I'm Preyas — your Aquos ball. What do I call ya?`
+        ? `Hey hey! I'm Preyas. Watch the core light up — then tell me your name.`
         : `I'm ${p.name}. Your Bakugan. What should I call you?`;
+    setWillSay(body);
     setMessages([
       {
         id: uid(),
@@ -160,7 +215,10 @@ export default function App() {
         at: Date.now(),
       },
     ]);
-    if (voiceOnRef.current) queueRef.current?.enqueue(body, p, true);
+    if (voiceOnRef.current) {
+      queueRef.current?.enqueue(body, p, true);
+      patchTrain({ kind: "voice" });
+    }
     setTimeout(() => inputRef.current?.focus(), 350);
   }
 
@@ -180,7 +238,7 @@ export default function App() {
           id: uid(),
           role: "bakugan",
           bakuganId: mem.activeId,
-          text: "Mic needs Chrome or Edge. Type away — I'll still hop and glow.",
+          text: "Mic needs Chrome or Edge. Type away — neurons still fire.",
           emotion: "calm",
           at: Date.now(),
         },
@@ -188,16 +246,23 @@ export default function App() {
       return;
     }
     bargeIn();
+    patchTrain({ kind: "mic" });
     const listener = createListener({
       onListeningChange: (on) => {
         setListening(on);
-        if (on) setEmotion("listening");
+        if (on) {
+          setEmotion("listening");
+          pushNeural("sense", "ear open");
+        }
       },
       onPartial: (t) => {
         setPartial(t);
         setEmotion("listening");
       },
-      onReact: () => setEmotion("listening"),
+      onReact: () => {
+        setEmotion("listening");
+        pushNeural("sense", "hearing…");
+      },
       onFinal: (t) => {
         setPartial("");
         void runTurn(t);
@@ -220,7 +285,12 @@ export default function App() {
       forms: { ...m.forms, [m.activeId]: next },
     }));
     setEmotion(next === "battle" ? "excited" : "calm");
-    if (next === "battle") playEmotionSound("excited");
+    if (next === "battle") {
+      playEmotionSound("excited");
+      pushNeural("body", "pop-open");
+    } else {
+      pushNeural("body", "seal");
+    }
   }
 
   function selectPartner(id: BakuganId) {
@@ -242,9 +312,11 @@ export default function App() {
 
       {!awake ? (
         <header className="hero">
-          <p className="eyebrow">Live Bakugan · web</p>
+          <p className="eyebrow">Live Bakugan · train the mind</p>
           <h1 className="brand">{profile.name.toUpperCase()}</h1>
-          <p className="tagline">{profile.tagline}</p>
+          <p className="tagline">
+            Watch the neurons. Train him step by step. Someday — a real body.
+          </p>
           <BakuganBall
             profile={profile}
             emotion={emotion === "idle" ? "happy" : emotion}
@@ -271,125 +343,145 @@ export default function App() {
           <button type="button" className="cta" onClick={() => wake()}>
             Wake {profile.name}
           </button>
-          <p className="hint">
-            No cartoon face — feelings are hops, wobbles, pops, and that little eye glow.
-          </p>
+          <p className="hint">Ball on the outside. Nervous system on the inside.</p>
         </header>
       ) : (
-        <main className="stage">
-          <header className="top">
-            <div>
-              <h1 className="brand-sm">{profile.name.toUpperCase()}</h1>
-              <p className="meta">
-                Bond {mem.bonds[mem.activeId]}
-                {mem.partnerName ? ` · ${mem.partnerName}` : ""} · {form} · {emotion}
-              </p>
-            </div>
-            <div className="controls">
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => setForm(form === "battle" ? "sphere" : "battle")}
-              >
-                {form === "battle" ? "Seal" : "Pop open"}
-              </button>
-              <button
-                type="button"
-                className={`ghost ${voiceOn ? "on" : ""}`}
-                onClick={() => {
-                  setVoiceOn((v) => !v);
-                  queueRef.current?.cancel();
-                }}
-                aria-pressed={voiceOn}
-              >
-                Voice
-              </button>
-              <button
-                type="button"
-                className={`ghost ${micOn ? "on" : ""}`}
-                onClick={toggleMic}
-                aria-pressed={micOn}
-              >
-                Mic
-              </button>
-            </div>
-          </header>
-
-          <div className="roster slim">
-            {BAKUGAN_LIST.map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                className={`roster-pill ${b.id === mem.activeId ? "active" : ""}`}
-                onClick={() => selectPartner(b.id)}
-              >
-                {b.name}
-              </button>
-            ))}
-          </div>
-
-          <BakuganBall
-            profile={profile}
-            emotion={emotion}
-            form={form}
-            listening={listening}
-            speaking={speaking}
-            compact
-          />
-
-          <div className="chat" ref={listRef}>
-            {messages.map((m) => (
-              <div key={m.id} className={`bubble ${m.role}`}>
-                <span className="who">
-                  {m.role === "bakugan"
-                    ? BAKUGANS[m.bakuganId ?? mem.activeId].name
-                    : "You"}
-                </span>
-                <p>{m.text}</p>
-              </div>
-            ))}
-            {busy && streamText && (
-              <div className="bubble bakugan streaming">
-                <span className="who">{profile.name}</span>
-                <p>{streamText}</p>
-              </div>
-            )}
-            {busy && !streamText && (
-              <div className="bubble bakugan typing">
-                <span className="who">{profile.name}</span>
-                <p>
-                  <span className="dot" />
-                  <span className="dot" />
-                  <span className="dot" />
+        <div className="lab">
+          <main className="stage">
+            <header className="top">
+              <div>
+                <h1 className="brand-sm">{profile.name.toUpperCase()}</h1>
+                <p className="meta">
+                  Bond {mem.bonds[mem.activeId]}
+                  {mem.partnerName ? ` · ${mem.partnerName}` : ""} · {form} · {emotion} · XP{" "}
+                  {training.xp}
                 </p>
               </div>
-            )}
-            {partial && (
-              <div className="bubble you partial">
-                <span className="who">You · listening</span>
-                <p>{partial}</p>
+              <div className="controls">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setForm(form === "battle" ? "sphere" : "battle")}
+                >
+                  {form === "battle" ? "Seal" : "Pop open"}
+                </button>
+                <button
+                  type="button"
+                  className={`ghost ${voiceOn ? "on" : ""}`}
+                  onClick={() => {
+                    setVoiceOn((v) => !v);
+                    queueRef.current?.cancel();
+                  }}
+                  aria-pressed={voiceOn}
+                >
+                  Voice
+                </button>
+                <button
+                  type="button"
+                  className={`ghost ${micOn ? "on" : ""}`}
+                  onClick={toggleMic}
+                  aria-pressed={micOn}
+                >
+                  Mic
+                </button>
               </div>
-            )}
-          </div>
+            </header>
 
-          <form className="composer" onSubmit={onSubmit}>
-            <input
-              ref={inputRef}
-              value={draft}
-              onChange={(e) => {
-                bargeIn();
-                setDraft(e.target.value);
-              }}
-              placeholder={`Talk to ${profile.name}… (or say ${others})`}
-              aria-label={`Message ${profile.name}`}
-              autoComplete="off"
+            <div className="roster slim">
+              {BAKUGAN_LIST.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  className={`roster-pill ${b.id === mem.activeId ? "active" : ""}`}
+                  onClick={() => selectPartner(b.id)}
+                >
+                  {b.name}
+                </button>
+              ))}
+            </div>
+
+            <BakuganBall
+              profile={profile}
+              emotion={emotion}
+              form={form}
+              listening={listening}
+              speaking={speaking}
+              compact
             />
-            <button type="submit" disabled={!draft.trim() || busy}>
-              Send
-            </button>
-          </form>
-        </main>
+
+            <div className="neural-wrap">
+              <NeuralCore
+                emotion={emotion}
+                listening={listening}
+                speaking={speaking}
+                thinking={busy}
+                pulses={pulses}
+              />
+            </div>
+
+            <div className="chat" ref={listRef}>
+              {messages.map((m) => (
+                <div key={m.id} className={`bubble ${m.role}`}>
+                  <span className="who">
+                    {m.role === "bakugan"
+                      ? BAKUGANS[m.bakuganId ?? mem.activeId].name
+                      : "You"}
+                  </span>
+                  <p>{m.text}</p>
+                </div>
+              ))}
+              {busy && streamText && (
+                <div className="bubble bakugan streaming">
+                  <span className="who">{profile.name}</span>
+                  <p>{streamText}</p>
+                </div>
+              )}
+              {busy && !streamText && (
+                <div className="bubble bakugan typing">
+                  <span className="who">{profile.name}</span>
+                  <p>
+                    <span className="dot" />
+                    <span className="dot" />
+                    <span className="dot" />
+                  </p>
+                </div>
+              )}
+              {partial && (
+                <div className="bubble you partial">
+                  <span className="who">You · listening</span>
+                  <p>{partial}</p>
+                </div>
+              )}
+            </div>
+
+            <form className="composer" onSubmit={onSubmit}>
+              <input
+                ref={inputRef}
+                value={draft}
+                onChange={(e) => {
+                  bargeIn();
+                  setDraft(e.target.value);
+                }}
+                placeholder={`Talk / train ${profile.name}… (${others}, or “real body”)`}
+                aria-label={`Message ${profile.name}`}
+                autoComplete="off"
+              />
+              <button type="submit" disabled={!draft.trim() || busy}>
+                Send
+              </button>
+            </form>
+          </main>
+
+          <TrainingPanel
+            training={training}
+            willSay={willSay}
+            trace={trace}
+            bond={mem.bonds[mem.activeId]}
+          />
+        </div>
       )}
+
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
