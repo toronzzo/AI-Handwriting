@@ -104,6 +104,6 @@ export const BodyWebViewAPI = {
 };
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: "#030b14" },
+  wrap: { flex: 1, backgroundColor: "#050505" },
   web: { flex: 1, backgroundColor: "transparent" },
 });

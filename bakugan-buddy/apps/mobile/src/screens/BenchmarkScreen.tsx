@@ -79,7 +79,7 @@ export function BenchmarkScreen({ latest }: Props) {
         <Text style={styles.btnT}>{running ? "Running…" : "Run body suite"}</Text>
       </Pressable>
       <Pressable style={styles.btnGhost} onPress={loadLog}>
-        <Text style={styles.btnT}>Reload log</Text>
+        <Text style={styles.btnGhostT}>Reload log</Text>
       </Pressable>
       <Text style={styles.log}>{log || "Log empty — run suite."}</Text>
     </ScrollView>
@@ -91,18 +91,18 @@ function wait(ms: number) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: "#030b14" },
+  wrap: { flex: 1, backgroundColor: "#050505" },
   pad: { padding: 16, paddingBottom: 40 },
-  h: { color: "#5dfff0", fontSize: 20, fontWeight: "800", marginBottom: 8 },
-  p: { color: "#a8c5d4", marginBottom: 12, lineHeight: 20 },
+  h: { color: "#f2f2f2", fontSize: 20, fontWeight: "800", marginBottom: 8 },
+  p: { color: "#b0b0b0", marginBottom: 12, lineHeight: 20 },
   mono: {
-    color: "#9ffff6",
+    color: "#e8e8e8",
     fontFamily: "monospace",
     marginBottom: 16,
     fontSize: 12,
   },
   btn: {
-    backgroundColor: "#1a4fd6",
+    backgroundColor: "#c8c8c8",
     padding: 14,
     alignItems: "center",
     marginBottom: 8,
@@ -110,14 +110,15 @@ const styles = StyleSheet.create({
   btnOff: { opacity: 0.5 },
   btnGhost: {
     borderWidth: 1,
-    borderColor: "rgba(93,255,240,0.35)",
+    borderColor: "rgba(200,200,200,0.35)",
     padding: 12,
     alignItems: "center",
     marginBottom: 16,
   },
-  btnT: { color: "#d8f3ff", fontWeight: "700" },
+  btnT: { color: "#0a0a0a", fontWeight: "700" },
+  btnGhostT: { color: "#e8e8e8", fontWeight: "700" },
   log: {
-    color: "#7bdff2",
+    color: "#c8c8c8",
     fontFamily: "monospace",
     fontSize: 11,
     lineHeight: 16,
