@@ -64,3 +64,11 @@ Open the `.blend` in the Blender GUI to scrub the action and inspect custom prop
 ## Movable parts
 
 `ROOT` · `BODY` · `SHELL_UPPER` · `SHELL_LOWER` · `CORE` · `RING_INNER` · `RING_OUTER` · `EYE` · `PANEL_A/B/C` · `CLAW_*_A/B` (4 claws × 2 bones)
+
+## Micro detail (build)
+
+`build_ripple.py` also stamps toy-scale hardware parented to those bones:
+
+- equator **hinge rivets** · side **gill inserts** · dark **eye socket + metal rim**
+- upper-shell **hex studs** · inner **teal pillars** with collars (show when open)
+- **three-finger** claw tips on each `CLAW_*_B`

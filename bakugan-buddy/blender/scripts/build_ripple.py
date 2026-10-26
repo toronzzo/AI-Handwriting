@@ -171,7 +171,120 @@ def assign_mats():
         "eye": mat("Eye", (1.0, 0.08, 0.08, 1.0), emission=4.0),
         "claw": mat("Claw", (0.42, 0.28, 1.0, 1.0), emission=0.4),
         "panel": mat("Panel", (0.12, 0.4, 0.95, 1.0)),
+        "socket": mat("Socket", (0.02, 0.02, 0.03, 1.0)),
+        "metal": mat("Metal", (0.55, 0.62, 0.7, 1.0)),
     }
+
+
+def add_micro_details(arm: bpy.types.Object, mats: dict) -> list[bpy.types.Object]:
+    """Hinge rivets, gill inserts, eye socket, hex studs, three-finger claws, pillars."""
+    extras: list[bpy.types.Object] = []
+    mapping: list[tuple[bpy.types.Object, str]] = []
+
+    # Equator hinge rivets
+    for i in range(12):
+        a = (i / 12) * math.tau
+        x, y = math.cos(a) * 0.505, math.sin(a) * 0.505
+        bpy.ops.mesh.primitive_uv_sphere_add(radius=0.018, location=(x, y, 0.0))
+        riv = bpy.context.active_object
+        riv.name = f"Rivet{i}"
+        riv.data.materials.append(mats["accent"] if i % 2 == 0 else mats["metal"])
+        extras.append(riv)
+        mapping.append((riv, "BODY"))
+
+    # Side gill inlaid bars (3 per side)
+    for side, sx in (("L", 1.0), ("R", -1.0)):
+        for i in range(3):
+            z = -0.08 + i * 0.1
+            bpy.ops.mesh.primitive_cube_add(size=1.0, location=(sx * 0.42, 0.05, z))
+            gill = bpy.context.active_object
+            gill.name = f"Gill{side}{i}"
+            gill.scale = (0.06, 0.02, 0.028)
+            gill.data.materials.append(mats["accent"])
+            extras.append(gill)
+            mapping.append((gill, "BODY"))
+
+    # Dark eye socket dish + rim
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.09, location=(0.0, -0.38, 0.18))
+    socket = bpy.context.active_object
+    socket.name = "EyeSocket"
+    socket.scale = (1.35, 0.55, 0.85)
+    socket.data.materials.append(mats["socket"])
+    extras.append(socket)
+    mapping.append((socket, "BODY"))
+
+    bpy.ops.mesh.primitive_torus_add(
+        major_radius=0.095, minor_radius=0.008, location=(0.0, -0.38, 0.18)
+    )
+    rim = bpy.context.active_object
+    rim.name = "EyeRim"
+    rim.rotation_euler = Euler((math.radians(90), 0, 0))
+    rim.scale = (1.2, 0.7, 1.0)
+    rim.data.materials.append(mats["metal"])
+    extras.append(rim)
+    mapping.append((rim, "BODY"))
+
+    # Hex panel studs on upper shell
+    hex_pts = [
+        (0.0, 0.05, 0.42),
+        (0.16, 0.12, 0.36),
+        (-0.16, 0.12, 0.36),
+        (0.0, -0.16, 0.38),
+        (0.22, -0.02, 0.32),
+        (-0.22, -0.02, 0.32),
+    ]
+    for i, loc in enumerate(hex_pts):
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.028, depth=0.012, location=loc)
+        hx = bpy.context.active_object
+        hx.name = f"HexStud{i}"
+        hx.rotation_euler = Euler((math.radians(90), 0, 0))
+        # Approximate hex look via 6 verts — keep cylinder, mark accent edge
+        hx.data.materials.append(mats["panel"] if i % 2 else mats["accent"])
+        extras.append(hx)
+        mapping.append((hx, "SHELL_UPPER"))
+
+    # Inner teal pillars (visible when open)
+    for i, x in enumerate((-0.1, 0.0, 0.1)):
+        cyl = cylinder(f"Pillar{i}", 0.022, 0.28)
+        cyl.location = (x, 0.0, 0.0)
+        cyl.data.materials.append(mats["accent"])
+        extras.append(cyl)
+        mapping.append((cyl, "CORE"))
+        for j, z in enumerate((-0.06, 0.06)):
+            bpy.ops.mesh.primitive_torus_add(
+                major_radius=0.03, minor_radius=0.005, location=(x, 0.0, z)
+            )
+            collar = bpy.context.active_object
+            collar.name = f"PillarCollar{i}_{j}"
+            collar.data.materials.append(mats["accent"])
+            extras.append(collar)
+            mapping.append((collar, "CORE"))
+
+    # Three-finger tips on each claw B bone
+    for name, side in (
+        ("CLAW_FL", 1),
+        ("CLAW_FR", -1),
+        ("CLAW_BL", 1),
+        ("CLAW_BR", -1),
+    ):
+        tip_bone = f"{name}_B"
+        base = {
+            "CLAW_FL": Vector((0.72, 0.32, -0.28)),
+            "CLAW_FR": Vector((-0.72, 0.32, -0.28)),
+            "CLAW_BL": Vector((0.65, -0.35, -0.35)),
+            "CLAW_BR": Vector((-0.65, -0.35, -0.35)),
+        }[name]
+        for fi, off in enumerate(((-0.03, 0.02), (0.0, 0.0), (0.03, -0.02))):
+            finger = cone(f"{name}_F{fi}", 0.015, 0.07)
+            finger.location = (base.x + side * off[0], base.y + off[1], base.z - 0.04)
+            finger.data.materials.append(mats["claw"])
+            extras.append(finger)
+            mapping.append((finger, tip_bone))
+
+    bpy.context.view_layer.update()
+    for obj, bone in mapping:
+        parent_bone(obj, arm, bone)
+    return extras
 
 
 def build_meshes(arm: bpy.types.Object, mats: dict) -> list[bpy.types.Object]:
@@ -341,6 +454,7 @@ def main() -> None:
     mats = assign_mats()
     arm = create_armature()
     build_meshes(arm, mats)
+    add_micro_details(arm, mats)
     add_brain_properties(arm)
     setup_world_camera()
 
