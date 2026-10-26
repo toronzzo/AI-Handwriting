@@ -4,17 +4,18 @@ Neural network classifier (CNN variant) trained with backpropagation.
 
 ---
 
-## Pyrax — personal Bakugan
+## Live Bakugan (web-first)
 
-Talk with **Pyrax**, your fire-core Bakugan partner.
+Talk with **Pyrax** (Pyrus), **Namiq** (Aquos), or **Vexar** (Darkus).
+Face runs at 60fps separately from the brain; mood tags fire first; speech is sentence-streamed.
 
 | Path | What |
 | --- | --- |
-| [`companion/`](./companion) | Animated sphere + chat UI (open in browser) |
-| [`bakugan/`](./bakugan) | Agent SDK companion for Cursor playground / hosting |
+| [`companion/`](./companion) | Live web companion (face + mic + voices) |
+| [`bakugan/`](./bakugan) | Agent SDK Pyrax for Cursor playground / hosting |
 
 ```bash
-# Visual chat companion
+# Live web companion
 cd companion && npm install && npm run dev
 
 # LLM Bakugan (needs Cursor login)
