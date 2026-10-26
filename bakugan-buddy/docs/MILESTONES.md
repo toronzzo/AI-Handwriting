@@ -27,3 +27,12 @@
 4. Interrupt mid-sentence: Web Audio source stops; console logs `[speech] barge-in … ms`.
 5. Joke vs sad: different Piper `lengthScale` / voice (or espeak rate/pitch fallback).
 6. Kill sidecar: in-character “core’s offline” toast; ball still 60 fps.
+
+## Train-the-mind coach (web lab)
+
+1. Wake Preyas — next drill is named (or “tell me your name”).
+2. Tap **Try this** / a drill in the panel — composer fills or a turn fires.
+3. Finish a drill — unlock toast + a spoken coach line pointing at the next one.
+4. Type `what's next` / `train me` — he recites the current drill.
+5. After ~28s idle — one quiet nudge, then he stays quiet.
+6. Chassis spec appears once stage 5 unlocks (`real body` / Bond 60).

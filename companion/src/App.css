@@ -442,9 +442,10 @@ body {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 1.25rem;
+  bottom: 5.5rem;
   transform: translateX(-50%);
   z-index: 20;
+  max-width: min(36rem, calc(100vw - 2rem));
   padding: 0.65rem 1rem;
   font-family: var(--font-display);
   font-size: 0.8rem;
@@ -453,6 +454,67 @@ body {
   color: var(--ink);
   background: linear-gradient(135deg, var(--c-secondary), var(--c-primary));
   animation: fade-up 0.35s ease both;
+}
+
+.app.asleep .toast {
+  bottom: 1.25rem;
+}
+
+.facts,
+.chassis-spec {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+}
+
+.facts li,
+.chassis-spec small {
+  color: var(--ash-dim);
+}
+
+.chassis-spec strong {
+  display: block;
+  font-size: 0.78rem;
+}
+
+.try-drill,
+.drill-btn {
+  display: block;
+  margin-top: 0.45rem;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--c-primary) 16%, transparent);
+  color: var(--c-ash);
+  font-family: var(--font-body);
+  cursor: pointer;
+  text-align: left;
+}
+
+.try-drill {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: var(--font-display);
+}
+
+.drill-btn {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.drills li.todo {
+  opacity: 1;
+  cursor: pointer;
+}
+
+.drills li.todo:hover strong {
+  color: var(--c-secondary);
 }
 
 @media (max-width: 860px) {

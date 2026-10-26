@@ -9,6 +9,8 @@ import {
 import type { PartnerMemory } from "./memory";
 import type { Form } from "./types";
 import { pingStudio, streamStudioTokens } from "./studio";
+import { wantsNextDrill, type Drill } from "./training";
+import { coachNextLine } from "./coach";
 
 export type BrainResult = {
   tagged: string;
@@ -90,7 +92,11 @@ function pack(
   return { tagged: `[${emotion}] ${text}`, emotion, text, memory, switchedTo };
 }
 
-export function think(userText: string, mem: PartnerMemory): BrainResult {
+export function think(
+  userText: string,
+  mem: PartnerMemory,
+  opts?: { nextDrill?: Drill | null },
+): BrainResult {
   const text = userText.trim();
   const lower = text.toLowerCase();
   let next = { ...mem };
@@ -247,6 +253,11 @@ export function think(userText: string, mem: PartnerMemory): BrainResult {
     return pack("curious", `Active: ${profile.name}. Bonds — ${roster}.`, next);
   }
 
+  if (wantsNextDrill(text) && opts?.nextDrill) {
+    const line = coachNextLine(id, opts.nextDrill, next.partnerName);
+    return pack(line.emotion, line.text, next);
+  }
+
   if (/\b(real body|body blueprint|chassis|neurons|train me|training)\b/.test(lower)) {
     return pack(
       "curious",
@@ -365,7 +376,7 @@ export type NeuralEvent =
 export async function* streamReply(
   userText: string,
   mem: PartnerMemory,
-  opts?: { signal?: AbortSignal; thinkMs?: number },
+  opts?: { signal?: AbortSignal; thinkMs?: number; nextDrill?: Drill | null },
 ): AsyncGenerator<NeuralEvent> {
   yield { type: "neural", layer: "sense", label: clip(userText, 48) };
 
@@ -377,7 +388,7 @@ export async function* streamReply(
     const health = await pingStudio();
     if (health?.llm?.ready) {
       usedLlm = true;
-      yield* streamLlmReply(userText, effects, profile, opts?.signal);
+      yield* streamLlmReply(userText, effects, profile, opts?.signal, opts?.nextDrill);
       return;
     }
   } catch (err) {
@@ -396,6 +407,7 @@ async function* streamLlmReply(
   effects: { memory: PartnerMemory; switchedTo?: BakuganId },
   profile: (typeof BAKUGANS)[BakuganId],
   signal?: AbortSignal,
+  nextDrill?: Drill | null,
 ): AsyncGenerator<NeuralEvent> {
   yield { type: "neural", layer: "intend", label: "llama.cpp · Qwen2.5-3B" };
 
@@ -425,7 +437,12 @@ async function* streamLlmReply(
       {
         text: userText,
         partnerName: effects.memory.partnerName,
-        facts: effects.memory.facts,
+        facts: [
+          ...effects.memory.facts,
+          ...(nextDrill
+            ? [`Next training drill: ${nextDrill.title} — ${nextDrill.how}`]
+            : []),
+        ],
         form: effects.memory.forms[effects.memory.activeId],
         character: {
           name: profile.name,
@@ -500,12 +517,12 @@ async function* streamLlmReply(
 async function* streamMockReply(
   userText: string,
   mem: PartnerMemory,
-  opts?: { signal?: AbortSignal; thinkMs?: number },
+  opts?: { signal?: AbortSignal; thinkMs?: number; nextDrill?: Drill | null },
 ): AsyncGenerator<NeuralEvent> {
   const thinkMs = opts?.thinkMs ?? 160 + Math.random() * 140;
   await delay(thinkMs * 0.45, opts?.signal);
 
-  const result = think(userText, mem);
+  const result = think(userText, mem, { nextDrill: opts?.nextDrill });
 
   yield { type: "neural", layer: "feel", label: `[${result.emotion}]` };
   yield {
