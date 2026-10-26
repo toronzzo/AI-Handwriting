@@ -353,7 +353,7 @@ export function applyLocalEffects(
     }
   }
   next = bump(next, id, 1);
-  return { memory: next, switchedTo };
+  return { memory: next };
 }
 
 export type NeuralEvent =
