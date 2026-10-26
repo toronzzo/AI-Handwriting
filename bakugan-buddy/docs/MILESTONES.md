@@ -17,3 +17,4 @@
 3. HUD shows fps ≈ 60, `setEmotion` reaction ≪ 1 ms (body path).
 4. Benchmark button appends a line to local metrics log.
 5. `react("[excited] …")` pops open + sets mood.
+6. **Anime fake-test (mute):** a friend guesses ≥7/9 moods from motion alone (`docs/PREYAS_FROM_ANIME.md` §6).
