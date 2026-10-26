@@ -1,21 +1,27 @@
-/** Shared mood parser + motion targets for body.html / Skia / web.
+/** Shared motion targets for body.html / Skia / web.
+ * Mood vocabulary: @bakugan-buddy/mood
  * Ground truth: docs/PREYAS_FROM_ANIME.md — emotion via body, not a cartoon face.
  */
 
-export type Mood =
-  | "idle"
-  | "listening"
-  | "thinking"
-  | "happy"
-  | "excited"
-  | "calm"
-  | "sad"
-  | "curious"
-  | "fierce"
-  | "mysterious"
-  | "amused"
-  | "surprised"
-  | "determined";
+export {
+  CANONICAL_MOODS,
+  DEFAULT_MOOD,
+  LEGACY_ALIASES,
+  StreamingMoodParser,
+  isCanonicalMood,
+  moodLookupKey,
+  moodPromptLine,
+  normalizeMood,
+  parseTagged,
+  react,
+  splitSentences,
+  stripThink,
+  type Mood,
+  type StreamSnapshot,
+  type TaggedParse,
+} from "../../mood/src/index.ts";
+
+import { normalizeMood, type Mood } from "../../mood/src/index.ts";
 
 export type ThemeId = "aquos" | "pyrus" | "darkus" | "haos" | "subterra" | "ventus";
 
@@ -93,63 +99,6 @@ export const THEMES: Record<ThemeId, Theme> = {
   },
 };
 
-const MOODS = new Set<string>([
-  "idle",
-  "listening",
-  "thinking",
-  "happy",
-  "excited",
-  "calm",
-  "sad",
-  "curious",
-  "fierce",
-  "mysterious",
-  "amused",
-  "surprised",
-  "determined",
-]);
-
-const ALIASES: Record<string, Mood> = {
-  angry: "fierce",
-  mad: "fierce",
-  rage: "fierce",
-  neutral: "idle",
-  normal: "idle",
-  joy: "happy",
-  glad: "happy",
-  smile: "happy",
-  laugh: "happy",
-  hype: "excited",
-  hyped: "excited",
-  wow: "excited",
-  upset: "sad",
-  cry: "sad",
-  crying: "sad",
-  shocked: "surprised",
-  shock: "surprised",
-  surprise: "surprised",
-  think: "thinking",
-  hmm: "thinking",
-  listen: "listening",
-  battle: "determined",
-  brave: "determined",
-  fight: "determined",
-  focused: "determined",
-};
-
-export function normalizeMood(m: string): Mood {
-  const x = m.toLowerCase().trim();
-  if (ALIASES[x]) return ALIASES[x]!;
-  return (MOODS.has(x) ? x : "curious") as Mood;
-}
-
-/** Parse `[mood] text` — product contract for every LLM reply. */
-export function react(tagged: string): { emotion: Mood; text: string } {
-  const m = tagged.trim().match(/^\[([a-z]+)\]\s*([\s\S]*)$/i);
-  if (m) return { emotion: normalizeMood(m[1]!), text: m[2]!.trim() };
-  return { emotion: "curious", text: tagged.trim() };
-}
-
 export type MotionTargets = {
   open: number;
   droop: number;
@@ -159,13 +108,9 @@ export type MotionTargets = {
   hopDrive: number;
   hopAmp: number;
   shake: number;
-  /** Forward lean toward partner (listening / fierce). */
   lean: number;
-  /** Soft idle rock amplitude. */
   rock: number;
-  /** Aura / attribute energy 0–1. */
   aura: number;
-  /** Higher = springier open (anime magnet snap). */
   openSnap: number;
 };
 
@@ -194,12 +139,13 @@ const DEFAULT_STYLE: Required<MotionStyle> = {
  * See docs/PREYAS_FROM_ANIME.md §3.
  */
 export function motionTargets(
-  emotion: Mood,
+  emotion: Mood | string,
   form: "sphere" | "battle",
   listening: boolean,
   talking: boolean,
   style: MotionStyle = {},
 ): MotionTargets {
+  const mood = normalizeMood(emotion);
   const s = { ...DEFAULT_STYLE, ...style };
   const forceOpen = form === "battle" ? 1 : 0;
   let open = forceOpen;
@@ -215,9 +161,8 @@ export function motionTargets(
   let aura = 0;
   let openSnap = 0.45 + 0.4 * s.openSnap;
 
-  switch (emotion) {
+  switch (mood) {
     case "happy":
-    case "amused":
       hopDrive = 7.5 * s.bounce;
       hopAmp = 0.85 * s.bounce;
       eye = 1;
@@ -235,7 +180,7 @@ export function motionTargets(
       openSnap = 0.85 + 0.15 * s.openSnap;
       rock = 0;
       break;
-    case "determined":
+    case "battle":
       open = Math.max(open, 1);
       claw = 0.35;
       eye = 1;
@@ -244,7 +189,7 @@ export function motionTargets(
       openSnap = 0.9;
       rock = 0;
       break;
-    case "fierce":
+    case "angry":
       shake = 0.55 * s.angryShake;
       eye = 0.95;
       open = Math.max(open, 0.35);
@@ -259,15 +204,9 @@ export function motionTargets(
       rock = 0.04;
       lean = -0.15;
       break;
-    case "calm":
-    case "idle":
+    case "neutral":
       eye = 0.5;
       rock = 0.1 + 0.2 * s.idleRock;
-      break;
-    case "curious":
-      eye = 0.8;
-      wobble = 0.25;
-      open = Math.max(open, 0.15);
       break;
     case "surprised":
       open = Math.max(open, 1);
@@ -277,11 +216,6 @@ export function motionTargets(
       aura = 0.35;
       openSnap = 1;
       rock = 0;
-      break;
-    case "mysterious":
-      eye = 0.4;
-      wobble = 0.12;
-      rock = 0.06;
       break;
     case "listening":
       eye = 0.85;
@@ -299,7 +233,9 @@ export function motionTargets(
     default:
       break;
   }
+
   if (talking && open < 0.2) open = Math.max(open, 0.12);
+
   return {
     open,
     droop,

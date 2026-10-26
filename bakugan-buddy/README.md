@@ -40,6 +40,10 @@ node bakugan-buddy/scripts/sync-body.mjs
 
 Use Expo Dev Build / `npx expo run:android`. Expo Go may load WebView HTML; native Skia port is next.
 
+## Mood vocabulary
+
+Single source of truth: [`packages/mood`](./packages/mood) — `neutral | happy | excited | angry | sad | surprised | thinking | listening | battle` (plus `amused` → happy). Legacy tags (`fierce`, `calm`, `curious`, …) normalize automatically. Streaming parser strips `<think>…</think>` so it is never spoken; mood fires as soon as `]` arrives.
+
 ## Characters
 
 Start pack: `packages/character-packs/ripple.json` (**original** Aquos joker for public-safe releases).  

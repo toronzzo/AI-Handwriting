@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bakugan-buddy.local/character-pack.schema.json",
+  "title": "BakuganBuddyCharacterPack",
+  "type": "object",
+  "required": ["id", "name", "allowedMoods"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "allowedMoods": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "../mood/moods.schema.json" },
+      "uniqueItems": true
+    },
+    "personalityPrompt": { "type": "string" },
+    "speechStyle": { "type": "string" },
+    "catchphrases": { "type": "array", "items": { "type": "string" } },
+    "bannedBehaviors": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

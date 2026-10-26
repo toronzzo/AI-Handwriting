@@ -98,14 +98,14 @@ export function BakuganBall({
       m.wobble = ease(m.wobble, t.wobble, 6);
       m.claw = ease(m.claw, t.claw, 10);
 
-      // Hop is a driven spring when happy/amused
+      // Hop is a driven spring when happy
       if (t.hopDrive > 0) {
         m.hop = Math.abs(Math.sin(m.breath * t.hopDrive)) * t.hopAmp;
       } else {
         m.hop = ease(m.hop, 0, 8);
       }
 
-      // Shake / flash when fierce
+      // Shake / flash when angry
       if (t.shake) {
         m.shake = Math.sin(m.breath * 38) * t.shake;
         m.flash = 0.5 + 0.5 * Math.sin(m.breath * 22);
@@ -122,11 +122,11 @@ export function BakuganBall({
         m.bob = ease(m.bob, 0, 7);
       }
 
-      // Thinking spin
+      // Thinking sway / happy spin
       if (s.emotion === "thinking") {
-        m.spin += dt * 1.6;
-      } else if (s.emotion === "curious") {
         m.spin += dt * 0.35;
+      } else if (s.emotion === "happy") {
+        m.spin += dt * 1.6;
       } else {
         m.spin *= 1 - Math.min(1, dt * 2);
       }
@@ -175,7 +175,6 @@ function targetsFor(
 
   switch (emotion) {
     case "happy":
-    case "amused":
       hopDrive = 7.5;
       hopAmp = 0.85;
       eye = 1;
@@ -188,7 +187,7 @@ function targetsFor(
       hopDrive = 5;
       hopAmp = 0.35;
       break;
-    case "fierce":
+    case "angry":
       shake = 0.55;
       eye = 0.95;
       open = Math.max(open, 0.35);
@@ -198,18 +197,20 @@ function targetsFor(
       eye = 0.22;
       wobble = 0.05;
       break;
-    case "calm":
+    case "neutral":
       eye = 0.5;
       wobble = 0.06;
       break;
-    case "curious":
-      eye = 0.8;
-      wobble = 0.25;
-      open = Math.max(open, 0.15);
+    case "surprised":
+      open = Math.max(open, 1);
+      eye = 1;
+      hopDrive = 2;
+      hopAmp = 0.2;
       break;
-    case "mysterious":
-      eye = 0.4;
-      wobble = 0.12;
+    case "battle":
+      open = Math.max(open, 1);
+      claw = 0.35;
+      eye = 1;
       break;
     case "listening":
       eye = 0.85;
@@ -218,6 +219,7 @@ function targetsFor(
     case "thinking":
       eye = 0.45;
       wobble = 0.15;
+      open = Math.max(open, 0.15);
       break;
     default:
       break;

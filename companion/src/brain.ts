@@ -115,7 +115,7 @@ export function think(
   ) {
     next = { ...next, activeId: switchTo };
     const emotion: Emotion =
-      switchTo === "preyas" ? "excited" : switchTo === "pyrax" ? "fierce" : "mysterious";
+      switchTo === "preyas" ? "excited" : switchTo === "pyrax" ? "angry" : "neutral";
     const line =
       switchTo === "preyas"
         ? `Heh — Preyas rollin' in! Miss me, ${who}?`
@@ -141,7 +141,7 @@ export function think(
     if (id === "pyrax") {
       return pack("happy", `${name}. Burned into my core. I'm Pyrax — say the word.`, next);
     }
-    return pack("mysterious", `${name}. Noted. I'm Vexar. I don't forget.`, next);
+    return pack("neutral", `${name}. Noted. I'm Vexar. I don't forget.`, next);
   }
 
   if (/\b(open|battle|stand|transform|pop)\b/.test(lower)) {
@@ -150,15 +150,15 @@ export function think(
       return pack("excited", `Whoop — poppin' open! Claws out, ${who}!`, next);
     }
     if (id === "pyrax") {
-      return pack("fierce", `Battle form! Ready when you are, ${who}.`, next);
+      return pack("angry", `Battle form! Ready when you are, ${who}.`, next);
     }
-    return pack("fierce", `Unfurling. Point me, ${who}.`, next);
+    return pack("angry", `Unfurling. Point me, ${who}.`, next);
   }
 
   if (/\b(rest|sleep|sphere|close|fold|chill)\b/.test(lower)) {
     next = setForm(next, id, "sphere");
     return pack(
-      "calm",
+      "neutral",
       id === "preyas"
         ? `Sealin' up… still peekin' though. Don't you worry.`
         : `Back to sphere. Still here.`,
@@ -181,7 +181,7 @@ export function think(
     if (id === "pyrax") {
       return pack("excited", `Hey${next.partnerName ? `, ${next.partnerName}` : ""}. Core's warm — talk.`, next);
     }
-    return pack("mysterious", `…Hey${next.partnerName ? `, ${next.partnerName}` : ""}. Go on.`, next);
+    return pack("neutral", `…Hey${next.partnerName ? `, ${next.partnerName}` : ""}. Go on.`, next);
   }
 
   if (/\b(how are you|how'?s it going|you ok)\b/.test(lower)) {
@@ -208,7 +208,7 @@ export function think(
 
   if (/\b(mad|angry|annoyed|furious)\b/.test(lower)) {
     return pack(
-      "fierce",
+      "angry",
       id === "preyas"
         ? `Ooh, I feel that heat! Want me to shake it out with ya?`
         : `Yeah. Let's put that fire somewhere useful.`,
@@ -229,7 +229,7 @@ export function think(
 
   if (/\b(joke|funny|laugh)\b/.test(lower)) {
     return pack(
-      "amused",
+      "happy",
       pick([
         `Why'd the Bakugan bring a ladder? To raise its G-Power! Wahaha!`,
         `Gate Card walks into an arena… and I already popped open for the punchline.`,
@@ -240,7 +240,7 @@ export function think(
 
   if (/\b(who are you|what are you|your name)\b/.test(lower)) {
     return pack(
-      id === "preyas" ? "excited" : id === "pyrax" ? "fierce" : "mysterious",
+      id === "preyas" ? "excited" : id === "pyrax" ? "angry" : "neutral",
       `I'm ${profile.name} — ${profile.attribute}. ${profile.tagline}`,
       next,
     );
@@ -250,7 +250,7 @@ export function think(
     const roster = (["preyas", "pyrax", "vexar"] as BakuganId[])
       .map((k) => `${BAKUGANS[k].name} ${next.bonds[k]}`)
       .join(" · ");
-    return pack("curious", `Active: ${profile.name}. Bonds — ${roster}.`, next);
+    return pack("thinking", `Active: ${profile.name}. Bonds — ${roster}.`, next);
   }
 
   if (wantsNextDrill(text) && opts?.nextDrill) {
@@ -260,7 +260,7 @@ export function think(
 
   if (/\b(real body|body blueprint|chassis|neurons|train me|training)\b/.test(lower)) {
     return pack(
-      "curious",
+      "thinking",
       id === "preyas"
         ? `Heh — peek at my core, ${who}. Sense lights first, then feel, then I pick words, then the ball moves. Train me drill by drill… someday that same mind gets motors. Real body. Not yet — but we're etchín' the blueprint.`
         : `Watch the neural stack: sense → feel → intent → speak → body. Train step by step toward a chassis.`,
@@ -279,7 +279,7 @@ export function think(
   next = bump(next, id, 1);
   if (id === "preyas") {
     return pack(
-      "curious",
+      "thinking",
       pick([
         `Mm-hm, I'm listenin', ${who}. Keep talkin' — I'll bounce along.`,
         `Say now… what's the real splash we need to make?`,
@@ -290,7 +290,7 @@ export function think(
   }
   if (id === "pyrax") {
     return pack(
-      "curious",
+      "thinking",
       pick([
         `I'm with you, ${who}. Pep talk, plan, or listening?`,
         `Fire says go. What's the move?`,
@@ -299,7 +299,7 @@ export function think(
     );
   }
   return pack(
-    "mysterious",
+    "neutral",
     pick([
       `Interesting, ${who}. Say the part you haven't said yet.`,
       `The quiet between words — that's where I listen.`,
@@ -565,8 +565,8 @@ function intentLabel(emotion: Emotion, text: string, switched?: BakuganId): stri
   if (switched) return `switch → ${BAKUGANS[switched].name}`;
   if (/\bpop|battle|open|claws\b/i.test(text)) return "actuator: pop-open";
   if (emotion === "sad") return "actuator: droop";
-  if (emotion === "fierce") return "actuator: shake";
-  if (emotion === "happy" || emotion === "amused") return "actuator: hop";
+  if (emotion === "angry") return "actuator: shake";
+  if (emotion === "happy") return "actuator: hop";
   if (emotion === "excited") return "actuator: pop + wave";
   return `say · ${emotion}`;
 }

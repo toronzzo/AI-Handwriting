@@ -15,7 +15,8 @@ export function playEmotionSound(emotion: Emotion) {
     const now = c.currentTime;
     switch (emotion) {
       case "excited":
-      case "fierce":
+      case "angry":
+      case "battle":
         growl(c, now, 180, 0.12);
         blip(c, now + 0.05, 520, 0.08);
         break;
@@ -23,21 +24,19 @@ export function playEmotionSound(emotion: Emotion) {
         blip(c, now, 660, 0.07);
         blip(c, now + 0.08, 880, 0.06);
         break;
-      case "amused":
-        laugh(c, now);
-        break;
       case "sad":
         blip(c, now, 220, 0.12, "sine", 0.08);
         blip(c, now + 0.12, 180, 0.14, "sine", 0.06);
         break;
-      case "curious":
+      case "thinking":
         blip(c, now, 480, 0.06);
         blip(c, now + 0.07, 620, 0.05);
         break;
-      case "mysterious":
-        growl(c, now, 90, 0.18);
+      case "surprised":
+        blip(c, now, 720, 0.05);
+        blip(c, now + 0.04, 880, 0.04);
         break;
-      case "calm":
+      case "neutral":
         blip(c, now, 320, 0.14, "sine", 0.05);
         break;
       case "listening":
@@ -98,10 +97,4 @@ function growl(c: AudioContext, when: number, freq: number, dur: number) {
   g.connect(c.destination);
   o.start(when);
   o.stop(when + dur + 0.02);
-}
-
-function laugh(c: AudioContext, when: number) {
-  [520, 600, 540, 680].forEach((f, i) => {
-    blip(c, when + i * 0.07, f, 0.05, "square", 0.035);
-  });
 }

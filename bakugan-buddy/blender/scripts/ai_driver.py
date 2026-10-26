@@ -30,30 +30,28 @@ DEFAULT_BLEND = ROOT / "out" / "ripple_rigged.blend"
 RENDERS = ROOT / "renders"
 
 MOODS = {
-    "idle",
-    "listening",
-    "thinking",
+    "neutral",
     "happy",
     "excited",
-    "calm",
+    "angry",
     "sad",
-    "curious",
-    "fierce",
-    "mysterious",
-    "amused",
     "surprised",
-    "determined",
+    "thinking",
+    "listening",
+    "battle",
 }
 
 ALIASES = {
-    "angry": "fierce",
-    "mad": "fierce",
-    "neutral": "idle",
-    "joy": "happy",
-    "hype": "excited",
-    "listen": "listening",
-    "think": "thinking",
-    "battle": "determined",
+    "fierce": "angry",
+    "mad": "angry",
+    "rage": "angry",
+    "calm": "neutral",
+    "idle": "neutral",
+    "mysterious": "neutral",
+    "curious": "thinking",
+    "determined": "battle",
+    "amused": "happy",
+    "battle_form": "battle",
 }
 
 
@@ -61,14 +59,14 @@ def normalize_mood(m: str) -> str:
     x = m.lower().strip()
     if x in ALIASES:
         return ALIASES[x]
-    return x if x in MOODS else "curious"
+    return x if x in MOODS else "thinking"
 
 
 def react(tagged: str) -> tuple[str, str]:
     m = re.match(r"^\[([a-z]+)\]\s*([\s\S]*)$", tagged.strip(), re.I)
     if m:
         return normalize_mood(m.group(1)), m.group(2).strip()
-    return "curious", tagged.strip()
+    return "thinking", tagged.strip()
 
 
 def motion_targets(emotion: str, listening: bool, talking: bool) -> dict[str, float]:
@@ -83,28 +81,24 @@ def motion_targets(emotion: str, listening: bool, talking: bool) -> dict[str, fl
     rock = 0.12
     aura = 0.0
 
-    if emotion in ("happy", "amused"):
+    if emotion == "happy":
         hop, eye, rock, aura = 0.85, 1.0, 0.12, 0.15
     elif emotion == "excited":
         open_, claw, eye, hop, aura, rock = 1.0, 1.0, 1.0, 0.35, 0.45, 0.0
-    elif emotion == "determined":
+    elif emotion == "battle":
         open_, claw, eye, aura, lean, rock = 1.0, 0.35, 1.0, 1.0, 0.4, 0.0
-    elif emotion == "fierce":
+    elif emotion == "angry":
         shake, eye, open_, lean, aura, rock = 0.55, 0.95, 0.35, 0.7, 0.7, 0.0
     elif emotion == "sad":
         droop, eye, rock, lean = 1.0, 0.22, 0.04, -0.15
-    elif emotion in ("calm", "idle"):
+    elif emotion == "neutral":
         eye, rock = 0.5, 0.18
-    elif emotion == "curious":
-        eye, open_ = 0.8, 0.15
     elif emotion == "surprised":
         open_, eye, hop, aura, rock = 1.0, 1.0, 0.2, 0.35, 0.0
-    elif emotion == "mysterious":
-        eye, rock = 0.4, 0.06
     elif emotion == "listening":
         eye, lean, open_, rock = 0.85, 0.8, 0.12, 0.05
     elif emotion == "thinking":
-        eye, lean, rock = 0.45, -0.1, 0.18
+        eye, lean, rock, open_ = 0.45, -0.1, 0.18, 0.15
 
     if listening:
         lean = max(lean, 0.55)
@@ -144,8 +138,6 @@ def decide_intent(emotion: str, targets: dict[str, float], listening: bool, talk
         return "SPEAK"
     if emotion == "thinking":
         return "THINK"
-    if emotion == "curious":
-        return "GLANCE"
     return "REST"
 
 
@@ -159,7 +151,7 @@ INTENT_DESC = {
     "DEPLOY_SPEAK": "Deployed claws + speaking — dramatic show-off line.",
     "HOP": "Happy hop with landing squash.",
     "HOP_SPEAK": "Hopping while delivering a line.",
-    "SHAKE": "Fierce rattle — protective anger.",
+    "SHAKE": "Angry rattle — protective anger.",
     "DROOP": "Sad sink — energy low, loyal soft.",
     "THINK": "Slow rock; eyes dim — working it out.",
     "GLANCE": "Slight open + wobble — curious peek.",
@@ -345,7 +337,7 @@ def setup_render(path: Path, frames: int) -> None:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Ripple AI Blender driver")
     p.add_argument("--react", type=str, default="", help='e.g. "[excited] Whoop!"')
-    p.add_argument("--mood", type=str, default="idle")
+    p.add_argument("--mood", type=str, default="neutral")
     p.add_argument("--line", type=str, default="")
     p.add_argument("--listen", action="store_true")
     p.add_argument("--talking", action="store_true")

@@ -15,13 +15,13 @@
     "espeakRate": 210,
     "espeakPitch": 70
   },
-  "amused": {
+  "angry": {
     "engine": "piper",
-    "voice": "en_US-lessac-medium",
-    "lengthScale": 0.9,
-    "noiseW": 0.75,
-    "espeakRate": 185,
-    "espeakPitch": 60
+    "voice": "en_US-ryan-medium",
+    "lengthScale": 0.88,
+    "noiseW": 0.8,
+    "espeakRate": 190,
+    "espeakPitch": 25
   },
   "sad": {
     "engine": "piper",
@@ -31,15 +31,7 @@
     "espeakRate": 120,
     "espeakPitch": 30
   },
-  "fierce": {
-    "engine": "piper",
-    "voice": "en_US-ryan-medium",
-    "lengthScale": 0.88,
-    "noiseW": 0.8,
-    "espeakRate": 190,
-    "espeakPitch": 25
-  },
-  "calm": {
+  "neutral": {
     "engine": "piper",
     "voice": "en_US-lessac-medium",
     "lengthScale": 1.05,
@@ -47,7 +39,7 @@
     "espeakRate": 145,
     "espeakPitch": 40
   },
-  "curious": {
+  "thinking": {
     "engine": "piper",
     "voice": "en_US-lessac-medium",
     "lengthScale": 1.0,
@@ -55,20 +47,28 @@
     "espeakRate": 160,
     "espeakPitch": 50
   },
-  "mysterious": {
-    "engine": "piper",
-    "voice": "en_US-ryan-medium",
-    "lengthScale": 1.08,
-    "noiseW": 0.45,
-    "espeakRate": 130,
-    "espeakPitch": 20
-  },
-  "idle": {
+  "surprised": {
     "engine": "piper",
     "voice": "en_US-lessac-medium",
-    "lengthScale": 1.0,
-    "noiseW": 0.6,
-    "espeakRate": 155,
+    "lengthScale": 0.85,
+    "noiseW": 0.8,
+    "espeakRate": 200,
+    "espeakPitch": 65
+  },
+  "listening": {
+    "engine": "piper",
+    "voice": "en_US-lessac-medium",
+    "lengthScale": 1.02,
+    "noiseW": 0.55,
+    "espeakRate": 150,
     "espeakPitch": 45
+  },
+  "battle": {
+    "engine": "piper",
+    "voice": "en_US-ryan-medium",
+    "lengthScale": 0.86,
+    "noiseW": 0.85,
+    "espeakRate": 195,
+    "espeakPitch": 30
   }
 }

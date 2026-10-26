@@ -11,7 +11,7 @@ type Props = {
   emotion?: Mood;
 };
 
-export function BodySkia({ emotion = "idle" }: Props) {
+export function BodySkia({ emotion = "neutral" }: Props) {
   return (
     <View style={styles.box}>
       <Text style={styles.t}>Skia body port</Text>

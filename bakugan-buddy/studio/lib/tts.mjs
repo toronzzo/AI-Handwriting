@@ -19,10 +19,27 @@ export function ttsStatus() {
   };
 }
 
+const MOOD_ALIASES = {
+  fierce: "angry",
+  calm: "neutral",
+  idle: "neutral",
+  mysterious: "neutral",
+  curious: "thinking",
+  determined: "battle",
+  amused: "happy",
+  mad: "angry",
+  rage: "angry",
+};
+
+export function normalizeMoodKey(mood) {
+  const x = String(mood || "neutral").toLowerCase().trim();
+  return MOOD_ALIASES[x] || x;
+}
+
 export function voiceForMood(mood) {
-  const key = mood === "angry" ? "fierce" : mood;
+  const key = normalizeMoodKey(mood);
   const map = voices.moods || voices;
-  return map[key] || map.idle || map.happy;
+  return map[key] || map.neutral || map.happy;
 }
 
 /**
@@ -32,7 +49,12 @@ export function voiceForMood(mood) {
 export async function synthesize({ text, mood = "happy", engine } = {}) {
   const cfg = voiceForMood(mood);
   const want = engine || cfg.engine || "piper";
-  const clean = String(text || "").replace(/\[([a-z]+)\]/gi, "").trim();
+  const clean = String(text || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/i, "")
+    .replace(/\[([a-z]+)\]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!clean) throw new Error("empty_text");
 
   if (want === "piper" && piperBin()) {

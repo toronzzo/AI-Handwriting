@@ -14,11 +14,11 @@
       "lengthScale": 0.82,
       "noiseW": 0.85
     },
-    "amused": {
+    "angry": {
       "engine": "piper",
-      "voice": "en_US-lessac-medium",
-      "lengthScale": 0.9,
-      "noiseW": 0.75
+      "voice": "en_US-ryan-medium",
+      "lengthScale": 0.88,
+      "noiseW": 0.8
     },
     "sad": {
       "engine": "piper",
@@ -26,36 +26,82 @@
       "lengthScale": 1.18,
       "noiseW": 0.5
     },
-    "fierce": {
-      "engine": "piper",
-      "voice": "en_US-ryan-medium",
-      "lengthScale": 0.88,
-      "noiseW": 0.8
-    },
-    "calm": {
+    "neutral": {
       "engine": "piper",
       "voice": "en_US-lessac-medium",
       "lengthScale": 1.05,
       "noiseW": 0.55
     },
-    "curious": {
+    "thinking": {
       "engine": "piper",
       "voice": "en_US-lessac-medium",
       "lengthScale": 1.0,
       "noiseW": 0.65
     },
-    "mysterious": {
+    "surprised": {
+      "engine": "piper",
+      "voice": "en_US-lessac-medium",
+      "lengthScale": 0.85,
+      "noiseW": 0.8
+    },
+    "listening": {
+      "engine": "piper",
+      "voice": "en_US-lessac-medium",
+      "lengthScale": 1.02,
+      "noiseW": 0.55
+    },
+    "battle": {
       "engine": "piper",
       "voice": "en_US-ryan-medium",
-      "lengthScale": 1.08,
-      "noiseW": 0.45
+      "lengthScale": 0.88,
+      "noiseW": 0.8
     }
   },
   "kokoro": {
-    "happy": { "engine": "kokoro", "speaker": "af_bella", "speed": 1.08 },
-    "excited": { "engine": "kokoro", "speaker": "af_bella", "speed": 1.2 },
-    "sad": { "engine": "kokoro", "speaker": "am_adam", "speed": 0.85 },
-    "fierce": { "engine": "kokoro", "speaker": "am_adam", "speed": 1.1 },
-    "calm": { "engine": "kokoro", "speaker": "af_heart", "speed": 0.95 }
+    "happy": {
+      "engine": "kokoro",
+      "speaker": "af_bella",
+      "speed": 1.08
+    },
+    "excited": {
+      "engine": "kokoro",
+      "speaker": "af_bella",
+      "speed": 1.2
+    },
+    "sad": {
+      "engine": "kokoro",
+      "speaker": "am_adam",
+      "speed": 0.85
+    },
+    "angry": {
+      "engine": "kokoro",
+      "speaker": "am_adam",
+      "speed": 1.1
+    },
+    "neutral": {
+      "engine": "kokoro",
+      "speaker": "af_heart",
+      "speed": 0.95
+    },
+    "thinking": {
+      "engine": "kokoro",
+      "speaker": "af_heart",
+      "speed": 1.0
+    },
+    "surprised": {
+      "engine": "kokoro",
+      "speaker": "af_bella",
+      "speed": 1.15
+    },
+    "listening": {
+      "engine": "kokoro",
+      "speaker": "af_heart",
+      "speed": 0.98
+    },
+    "battle": {
+      "engine": "kokoro",
+      "speaker": "am_adam",
+      "speed": 1.1
+    }
   }
 }
