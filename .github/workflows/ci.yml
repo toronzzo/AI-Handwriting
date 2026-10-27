@@ -27,6 +27,7 @@ jobs:
           cache-dependency-path: |
             companion/package-lock.json
             bakugan-buddy/studio/package-lock.json
+            bakugan-buddy/apps/mobile/package-lock.json
 
       - name: Character pack schema
         run: node bakugan-buddy/scripts/validate-packs.mjs
@@ -42,6 +43,18 @@ jobs:
 
       - name: Alive behavior unit tests
         run: npm --prefix bakugan-buddy/packages/alive test
+
+      - name: Install mobile
+        run: npm ci
+        working-directory: bakugan-buddy/apps/mobile
+
+      - name: Typecheck mobile
+        run: npx tsc --noEmit -p tsconfig.json
+        working-directory: bakugan-buddy/apps/mobile
+
+      - name: Ball clip check
+        run: npm run check:ball
+        working-directory: bakugan-buddy/apps/mobile
 
       - name: Install companion
         run: npm ci

@@ -10,7 +10,9 @@
     "typecheck:companion": "npm --prefix companion run typecheck",
     "lint:companion": "npm --prefix companion run lint",
     "validate:packs": "node bakugan-buddy/scripts/validate-packs.mjs",
-    "ci": "npm run validate:packs && npm run test:mood && npm run test:body-core && npm run test:emotion-state && npm run test:alive && npm run lint:companion && npm run typecheck:companion && npm run test:companion && npm --prefix companion run build && node --check bakugan-buddy/studio/server.mjs && npm run eval:smoke",
+    "typecheck:mobile": "npm --prefix bakugan-buddy/apps/mobile run typecheck",
+    "check:ball": "npm --prefix bakugan-buddy/apps/mobile run check:ball",
+    "ci": "npm run validate:packs && npm run test:mood && npm run test:body-core && npm run test:emotion-state && npm run test:alive && npm run typecheck:mobile && npm run check:ball && npm run lint:companion && npm run typecheck:companion && npm run test:companion && npm --prefix companion run build && node --check bakugan-buddy/studio/server.mjs && npm run eval:smoke",
     "eval:smoke": "bash bakugan-buddy/evals/ci-smoke.sh",
     "test:emotion-state": "npm --prefix bakugan-buddy/packages/emotion-state test"
   }
