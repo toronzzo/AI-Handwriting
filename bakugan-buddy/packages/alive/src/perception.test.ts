@@ -64,13 +64,18 @@ test("last-known position freezes when the partner leaves view", () => {
   assert.equal(slot.lastX, 2);
   assert.equal(slot.lastZ, 3);
   tickNotice(slot, false, 80, -40, 500, 9_000, NOTICE_MS);
+  assert.equal(slot.noticed, false);
   assert.equal(slot.lastX, 2);
   assert.equal(slot.lastZ, 3);
   assert.equal(slot.lastAt, 8_000);
   tickNotice(slot, true, 4, 5, 16, 9_500, NOTICE_MS);
+  assert.equal(slot.noticed, false);
+  assert.equal(slot.lastX, 2);
+  assert.equal(slot.lastZ, 3);
+  assert.equal(tickNotice(slot, true, 4, 5, NOTICE_MS, 11_000, NOTICE_MS), "noticed");
   assert.equal(slot.lastX, 4);
   assert.equal(slot.lastZ, 5);
-  assert.equal(slot.lastAt, 9_500);
+  assert.equal(slot.lastAt, 11_000);
 });
 
 test("a saved log reloads names without moving him", () => {

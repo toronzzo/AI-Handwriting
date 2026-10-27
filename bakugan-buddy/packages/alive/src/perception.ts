@@ -16,8 +16,9 @@ export type NoticeResult = "none" | "noticed" | "tracking";
 
 /**
  * Seeing something fills a timer. He does not react until it completes.
- * Looking away early clears the timer. Once noticed, last-known position
- * updates only while the thing is still in view.
+ * Looking away early clears the timer. Leaving view after a notice
+ * forgets the "I see you" flag so the next look has to fill the timer
+ * again. Last-known position stays put until that new notice lands.
  */
 export function tickNotice(
   slot: NoticeSlot,
@@ -29,7 +30,8 @@ export function tickNotice(
   noticeMs: number,
 ): NoticeResult {
   if (!visible) {
-    if (!slot.noticed) slot.seenMs = 0;
+    slot.seenMs = 0;
+    slot.noticed = false;
     return "none";
   }
   if (!slot.noticed) {

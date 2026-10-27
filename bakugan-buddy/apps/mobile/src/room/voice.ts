@@ -1,5 +1,12 @@
 import type { Mood } from "../../../../packages/mood/src/index.ts";
 
+/** Hermes does not always ship AbortSignal.timeout. */
+function abortAfter(ms: number): AbortSignal {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
 let studioUrl: string | null = null;
 let audio: AudioContext | null = null;
 let current: AudioBufferSourceNode | null = null;
@@ -15,7 +22,7 @@ export async function probeStudio(): Promise<string | null> {
   if (!url) return null;
   try {
     const response = await fetch(`${url.replace(/\/$/, "")}/v1/health`, {
-      signal: AbortSignal.timeout(700),
+      signal: abortAfter(700),
     });
     if (!response.ok) return null;
     studioUrl = url.replace(/\/$/, "");

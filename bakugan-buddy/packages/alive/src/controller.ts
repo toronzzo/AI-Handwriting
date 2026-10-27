@@ -29,6 +29,8 @@ export type AliveOptions = {
   z?: number;
   seed?: number;
   noticeMs?: number;
+  /** Resting mood loaded from the emotion store. Skills can still override it. */
+  mood?: Mood;
 };
 
 function mulberry32(seed: number): () => number {
@@ -82,6 +84,7 @@ export class AliveController {
   private readonly pose: PoseSample = { bob: 0, hop: 0, roll: 0, flap: 0, headTilt: 0, eye: 0 };
 
   private skill: SkillId = "idle-roll";
+  private restMood: Mood = "neutral";
   private mood: Mood = "neutral";
   private look = 0;
   private holdSpot = -1;
@@ -111,6 +114,10 @@ export class AliveController {
     this.x = options.x ?? 1.7;
     this.z = options.z ?? 0.5;
     this.noticeMs = options.noticeMs ?? NOTICE_MS;
+    if (options.mood) {
+      this.restMood = normalizeMood(options.mood);
+      this.mood = this.restMood;
+    }
     this.rng = mulberry32(options.seed ?? 1);
     this.spots = new Array(SPOT_COUNT);
     for (let i = 0; i < SPOT_COUNT; i++) this.spots[i] = { x: 0, z: 0, score: 0 };
@@ -190,6 +197,19 @@ export class AliveController {
 
   writeNewest(max: number, into: string[]): void {
     this.log.writeNewest(max, into);
+  }
+
+  /** Drop a suggestion. A wake or mood button outranks a held sleep hint. */
+  clearAdvice(): void {
+    this.adviceGoal = null;
+    this.adviceMood = null;
+    this.adviceUntil = 0;
+  }
+
+  /** Resting mood from the emotion store. Does not write the log. */
+  seedMood(mood: Mood): void {
+    this.restMood = normalizeMood(mood);
+    this.mood = this.restMood;
   }
 
   tick(input: AliveInput): AliveFrame {
@@ -299,8 +319,10 @@ export class AliveController {
       this.tickExplore(input.nowMs, dt);
     } else if (skill === "idle-roll") {
       this.wasHurrying = false;
-      if (!this.playerSlot.noticed && input.playerVisible) {
+      if (input.playerVisible) {
         this.yaw = turnToward(this.yaw, input.playerX, input.playerZ, this.x, this.z, dt);
+      } else if (this.playerSlot.lastAt > 0) {
+        this.yaw = turnToward(this.yaw, this.playerSlot.lastX, this.playerSlot.lastZ, this.x, this.z, dt);
       } else {
         this.yaw += IDLE_SPIN * dt;
       }
@@ -398,7 +420,7 @@ export class AliveController {
     if (this.adviceMood && input.nowMs <= this.adviceUntil) return this.adviceMood;
     if (skill === "explore" && this.explorePhase !== 1) return "thinking";
     if (skill === "follow") return "happy";
-    return "neutral";
+    return this.restMood;
   }
 
   private beginScan(nowMs: number): void {

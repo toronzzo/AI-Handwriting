@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { memo, useEffect, useRef, useState } from "react";
+import { AppState, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import {
   AnimationAction,
   AnimationMixer,
+  LoopOnce,
   LoopRepeat,
   Mesh,
   MeshStandardMaterial,
   Object3D,
   PointLight,
+  SkinnedMesh,
+  Vector3,
   type Group,
 } from "three";
 import type { GLTF } from "three/addons/loaders/GLTFLoader.js";
@@ -17,19 +19,40 @@ import {
   EXPLORE_POINTS,
   FOLLOW_RING_RADIUS,
   MockMindAdvisor,
+  POSE_LIMITS,
   chainAdvisors,
   createStudioAdvisor,
-  type AliveFrame,
   type AliveInput,
+  type ClipName,
   type MindAdvisor,
   type Mood,
 } from "../../../../packages/alive/src/index.ts";
+import { Canvas, useFrame, useThree } from "./fiber";
 import { loadPreyasBall } from "./loadPreyas";
+import { applyAxis, closingHinge, floorLift, measureFootRadius, POSE_FADE_SEC } from "./poseRig";
 import { readAliveMemory, writeAliveMemory } from "./persist";
+import { applyMood, loadCompanionState } from "../state/emotionStore";
 import { probeStudio, speakLine } from "./voice";
 
 const MODEL_SCALE = 0.52;
 const ROOM = 4.7;
+const BARK_MS = 3400;
+const SAVE_MS = 10_000;
+
+const AXIS_X = new Vector3(1, 0, 0);
+const AXIS_Y = new Vector3(0, 1, 0);
+const LOOK_AT = new Vector3();
+
+const CAMERA = { position: [0.2, 2.35, 3.6] as [number, number, number], fov: 42, near: 0.08, far: 40 };
+const GL_PROPS = {
+  antialias: false,
+  alpha: false,
+  powerPreference: "default" as const,
+  failIfMajorPerformanceCaveat: false,
+};
+
+type PlayClip = ClipName | "open" | "close";
+type Phase = "loop" | "closing" | "closed" | "opening";
 
 type PlayerDrive = {
   x: number;
@@ -43,7 +66,14 @@ type PlayerDrive = {
   mood: Mood | null;
 };
 
-type HudState = {
+type BarkSink = {
+  text: string;
+  mood: Mood;
+  until: number;
+  gen: number;
+};
+
+type ReadoutSink = {
   skill: string;
   mood: string;
   hurry: boolean;
@@ -51,10 +81,22 @@ type HudState = {
   notice01: number;
   noticed: boolean;
   advice: string | null;
-  bark: string | null;
-  lines: string[];
   logCount: number;
-  auto: boolean;
+};
+
+type Sinks = {
+  player: PlayerDrive;
+  advisorRef: { current: MindAdvisor };
+  sim: AliveController;
+  bark: BarkSink;
+  readout: ReadoutSink;
+  lines: string[];
+  clock0: number;
+  booted: boolean;
+  adviseAt: number;
+  adviseBusy: boolean;
+  frames: number;
+  frameStamp: number;
 };
 
 const MOODS: readonly Mood[] = ["neutral", "happy", "excited", "sad", "angry"];
@@ -63,6 +105,38 @@ function clamp(value: number, min: number, max: number): number {
   if (value < min) return min;
   if (value > max) return max;
   return value;
+}
+
+function approach(current: number, target: number, limit: number, dt: number): number {
+  const maxStep = (limit * dt) / POSE_FADE_SEC;
+  const delta = target - current;
+  if (delta > maxStep) return current + maxStep;
+  if (delta < -maxStep) return current - maxStep;
+  return target;
+}
+
+function armClip(
+  book: Partial<Record<PlayClip, AnimationAction>>,
+  playing: { current: PlayClip },
+  name: PlayClip,
+  fade: number,
+): boolean {
+  const next = book[name];
+  if (!next || playing.current === name) return next != null && playing.current === name;
+  const once = name === "open" || name === "close";
+  next.reset();
+  next.enabled = true;
+  next.setEffectiveWeight(1);
+  next.clampWhenFinished = once;
+  next.setLoop(once ? LoopOnce : LoopRepeat, once ? 1 : Infinity);
+  next.play();
+  const prev = book[playing.current];
+  if (prev && prev !== next) {
+    if (fade > 0) prev.crossFadeTo(next, fade, false);
+    else prev.stop();
+  }
+  playing.current = name;
+  return true;
 }
 
 function driveAuto(t: number, player: PlayerDrive): void {
@@ -182,45 +256,62 @@ function RoomDressing() {
   );
 }
 
-type WorldProps = {
-  player: PlayerDrive;
-  onHud: (frame: AliveFrame, a: string, b: string, c: string) => void;
-  onBarkClear: () => void;
-  onFps: (fps: number) => void;
-  advisorRef: { current: MindAdvisor };
-};
+function makeSinks(): Sinks {
+  return {
+    player: {
+      x: 0,
+      z: 0,
+      vx: 0,
+      vz: 0,
+      auto: false,
+      sleep: false,
+      hidden: false,
+      summonUntil: 0,
+      mood: null,
+    },
+    advisorRef: { current: new MockMindAdvisor() },
+    sim: new AliveController({ x: 0.85, z: 0.35, seed: 11 }),
+    bark: { text: "", mood: "neutral", until: 0, gen: 0 },
+    readout: {
+      skill: "idle-roll",
+      mood: "neutral",
+      hurry: false,
+      scanning: false,
+      notice01: 0,
+      noticed: false,
+      advice: null,
+      logCount: 0,
+    },
+    lines: ["", "", ""],
+    clock0: Date.now(),
+    booted: false,
+    adviseAt: 0,
+    adviseBusy: false,
+    frames: 0,
+    frameStamp: Date.now(),
+  };
+}
 
-function World({ player, onHud, onBarkClear, onFps, advisorRef }: WorldProps) {
-  const sim = useRef<AliveController | null>(null);
-  if (sim.current === null) {
-    sim.current = new AliveController({ x: 0.85, z: 0.35, seed: 11 });
-  }
-  const booted = useRef(false);
+const World = memo(function World({ sinks }: { sinks: Sinks }) {
   const [gltf, setGltf] = useState<GLTF | null>(null);
   const mixer = useRef<AnimationMixer | null>(null);
-  const actions = useRef<Record<string, AnimationAction>>({});
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clipName = useRef("idle");
+  const actions = useRef<Partial<Record<PlayClip, AnimationAction>>>({});
   const bones = useRef<Record<string, Object3D>>({});
   const eye = useRef<PointLight | null>(null);
   const rig = useRef<Group>(null);
   const puck = useRef<Mesh>(null);
   const ring = useRef<Mesh>(null);
   const blob = useRef<Mesh>(null);
-  const onHudRef = useRef(onHud);
-  onHudRef.current = onHud;
-  const onClearRef = useRef(onBarkClear);
-  onClearRef.current = onBarkClear;
-  const onFpsRef = useRef(onFps);
-  onFpsRef.current = onFps;
-  const playerRef = useRef(player);
-  playerRef.current = player;
-  const adviseAt = useRef(0);
-  const adviseBusy = useRef(false);
-  const lastRev = useRef(0);
-  const barkUntil = useRef(0);
-  const lineBuf = useRef<string[]>(["", "", ""]);
-  const fps = useRef({ frames: 0, t: performance.now() / 1000, last: -1, t0: performance.now() });
+  const hingeL = useRef(new Vector3(0, 0, 1));
+  const hingeR = useRef(new Vector3(0, 0, 1));
+  const footRadius = useRef(0.4);
+  const phase = useRef<Phase>("loop");
+  const playing = useRef<PlayClip>("idle");
+  const wantLoop = useRef<ClipName>("idle");
+  const finishKind = useRef(0);
+  const shownFlap = useRef(0);
+  const shownTilt = useRef(0);
+  const shownLook = useRef(0);
   const input = useRef<AliveInput>({
     nowMs: 0,
     dt: 0,
@@ -237,28 +328,14 @@ function World({ player, onHud, onBarkClear, onFps, advisorRef }: WorldProps) {
 
   useEffect(() => {
     let cancel = false;
-    const timer = setTimeout(() => {
-      booted.current = true;
-    }, 1200);
-    void readAliveMemory().then((json) => {
-      if (cancel) return;
-      if (json) sim.current?.loadSnapshot(json);
-      booted.current = true;
-      clearTimeout(timer);
-    });
-    return () => {
-      cancel = true;
-      clearTimeout(timer);
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancel = false;
     void loadPreyasBall()
       .then((loaded) => {
         if (cancel) return;
+        let skinned: SkinnedMesh | null = null;
         loaded.scene.traverse((obj) => {
           if (obj.name) bones.current[obj.name] = obj;
+          const skinnedMesh = obj as SkinnedMesh;
+          if (skinnedMesh.isSkinnedMesh) skinned = skinnedMesh;
           const mesh = obj as Mesh;
           if (!mesh.isMesh) return;
           const material = mesh.material as MeshStandardMaterial;
@@ -269,14 +346,34 @@ function World({ player, onHud, onBarkClear, onFps, advisorRef }: WorldProps) {
           }
         });
         const nextMixer = new AnimationMixer(loaded.scene);
-        const book: typeof actions.current = {};
+        const book: Partial<Record<PlayClip, AnimationAction>> = {};
         for (const clip of loaded.animations) {
+          const name = clip.name as PlayClip;
           const action = nextMixer.clipAction(clip);
+          action.enabled = true;
+          action.setEffectiveWeight(1);
           action.setLoop(LoopRepeat, Infinity);
-          action.play();
-          action.setEffectiveWeight(clip.name === "idle" ? 1 : 0);
-          book[clip.name] = action;
+          action.clampWhenFinished = false;
+          book[name] = action;
         }
+        const flapL = loaded.scene.getObjectByName("flapL");
+        const flapR = loaded.scene.getObjectByName("flapR");
+        const closeClip = loaded.animations.find((clip) => clip.name === "close");
+        if (flapL && closeClip) closingHinge(flapL, nextMixer, closeClip, 0.4, hingeL.current);
+        if (flapR && closeClip) closingHinge(flapR, nextMixer, closeClip, 0.4, hingeR.current);
+        const idle = book.idle;
+        if (idle) {
+          idle.setLoop(LoopRepeat, Infinity);
+          idle.clampWhenFinished = false;
+          idle.reset();
+          idle.setEffectiveWeight(1);
+          idle.play();
+          idle.time = 0;
+          nextMixer.update(0);
+          playing.current = "idle";
+          phase.current = "loop";
+        }
+        if (skinned) footRadius.current = measureFootRadius(skinned, POSE_LIMITS.rollMax);
         const head = loaded.scene.getObjectByName("head");
         if (head && !head.getObjectByName("eye-glow")) {
           const light = new PointLight("#d5f3ff", 0.8, 2.4, 2);
@@ -285,6 +382,12 @@ function World({ player, onHud, onBarkClear, onFps, advisorRef }: WorldProps) {
           head.add(light);
           eye.current = light;
         }
+        nextMixer.addEventListener("finished", (event) => {
+          const action = (event as { action?: AnimationAction }).action;
+          if (!action) return;
+          if (action === book.close) finishKind.current = 1;
+          else if (action === book.open) finishKind.current = 2;
+        });
         mixer.current = nextMixer;
         actions.current = book;
         setGltf(loaded);
@@ -303,12 +406,10 @@ function World({ player, onHud, onBarkClear, onFps, advisorRef }: WorldProps) {
   }, []);
 
   useFrame((_, dt) => {
-    const body = sim.current;
-    if (!body) return;
-    const who = playerRef.current;
     const step = dt > 0.05 ? 0.05 : dt;
-    const demoNow = (performance.now() - fps.current.t0) / 1000;
-    if (who.auto) driveAuto(demoNow, who);
+    const now = Date.now();
+    const who = sinks.player;
+    if (who.auto) driveAuto((now - sinks.clock0) / 1000, who);
     else {
       who.x = clamp(who.x + who.vx * 1.55 * step, -ROOM, ROOM);
       who.z = clamp(who.z + who.vz * 1.55 * step, -ROOM, ROOM);
@@ -321,25 +422,27 @@ function World({ player, onHud, onBarkClear, onFps, advisorRef }: WorldProps) {
       ring.current.position.x = who.x;
       ring.current.position.z = who.z;
     }
+    sinks.frames += 1;
 
-    if (!booted.current) return;
+    if (!sinks.booted) return;
 
     const frameIn = input.current;
-    frameIn.nowMs = Date.now();
-    frameIn.dt = dt;
+    frameIn.nowMs = now;
+    frameIn.dt = step;
     frameIn.playerX = who.x;
     frameIn.playerZ = who.z;
     frameIn.playerVisible = !who.hidden;
     frameIn.sleepRequested = who.sleep;
-    frameIn.summon = who.summonUntil > frameIn.nowMs;
+    frameIn.summon = who.summonUntil > now;
     frameIn.moodOverride = who.mood;
-    const frame = body.tick(frameIn);
+    const frame = sinks.sim.tick(frameIn);
 
     const root = rig.current;
     if (root) {
-      root.position.set(frame.x, frame.bob + frame.hop, frame.z);
+      const lift = floorLift(frame.roll, footRadius.current, MODEL_SCALE);
+      root.position.set(frame.x, frame.bob + frame.hop + lift, frame.z);
       root.rotation.order = "YXZ";
-      root.rotation.x = frame.headTilt;
+      root.rotation.x = 0;
       root.rotation.y = frame.yaw;
       root.rotation.z = frame.roll;
     }
@@ -349,19 +452,46 @@ function World({ player, onHud, onBarkClear, onFps, advisorRef }: WorldProps) {
       const squash = 1 - frame.hop * 2.2;
       blob.current.scale.setScalar(squash > 0.7 ? squash : 0.7);
     }
+
     const mix = mixer.current;
     if (mix) {
-      mix.update(step);
-      const nextClip = frame.clip;
-      if (nextClip !== clipName.current && actions.current[nextClip]) {
-        actions.current[nextClip]!.reset().fadeIn(0.28).play();
-        actions.current[clipName.current]?.fadeOut(0.28);
-        clipName.current = nextClip;
+      const book = actions.current;
+      if (frame.clip === "closed") {
+        if (phase.current === "loop" || phase.current === "opening") {
+          if (armClip(book, playing, "close", 0.16)) phase.current = "closing";
+        }
+      } else if (phase.current === "closing" || phase.current === "closed") {
+        wantLoop.current = frame.clip;
+        if (armClip(book, playing, "open", 0.16)) phase.current = "opening";
+      } else if (phase.current === "opening") {
+        wantLoop.current = frame.clip;
+      } else if (frame.clip !== playing.current) {
+        armClip(book, playing, frame.clip, POSE_FADE_SEC);
       }
-      if (frame.clip !== "closed") {
-        bones.current.flapL?.rotateZ(frame.flap);
-        bones.current.flapR?.rotateZ(-frame.flap);
-        bones.current.head?.rotateY(frame.look);
+
+      mix.update(step);
+
+      if (finishKind.current === 1 && phase.current === "closing") {
+        phase.current = "closed";
+        armClip(book, playing, "closed", 0.08);
+      } else if (finishKind.current === 2 && phase.current === "opening") {
+        phase.current = "loop";
+        armClip(book, playing, wantLoop.current, POSE_FADE_SEC);
+      }
+      finishKind.current = 0;
+
+      const live = phase.current === "loop" ? 1 : 0;
+      shownFlap.current = approach(shownFlap.current, frame.flap * live, POSE_LIMITS.flapMax, step);
+      shownTilt.current = approach(shownTilt.current, frame.headTilt * live, POSE_LIMITS.headTiltMax, step);
+      shownLook.current = approach(shownLook.current, frame.look * live, POSE_LIMITS.lookMax, step);
+      const flapL = bones.current.flapL;
+      const flapR = bones.current.flapR;
+      const head = bones.current.head;
+      if (flapL) applyAxis(flapL, hingeL.current, -shownFlap.current);
+      if (flapR) applyAxis(flapR, hingeR.current, -shownFlap.current);
+      if (head) {
+        applyAxis(head, AXIS_X, shownTilt.current);
+        applyAxis(head, AXIS_Y, shownLook.current);
       }
     }
     if (eye.current) eye.current.intensity = 0.12 + frame.eye * 1.5;
@@ -369,51 +499,27 @@ function World({ player, onHud, onBarkClear, onFps, advisorRef }: WorldProps) {
     const lookX = who.x * 0.42 + frame.x * 0.58;
     const lookZ = who.z * 0.42 + frame.z * 0.58;
     camera.position.set(lookX + 0.15, 2.35, lookZ + 3.6);
-    camera.lookAt(lookX, 0.42, lookZ);
+    LOOK_AT.set(lookX, 0.42, lookZ);
+    camera.lookAt(LOOK_AT);
 
-    if (frame.rev !== lastRev.current) {
-      lastRev.current = frame.rev;
-      const lines = lineBuf.current;
-      body.writeNewest(3, lines);
-      onHudRef.current(frame, lines[0] ?? "", lines[1] ?? "", lines[2] ?? "");
-      if (frame.bark) barkUntil.current = performance.now() + 3400;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      const json = body.exportSnapshot();
-      saveTimer.current = setTimeout(() => {
-        void writeAliveMemory(json);
-      }, 450);
-    } else if (barkUntil.current && performance.now() > barkUntil.current) {
-      barkUntil.current = 0;
-      onClearRef.current();
-    }
-
-    const clock = fps.current;
-    clock.frames += 1;
-    const wall = performance.now() / 1000;
-    if (wall - clock.t >= 0.5) {
-      const rate = clock.frames / (wall - clock.t);
-      clock.frames = 0;
-      clock.t = wall;
-      const rounded = Math.round(rate);
-      if (rounded !== clock.last) {
-        clock.last = rounded;
-        onFpsRef.current(rounded);
-      }
-    }
-
-    if (demoNow - adviseAt.current > 4 && !adviseBusy.current) {
-      adviseAt.current = demoNow;
-      adviseBusy.current = true;
-      const snap = body.advisorSnapshot();
-      void advisorRef.current.advise(snap).then(
-        (suggestion) => {
-          body.offerAdvice(suggestion, Date.now());
-          adviseBusy.current = false;
-        },
-        () => {
-          adviseBusy.current = false;
-        },
-      );
+    const hud = sinks.readout;
+    hud.skill = frame.skill;
+    hud.mood = frame.mood;
+    hud.hurry = frame.hurry;
+    hud.scanning = frame.scanning;
+    hud.notice01 = frame.notice01;
+    hud.noticed = frame.noticedPlayer;
+    hud.advice = frame.adviceGoal;
+    hud.logCount = frame.logCount;
+    const bark = sinks.bark;
+    if (frame.bark) {
+      bark.text = frame.bark;
+      bark.mood = frame.mood;
+      bark.until = now + BARK_MS;
+      bark.gen += 1;
+    } else if (bark.text.length > 0 && now > bark.until) {
+      bark.text = "";
+      bark.gen += 1;
     }
   });
 
@@ -449,62 +555,149 @@ function World({ player, onHud, onBarkClear, onFps, advisorRef }: WorldProps) {
       </group>
     </group>
   );
-}
+});
+
+type ReadoutState = ReadoutSink & { fps: number; lines: string[] };
 
 export function RoomScreen() {
-  const player = useRef<PlayerDrive>({
-    x: 0,
-    z: 0,
-    vx: 0,
-    vz: 0,
-    auto: true,
-    sleep: false,
-    hidden: false,
-    summonUntil: 0,
-    mood: null,
-  }).current;
-  const advisorRef = useRef<MindAdvisor>(new MockMindAdvisor());
-  const [hud, setHud] = useState<HudState>({
-    skill: "idle roll",
+  const sinks = useRef<Sinks | null>(null);
+  if (sinks.current === null) sinks.current = makeSinks();
+  const bag = sinks.current;
+  const [debug, setDebug] = useState(typeof __DEV__ !== "undefined" && __DEV__);
+  const [bark, setBark] = useState<string | null>(null);
+  const [hud, setHud] = useState<ReadoutState>({
+    skill: "idle-roll",
     mood: "neutral",
     hurry: false,
     scanning: false,
     notice01: 0,
     noticed: false,
     advice: null,
-    bark: null,
-    lines: [],
     logCount: 0,
-    auto: true,
+    fps: 0,
+    lines: [],
   });
-  const [fps, setFps] = useState(0);
   const [tick, setTick] = useState(0);
+  void tick;
+
+  useEffect(() => {
+    let cancel = false;
+    const timer = setTimeout(() => {
+      bag.booted = true;
+    }, 1200);
+    void Promise.all([readAliveMemory(), loadCompanionState().catch(() => null)]).then(([json, state]) => {
+      if (cancel) return;
+      if (json) bag.sim.loadSnapshot(json);
+      if (state) {
+        bag.sim.seedMood(state.emotion.mood);
+        bag.readout.mood = state.emotion.mood;
+      }
+      bag.booted = true;
+      clearTimeout(timer);
+    });
+    return () => {
+      cancel = true;
+      clearTimeout(timer);
+    };
+  }, [bag]);
 
   useEffect(() => {
     let cancel = false;
     void probeStudio().then((url) => {
       if (cancel || !url) return;
-      advisorRef.current = chainAdvisors(createStudioAdvisor(url), new MockMindAdvisor());
+      bag.advisorRef.current = chainAdvisors(createStudioAdvisor(url), new MockMindAdvisor());
     });
     return () => {
       cancel = true;
     };
-  }, []);
+  }, [bag]);
+
+  useEffect(() => {
+    const save = () => {
+      if (!bag.booted) return;
+      void writeAliveMemory(bag.sim.exportSnapshot());
+    };
+    const interval = setInterval(save, SAVE_MS);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background" || state === "inactive") save();
+    });
+    return () => {
+      clearInterval(interval);
+      sub.remove();
+      save();
+    };
+  }, [bag]);
+
+  useEffect(() => {
+    let seen = bag.bark.gen;
+    const interval = setInterval(() => {
+      const now = Date.now();
+      if (bag.booted && now - bag.adviseAt > 4000 && !bag.adviseBusy) {
+        bag.adviseAt = now;
+        bag.adviseBusy = true;
+        const snap = bag.sim.advisorSnapshot();
+        void bag.advisorRef.current.advise(snap).then(
+          (suggestion) => {
+            bag.sim.offerAdvice(suggestion, Date.now());
+            bag.adviseBusy = false;
+          },
+          () => {
+            bag.adviseBusy = false;
+          },
+        );
+      }
+      if (bag.bark.gen === seen) return;
+      seen = bag.bark.gen;
+      const text = bag.bark.text;
+      setBark(text.length > 0 ? text : null);
+      if (text.length > 0) speakLine(text, bag.bark.mood);
+    }, 100);
+    return () => clearInterval(interval);
+  }, [bag]);
+
+  useEffect(() => {
+    if (!debug) return;
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const elapsed = (now - bag.frameStamp) / 1000;
+      const fps = elapsed > 0 ? Math.round(bag.frames / elapsed) : 0;
+      bag.frames = 0;
+      bag.frameStamp = now;
+      bag.sim.writeNewest(3, bag.lines);
+      const readout = bag.readout;
+      const lines = bag.lines.filter((line) => line.length > 0);
+      setHud({
+        skill: readout.skill,
+        mood: readout.mood,
+        hurry: readout.hurry,
+        scanning: readout.scanning,
+        notice01: readout.notice01,
+        noticed: readout.noticed,
+        advice: readout.advice,
+        logCount: readout.logCount,
+        fps,
+        lines,
+      });
+    }, 250);
+    return () => clearInterval(interval);
+  }, [bag, debug]);
 
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
     const down = (event: KeyboardEvent) => {
       if (event.repeat) return;
+      const player = bag.player;
       if (event.key === "ArrowLeft" || event.key === "a") player.vx = -1;
       if (event.key === "ArrowRight" || event.key === "d") player.vx = 1;
       if (event.key === "ArrowUp" || event.key === "w") player.vz = -1;
       if (event.key === "ArrowDown" || event.key === "s") player.vz = 1;
       if (event.key.startsWith("Arrow") || "wasd".includes(event.key)) {
         player.auto = false;
-        setTick((n) => n + 1);
+        if (debug) setTick((n) => n + 1);
       }
     };
     const up = (event: KeyboardEvent) => {
+      const player = bag.player;
       if (event.key === "ArrowLeft" || event.key === "a" || event.key === "ArrowRight" || event.key === "d") {
         player.vx = 0;
       }
@@ -518,162 +711,152 @@ export function RoomScreen() {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [player]);
+  }, [bag, debug]);
 
   const refresh = () => setTick((n) => n + 1);
-
+  const player = bag.player;
   const skillLabel =
     hud.skill === "idle-roll" ? "idle roll" : hud.hurry ? "hurry" : hud.scanning ? "looking" : hud.skill;
 
   return (
     <View style={styles.root}>
       <View style={styles.stage}>
-        <Canvas
-          style={styles.canvas}
-          dpr={[1, 1.5]}
-          camera={{ position: [0.2, 2.35, 3.6], fov: 42, near: 0.08, far: 40 }}
-          gl={{
-            antialias: false,
-            alpha: false,
-            powerPreference: "default",
-            failIfMajorPerformanceCaveat: false,
-          }}
-        >
-          <World
-            player={player}
-            advisorRef={advisorRef}
-            onFps={setFps}
-            onBarkClear={() => setHud((prev) => (prev.bark ? { ...prev, bark: null } : prev))}
-            onHud={(frame, a, b, c) => {
-              if (frame.bark) speakLine(frame.bark, frame.mood);
-              setHud((prev) => ({
-                skill: frame.skill,
-                mood: frame.mood,
-                hurry: frame.hurry,
-                scanning: frame.scanning,
-                notice01: frame.notice01,
-                noticed: frame.noticedPlayer,
-                advice: frame.adviceGoal,
-                bark: frame.bark ?? prev.bark,
-                lines: [a, b, c].filter((line) => line.length > 0),
-                logCount: frame.logCount,
-                auto: player.auto,
-              }));
-            }}
-          />
+        <Canvas style={styles.canvas} dpr={[1, 1.5]} camera={CAMERA} gl={GL_PROPS}>
+          <World sinks={bag} />
         </Canvas>
-        <View pointerEvents="none" style={styles.readout}>
-          <Text style={styles.name}>PREYAS</Text>
-          <Text style={styles.meta}>
-            {skillLabel} · {hud.mood}
-            {fps > 0 ? ` · ${fps} fps` : ""}
-          </Text>
-          {!hud.noticed && (
-            <View style={styles.noticeTrack}>
-              <View style={[styles.noticeFill, { width: `${Math.round(hud.notice01 * 100)}%` }]} />
-            </View>
-          )}
-          {hud.advice && hud.advice !== hud.skill && (
-            <Text style={styles.advice}>advisor said {hud.advice}</Text>
-          )}
-          <Text style={styles.memory}>remembers {hud.logCount}</Text>
-          {hud.lines.map((line, index) => (
-            <Text key={`${index}-${line}`} style={styles.log} numberOfLines={1}>
-              {line}
+        <Pressable
+          accessibilityLabel="debug"
+          delayLongPress={700}
+          onLongPress={() => setDebug((value) => !value)}
+          style={styles.debugHit}
+        />
+        {debug && (
+          <View pointerEvents="none" style={styles.readout}>
+            <Text style={styles.name}>PREYAS</Text>
+            <Text style={styles.meta}>
+              {skillLabel} · {hud.mood}
+              {hud.fps > 0 ? ` · ${hud.fps} fps` : ""}
             </Text>
-          ))}
-        </View>
-        {hud.bark && (
+            {!hud.noticed && (
+              <View style={styles.noticeTrack}>
+                <View style={[styles.noticeFill, { width: `${Math.round(hud.notice01 * 100)}%` }]} />
+              </View>
+            )}
+            {hud.advice && hud.advice !== hud.skill && (
+              <Text style={styles.advice}>advisor said {hud.advice}</Text>
+            )}
+            <Text style={styles.memory}>remembers {hud.logCount}</Text>
+            {hud.lines.map((line, index) => (
+              <Text key={`${index}-${line}`} style={styles.log} numberOfLines={1}>
+                {line}
+              </Text>
+            ))}
+          </View>
+        )}
+        {bark && (
           <View pointerEvents="none" style={styles.bubble}>
-            <Text style={styles.bubbleText}>{hud.bark}</Text>
+            <Text style={styles.bubbleText}>{bark}</Text>
           </View>
         )}
       </View>
-      <View style={styles.controls}>
-        <View style={styles.row}>
-          {(
-            [
-              ["left", () => (player.vx = -1), () => (player.vx = 0)],
-              ["up", () => (player.vz = -1), () => (player.vz = 0)],
-              ["down", () => (player.vz = 1), () => (player.vz = 0)],
-              ["right", () => (player.vx = 1), () => (player.vx = 0)],
-            ] as const
-          ).map(([label, start, stop]) => (
+      {debug && (
+        <View style={styles.controls}>
+          <View style={styles.row}>
+            {(
+              [
+                ["left", -1, 0],
+                ["up", 0, -1],
+                ["down", 0, 1],
+                ["right", 1, 0],
+              ] as const
+            ).map(([label, vx, vz]) => (
+              <Pressable
+                key={label}
+                style={styles.pad}
+                onPressIn={() => {
+                  player.auto = false;
+                  if (vx !== 0) player.vx = vx;
+                  if (vz !== 0) player.vz = vz;
+                  refresh();
+                }}
+                onPressOut={() => {
+                  if (vx !== 0) player.vx = 0;
+                  if (vz !== 0) player.vz = 0;
+                }}
+              >
+                <Text style={styles.padText}>{label}</Text>
+              </Pressable>
+            ))}
             <Pressable
-              key={label}
-              style={styles.pad}
-              onPressIn={() => {
-                player.auto = false;
-                start();
+              style={[styles.pad, player.auto && styles.padOn]}
+              onPress={() => {
+                player.auto = !player.auto;
+                if (player.auto) {
+                  player.mood = null;
+                  player.sleep = false;
+                  player.hidden = false;
+                  bag.clock0 = Date.now();
+                }
                 refresh();
               }}
-              onPressOut={() => stop()}
             >
-              <Text style={styles.padText}>{label}</Text>
+              <Text style={styles.padText}>{player.auto ? "auto on" : "auto"}</Text>
             </Pressable>
-          ))}
-          <Pressable
-            style={[styles.pad, player.auto && styles.padOn]}
-            onPress={() => {
-              player.auto = !player.auto;
-              if (player.auto) {
-                player.mood = null;
-                player.sleep = false;
-                player.hidden = false;
-              }
-              refresh();
-            }}
-          >
-            <Text style={styles.padText}>{player.auto ? "auto on" : "auto"}</Text>
-          </Pressable>
-        </View>
-        <View style={styles.row}>
-          <Pressable
-            style={styles.pad}
-            onPress={() => {
-              player.auto = false;
-              player.sleep = !player.sleep;
-              refresh();
-            }}
-          >
-            <Text style={styles.padText}>{player.sleep ? "wake" : "sleep"}</Text>
-          </Pressable>
-          <Pressable
-            style={styles.pad}
-            onPress={() => {
-              player.auto = false;
-              player.summonUntil = Date.now() + 1400;
-              player.hidden = false;
-              refresh();
-            }}
-          >
-            <Text style={styles.padText}>call</Text>
-          </Pressable>
-          <Pressable
-            style={styles.pad}
-            onPress={() => {
-              player.auto = false;
-              player.hidden = !player.hidden;
-              refresh();
-            }}
-          >
-            <Text style={styles.padText}>{player.hidden ? "return" : "step out"}</Text>
-          </Pressable>
-          {MOODS.map((mood) => (
+          </View>
+          <View style={styles.row}>
             <Pressable
-              key={mood}
-              style={[styles.pad, player.mood === mood && styles.padOn]}
+              style={styles.pad}
               onPress={() => {
                 player.auto = false;
-                player.mood = player.mood === mood ? null : mood;
+                player.sleep = !player.sleep;
+                if (!player.sleep) bag.sim.clearAdvice();
                 refresh();
               }}
             >
-              <Text style={styles.padText}>{mood}</Text>
+              <Text style={styles.padText}>{player.sleep ? "wake" : "sleep"}</Text>
             </Pressable>
-          ))}
+            <Pressable
+              style={styles.pad}
+              onPress={() => {
+                player.auto = false;
+                player.summonUntil = Date.now() + 1400;
+                player.hidden = false;
+                refresh();
+              }}
+            >
+              <Text style={styles.padText}>call</Text>
+            </Pressable>
+            <Pressable
+              style={styles.pad}
+              onPress={() => {
+                player.auto = false;
+                player.hidden = !player.hidden;
+                refresh();
+              }}
+            >
+              <Text style={styles.padText}>{player.hidden ? "return" : "step out"}</Text>
+            </Pressable>
+            {MOODS.map((mood) => (
+              <Pressable
+                key={mood}
+                style={[styles.pad, player.mood === mood && styles.padOn]}
+                onPress={() => {
+                  player.auto = false;
+                  const next = player.mood === mood ? null : mood;
+                  player.mood = next;
+                  if (next) {
+                    bag.sim.seedMood(next);
+                    void applyMood(next, 1);
+                  }
+                  refresh();
+                }}
+              >
+                <Text style={styles.padText}>{mood}</Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
-      </View>
+      )}
     </View>
   );
 }
@@ -682,7 +865,16 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#10141a" },
   stage: { flex: 1 },
   canvas: { flex: 1 },
-  readout: { position: "absolute", top: 8, left: 10, right: 10 },
+  debugHit: { position: "absolute", top: 0, right: 0, width: 56, height: 56 },
+  readout: {
+    position: "absolute",
+    top: 8,
+    left: 10,
+    maxWidth: 280,
+    backgroundColor: "rgba(8,12,16,0.82)",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
   name: { color: "#f2f2f2", fontWeight: "800", letterSpacing: 1.5, fontSize: 13 },
   meta: { color: "#d5dde6", fontSize: 13, marginTop: 2 },
   advice: { color: "#9ec4d6", fontSize: 12, marginTop: 2 },

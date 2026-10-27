@@ -154,6 +154,68 @@ test("a bad explore suggestion does not pull him off a follow", () => {
   assert.equal(frame.adviceGoal, "explore");
 });
 
+test("idle-roll faces the partner instead of spinning", () => {
+  const sim = new AliveController({ x: 0, z: 0, seed: 1, noticeMs: 200 });
+  const seen = input({
+    nowMs: 0,
+    dt: 0.05,
+    playerX: 1,
+    playerZ: 0.2,
+    playerVisible: true,
+  });
+  let frame = sim.tick(seen);
+  for (let i = 0; i < 20; i++) {
+    seen.nowMs += 50;
+    frame = sim.tick(seen);
+  }
+  assert.equal(frame.skill, "idle-roll");
+  assert.ok(frame.yaw > 0.6, `yaw ${frame.yaw}`);
+});
+
+test("stepping out clears the notice so he has to look again", () => {
+  const sim = new AliveController({ x: 0, z: 0, seed: 2, noticeMs: 400 });
+  const seen = input({ nowMs: 0, dt: 0.05, playerX: 0.2, playerZ: 0.2, playerVisible: true });
+  let frame = sim.tick(seen);
+  for (let i = 0; i < 12; i++) {
+    seen.nowMs += 50;
+    frame = sim.tick(seen);
+  }
+  assert.equal(frame.noticedPlayer, true);
+  seen.playerVisible = false;
+  seen.nowMs += 50;
+  frame = sim.tick(seen);
+  assert.equal(frame.noticedPlayer, false);
+  seen.playerVisible = true;
+  seen.nowMs += 50;
+  frame = sim.tick(seen);
+  assert.equal(frame.noticedPlayer, false);
+  for (let i = 0; i < 10; i++) {
+    seen.nowMs += 50;
+    frame = sim.tick(seen);
+  }
+  assert.equal(frame.noticedPlayer, true);
+});
+
+test("clearing advice lets a wake stick instead of nodding off again", () => {
+  const sim = new AliveController({ x: 0, z: 0, seed: 1, noticeMs: 50 });
+  const seen = input({ nowMs: 0, dt: 0.05, playerX: 0.4, playerZ: 0, playerVisible: true });
+  let frame = sim.tick(seen);
+  for (let i = 0; i < 80; i++) {
+    seen.nowMs += 50;
+    frame = sim.tick(seen);
+  }
+  sim.offerAdvice({ goal: "sleep", mood: "neutral", because: "quiet" }, seen.nowMs);
+  seen.nowMs += 50;
+  frame = sim.tick(seen);
+  assert.equal(frame.skill, "sleep");
+  assert.equal(frame.clip, "closed");
+  sim.clearAdvice();
+  seen.nowMs += 50;
+  frame = sim.tick(seen);
+  assert.notEqual(frame.skill, "sleep");
+  assert.notEqual(frame.clip, "closed");
+});
+
 test("pose offsets stay inside the clip-safe limits for every canonical mood", () => {
   const out: PoseSample = { bob: 0, hop: 0, roll: 0, flap: 0, headTilt: 0, eye: 0 };
   const clips = ["idle", "happy", "closed"] as const;

@@ -6,6 +6,18 @@ import type { Mood } from "../../mood/src/index.ts";
 
 const fast: BarkTuning = { lineMs: 10_000, globalMs: 0, situationMs: 40 };
 
+test("lines stay in his voice, not the dev notes", () => {
+  const banned = ["chasing is for later", "sleep mode", "malfunction", "ball form", "budget whoop"];
+  for (const situation of BARK_SITUATIONS) {
+    for (const line of BARKS[situation]) {
+      const lower = line.toLowerCase();
+      for (const phrase of banned) {
+        assert.equal(lower.includes(phrase), false, line);
+      }
+    }
+  }
+});
+
 test("every situation has a pool of 10 to 20 lines", () => {
   assert.ok(BARK_SITUATIONS.length >= 8);
   for (const situation of BARK_SITUATIONS) {
