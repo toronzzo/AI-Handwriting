@@ -81,3 +81,8 @@ Optional loopback process under `bakugan-buddy/studio/` (binds `127.0.0.1:8787`)
 - `WS /v1/stt` — sherpa-onnx streaming Zipformer
 
 The `companion/` Vite app proxies `/studio`. If the sidecar is down, `brain.ts` uses the offline regex fallback — body animation never waits on the AI path.
+
+
+## Emotion persistence
+
+`packages/emotion-state` stores mood + intensity + partner memory in SQLite (Expo) / SQLite-shaped durable row (web). On load, `decayEmotion` softens intensity toward **neutral** so a days-old `[angry]` does not snap the body awake furious. Writes happen after turns — never inside the animation frame.
