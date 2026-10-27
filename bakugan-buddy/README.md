@@ -91,3 +91,13 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every PR:
 - studio `node --check` syntax
 
 Local mirror: `npm run ci` from the repo root (after `npm install` in `companion/`).
+
+## Evals
+
+```bash
+bash bakugan-buddy/evals/ci-smoke.sh   # 5 cases vs mocked llama
+# full set (needs studio + llama or mock):
+#   node bakugan-buddy/evals/mock-llama.mjs &
+#   cd bakugan-buddy/studio && npm start &
+#   cd bakugan-buddy/evals && npm run eval
+```

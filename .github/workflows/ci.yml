@@ -64,7 +64,12 @@ jobs:
           node --check bakugan-buddy/studio/lib/tts.mjs
           node --check bakugan-buddy/studio/lib/stt.mjs
           node --check bakugan-buddy/studio/lib/paths.mjs
+          node --check bakugan-buddy/studio/lib/prompt.mjs
+          node --check bakugan-buddy/evals/mock-llama.mjs
 
       - name: Install studio (lockfile)
         run: npm ci
         working-directory: bakugan-buddy/studio
+
+      - name: Eval smoke (5 cases, mocked llama)
+        run: bash bakugan-buddy/evals/ci-smoke.sh
