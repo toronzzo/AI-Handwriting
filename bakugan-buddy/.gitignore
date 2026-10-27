@@ -9,3 +9,10 @@ studio/models/**
 !studio/models/.gitignore
 *.gguf
 *.onnx
+
+# Private Preyas pack (keep templates)
+characters/preyas/persona.json
+characters/preyas/lore.md
+characters/preyas/examples.jsonl
+characters/**/voice/
+characters/**/refs/

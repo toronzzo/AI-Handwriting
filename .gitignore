@@ -19,3 +19,10 @@ characters/preyas/
 !**/persona.template.json
 !**/lore.template.md
 !**/examples.template.jsonl
+
+# Private character pack (templates stay tracked)
+bakugan-buddy/characters/preyas/persona.json
+bakugan-buddy/characters/preyas/lore.md
+bakugan-buddy/characters/preyas/examples.jsonl
+bakugan-buddy/characters/**/voice/
+bakugan-buddy/characters/**/refs/
