@@ -40,6 +40,9 @@ jobs:
       - name: Emotion-state unit tests
         run: npm --prefix bakugan-buddy/packages/emotion-state test
 
+      - name: Alive behavior unit tests
+        run: npm --prefix bakugan-buddy/packages/alive test
+
       - name: Install companion
         run: npm ci
         working-directory: companion

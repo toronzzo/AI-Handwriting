@@ -27,6 +27,7 @@ npm install
 npx expo start
 ```
 
+- **Room** tab — Preyas in ball form, alive: idle roll, follow, explore, sleep, mood body language, delayed notice, memory log, barks  
 - **Body** tab — Aquos ball + mood buttons + in-body FPS HUD  
 - **Benchmark** tab — runs mood suite, logs JSONL to AsyncStorage  
 
@@ -86,7 +87,7 @@ See `docs/MILESTONES.md`. M1 body; studio sidecar is the PC half of M2–M4.
 GitHub Actions (`.github/workflows/ci.yml`) runs on every PR:
 
 - character pack JSON schema (`scripts/validate-packs.mjs`)
-- `@bakugan-buddy/mood` + `body-core` unit tests
+- `@bakugan-buddy/mood` + `body-core` + `alive` unit tests (`node --test`, non-zero exit on failure)
 - companion lint / typecheck / unit tests / production build
 - studio `node --check` syntax
 

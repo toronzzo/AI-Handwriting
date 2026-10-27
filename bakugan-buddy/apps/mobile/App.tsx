@@ -9,11 +9,12 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { BodyWebView, BodyWebViewAPI, type BodyMetrics } from "./src/body/BodyWebView";
 import { BenchmarkScreen } from "./src/screens/BenchmarkScreen";
+import { RoomScreen } from "./src/room/RoomScreen";
 
-type Tab = "body" | "bench";
+type Tab = "room" | "body" | "bench";
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("body");
+  const [tab, setTab] = useState<Tab>("room");
   const [metrics, setMetrics] = useState<BodyMetrics | null>(null);
 
   return (
@@ -21,8 +22,16 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.top}>
         <Text style={styles.brand}>BAKUGAN BUDDY</Text>
-        <Text style={styles.sub}>M1 · body @ 60fps · Aquos joker pack</Text>
+        <Text style={styles.sub}>
+          {tab === "room" ? "Preyas · ball form · alive in his room" : "M1 · body @ 60fps · Aquos joker pack"}
+        </Text>
         <View style={styles.tabs}>
+          <Pressable
+            style={[styles.tab, tab === "room" && styles.tabOn]}
+            onPress={() => setTab("room")}
+          >
+            <Text style={styles.tabT}>Room</Text>
+          </Pressable>
           <Pressable
             style={[styles.tab, tab === "body" && styles.tabOn]}
             onPress={() => setTab("body")}
@@ -39,10 +48,13 @@ export default function App() {
       </View>
 
       <View style={styles.stage}>
-        {/* Keep WebView mounted so benchmarks can drive the body */}
-        <View style={[styles.fill, tab !== "body" && styles.hidden]}>
-          <BodyWebView onMetrics={setMetrics} />
-        </View>
+        {tab === "room" && <RoomScreen />}
+        {/* Keep WebView mounted while benchmarking so it can drive the body */}
+        {(tab === "body" || tab === "bench") && (
+          <View style={[styles.fill, tab !== "body" && styles.hidden]}>
+            <BodyWebView onMetrics={setMetrics} />
+          </View>
+        )}
         {tab === "bench" && <BenchmarkScreen latest={metrics} />}
       </View>
 

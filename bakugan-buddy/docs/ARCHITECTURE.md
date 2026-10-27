@@ -55,6 +55,14 @@ bakugan-buddy/
 └─────────────────────────────────────────────┘
 ```
 
+## Alive layer (room)
+
+`packages/alive` is the phone-side brain for Preyas in ball form. `AliveController.tick` runs every frame and does not await anything: skill picker, follow ring, explore scan, perception timer, bark cooldowns, and procedural pose offsets. Mood ids are the canonical set in `packages/mood`. The ball performs five of them (`neutral`, `happy`, `excited`, `sad`, `angry`); the rest map onto those sets. `battle` does not change form.
+
+A `MindAdvisor` may read the memory log every few seconds and suggest `{ goal, mood }`. The picker ignores a goal whose skill does not want the frame. `MockMindAdvisor` is the offline default. `createStudioAdvisor` talks to Home Studio `POST /v1/chat` when `EXPO_PUBLIC_STUDIO_URL` or a local sidecar answers; otherwise the mock stands. Barks are text. Studio TTS is used only if `/v1/tts` is up. The event log is JSON (`t`, `name`, `detail`) in AsyncStorage.
+
+The room view is `apps/mobile/src/room`, using the meshopt `preyas_ball.glb` (MeshoptDecoder + GLTFLoader) inside react-three-fiber. Clips carry the shell. Procedural bob, hop, roll, flap, and tilt stay inside `POSE_LIMITS` so they sit on top of those clips.
+
 ## M1 scope (this milestone)
 
 - Ship `body.html` with public hooks + FPS HUD.
