@@ -46,7 +46,22 @@ export function ggufPath() {
 
 export function piperBin() {
   const local = path.join(MODELS_DIR, "piper", "piper");
-  return exists(local) ? local : which("piper");
+  if (exists(local)) return local;
+  return which("piper");
+}
+
+/** Python with piper-tts (models/venv preferred). */
+export function piperPython() {
+  const venvPy = path.join(MODELS_DIR, "venv", "bin", "python");
+  if (exists(venvPy)) return venvPy;
+  return which("python3") || which("python");
+}
+
+export function piperEngineKind() {
+  const marker = path.join(MODELS_DIR, "piper-engine.txt");
+  if (exists(marker)) return fs.readFileSync(marker, "utf8").trim();
+  if (piperBin()) return "binary";
+  return "unknown";
 }
 
 export function piperVoice(id) {

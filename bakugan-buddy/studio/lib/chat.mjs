@@ -1,4 +1,5 @@
 import { ggufPath, LLAMA_URL } from "./paths.mjs";
+import { buildSystemPrompt } from "./prompt.mjs";
 
 export function llmStatus() {
   return {
@@ -23,27 +24,27 @@ export async function llamaHealthy() {
   }
 }
 
-export function systemPrompt({ name, attribute, personality, partnerName, facts, form }) {
-  return [
-    `You are ${name}, a ${attribute}-attribute Bakugan-inspired pocket companion.`,
-    personality,
-    "Speak in 1-3 short spoken sentences.",
-    "EVERY reply MUST start with a mood tag in square brackets, then a space, then the line.",
-    "Allowed moods: [neutral] [happy] [excited] [angry] [sad] [surprised] [thinking] [listening] [battle].",
-    "Optional: wrap private reasoning in <think>...</think> (never spoken). [amused] is a happy variant.",
-    "Never break character. Never say you are an AI unless asked seriously.",
-    "Do not mention tools, models, or llama.",
-    partnerName ? `Your partner's name is ${partnerName}.` : "You do not know their name yet.",
-    form === "battle" ? "You are currently popped open (battle form)." : "You are currently in sphere form.",
-    facts?.length ? `You remember: ${facts.slice(-8).join("; ")}.` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+/** @deprecated prefer buildSystemPrompt — kept for callers that pass flat fields */
+export function systemPrompt(opts) {
+  return buildSystemPrompt({
+    partnerName: opts.partnerName,
+    facts: opts.facts,
+    form: opts.form,
+    userText: opts.userText,
+    characterOverride: {
+      name: opts.name,
+      attribute: opts.attribute,
+      personality: opts.personality,
+    },
+  }).prompt;
 }
+
+export { buildSystemPrompt };
 
 /**
  * Stream OpenAI-compat chat completions from llama-server as NDJSON
  * {type:"token", text} then {type:"done"}.
+ * Also emits {type:"timing", firstMoodMs} when the leading [mood] closes.
  */
 export async function streamChat({ messages, signal, res }) {
   const r = await fetch(`${LLAMA_URL}/v1/chat/completions`, {
@@ -69,6 +70,10 @@ export async function streamChat({ messages, signal, res }) {
     Connection: "keep-alive",
   });
 
+  const t0 = Date.now();
+  let acc = "";
+  let firstMoodMs = null;
+
   const reader = r.body.getReader();
   const dec = new TextDecoder();
   let buf = "";
@@ -86,12 +91,29 @@ export async function streamChat({ messages, signal, res }) {
       try {
         const json = JSON.parse(payload);
         const text = json.choices?.[0]?.delta?.content || "";
-        if (text) res.write(JSON.stringify({ type: "token", text }) + "\n");
+        if (text) {
+          acc += text;
+          if (firstMoodMs == null) {
+            const m = acc.match(/^\s*\[([a-z]+)\]/i);
+            if (m) {
+              firstMoodMs = Date.now() - t0;
+              res.write(
+                JSON.stringify({ type: "timing", firstMoodMs, mood: m[1].toLowerCase() }) + "\n",
+              );
+            }
+          }
+          res.write(JSON.stringify({ type: "token", text }) + "\n");
+        }
       } catch {
         /* ignore split json */
       }
     }
   }
-  res.write(JSON.stringify({ type: "done" }) + "\n");
+  res.write(
+    JSON.stringify({
+      type: "done",
+      timing: { firstMoodMs, totalMs: Date.now() - t0 },
+    }) + "\n",
+  );
   res.end();
 }
