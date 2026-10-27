@@ -37,6 +37,9 @@ jobs:
       - name: Body-core unit tests
         run: npm --prefix bakugan-buddy/packages/body-core test
 
+      - name: Emotion-state unit tests
+        run: npm --prefix bakugan-buddy/packages/emotion-state test
+
       - name: Install companion
         run: npm ci
         working-directory: companion

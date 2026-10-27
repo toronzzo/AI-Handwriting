@@ -3,7 +3,8 @@ import { flushSync } from "react-dom";
 import type { FormEvent } from "react";
 import { BAKUGANS, BAKUGAN_LIST, type BakuganId, type Emotion } from "./bakugans";
 import { streamReply } from "./brain";
-import { loadMemory, saveMemory, type PartnerMemory } from "./memory";
+import { saveMemory, type PartnerMemory } from "./memory";
+import { bootEmotionState, persistTurn } from "./state/emotionDb";
 import type { ChatMessage, Form } from "./types";
 import { BakuganBall } from "./face/BakuganBall";
 import { NeuralCore, type NeuralPulse } from "./face/NeuralCore";
@@ -30,7 +31,7 @@ function uid() {
 
 export default function App() {
   const [awake, setAwake] = useState(false);
-  const [mem, setMem] = useState<PartnerMemory>(() => loadMemory());
+  const [mem, setMem] = useState<PartnerMemory | null>(null);
   const [training, setTraining] = useState<TrainingState>(() => loadTraining());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -39,6 +40,7 @@ export default function App() {
   const [voiceOn, setVoiceOn] = useState(true);
   const [micOn, setMicOn] = useState(false);
   const [emotion, setEmotion] = useState<Emotion>("neutral");
+  const [emotionReady, setEmotionReady] = useState(false);
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [streamText, setStreamText] = useState("");
@@ -48,11 +50,11 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [studio, setStudio] = useState<StudioHealth | null>(null);
   const [talkVolume, setTalkVolume] = useState(0);
-  const liveEmotionRef = useRef<Emotion>("happy");
+  const liveEmotionRef = useRef<Emotion>("neutral");
 
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const memRef = useRef(mem);
+  const memRef = useRef<PartnerMemory | null>(mem);
   const trainingRef = useRef(training);
   const voiceOnRef = useRef(voiceOn);
   const abortRef = useRef<AbortController | null>(null);
@@ -62,12 +64,28 @@ export default function App() {
   const idleHintedRef = useRef(false);
   const busyRef = useRef(false);
 
-  const profile = BAKUGANS[mem.activeId];
-  const form = mem.forms[mem.activeId];
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const boot = await bootEmotionState();
+      if (cancelled) return;
+      setMem(boot.mem);
+      memRef.current = boot.mem;
+      setEmotion(boot.mood);
+      liveEmotionRef.current = boot.mood;
+      setEmotionReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     memRef.current = mem;
-    saveMemory(mem);
+    if (mem) {
+      saveMemory(mem);
+      void persistTurn(mem, liveEmotionRef.current);
+    }
   }, [mem]);
 
   useEffect(() => {
@@ -96,13 +114,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!mem) return;
+    const profile = BAKUGANS[mem.activeId];
     document.documentElement.dataset.attr = profile.attribute;
     document.documentElement.style.setProperty("--c-primary", profile.colors.shell);
     document.documentElement.style.setProperty("--c-secondary", profile.colors.accent);
     document.documentElement.style.setProperty("--c-glow", profile.colors.core);
     document.documentElement.style.setProperty("--c-deep", profile.colors.shellDeep);
     document.documentElement.style.setProperty("--c-ash", profile.colors.ash);
-  }, [profile]);
+  }, [mem]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
@@ -134,7 +154,9 @@ export default function App() {
   }
 
   function speakCoach(line: CoachLine, reason: string) {
-    const id = memRef.current.activeId;
+    const memNow = memRef.current;
+    if (!memNow) return;
+    const id = memNow.activeId;
     const p = BAKUGANS[id];
     pushNeural("feel", `[${line.emotion}]`);
     pushNeural("intend", reason);
@@ -167,10 +189,12 @@ export default function App() {
       const upcoming = nextDrill(trainingRef.current);
       if (!upcoming) return;
       idleHintedRef.current = true;
+      const memNow = memRef.current;
+      if (!memNow) return;
       const line = coachIdleLine(
-        memRef.current.activeId,
+        memNow.activeId,
         upcoming,
-        memRef.current.partnerName,
+        memNow.partnerName,
       );
       speakCoach(line, "idle coach");
     }, 4000);
@@ -229,15 +253,15 @@ export default function App() {
     setEmotion("thinking");
     setStreamText("");
     const unlockedThisTurn: Drill[] = [
-      ...patchTrain({ kind: "user", text, mem: memRef.current }),
+      ...patchTrain({ kind: "user", text, mem: memRef.current! }),
     ];
 
     const spoken: string[] = [];
-    let activeId = memRef.current.activeId;
+    let activeId = memRef.current!.activeId;
     liveEmotionRef.current = "thinking";
 
     try {
-      for await (const ev of streamReply(text, memRef.current, {
+      for await (const ev of streamReply(text, memRef.current!, {
         signal: ac.signal,
         nextDrill: nextDrill(trainingRef.current),
       })) {
@@ -254,6 +278,8 @@ export default function App() {
           liveEmotionRef.current = ev.emotion;
           setEmotion(ev.emotion);
           setMem(ev.memory);
+          saveMemory(ev.memory);
+          void persistTurn(ev.memory, ev.emotion);
           playEmotionSound(ev.emotion);
           unlockedThisTurn.push(
             ...patchTrain({ kind: "emotion", emotion: ev.emotion, mem: ev.memory }),
@@ -270,6 +296,8 @@ export default function App() {
           );
         } else if (ev.type === "done") {
           setMem(ev.result.memory);
+          saveMemory(ev.result.memory);
+          void persistTurn(ev.result.memory, ev.result.emotion);
           unlockedThisTurn.push(
             ...patchTrain({ kind: "emotion", emotion: ev.result.emotion, mem: ev.result.memory }),
           );
@@ -298,11 +326,13 @@ export default function App() {
       const unique = [...new Map(unlockedThisTurn.map((d) => [d.id, d])).values()];
       const upcoming = nextDrill(trainingRef.current);
       if (unique.length && upcoming) {
+        const memNow = memRef.current;
+        if (!memNow) return;
         const line = coachUnlockLine(
-          memRef.current.activeId,
+          memNow.activeId,
           unique[0]!,
           upcoming,
-          memRef.current.partnerName,
+          memNow.partnerName,
         );
         window.setTimeout(() => speakCoach(line, "coach next drill"), 700);
       }
@@ -310,6 +340,7 @@ export default function App() {
   }
 
   function wake(id?: BakuganId) {
+    if (!mem) return;
     const next = id ? { ...mem, activeId: id } : mem;
     setMem(next);
     setAwake(true);
@@ -376,7 +407,7 @@ export default function App() {
         {
           id: uid(),
           role: "bakugan",
-          bakuganId: mem.activeId,
+          bakuganId: memRef.current?.activeId ?? "preyas",
           text: "Ears need the studio sidecar (sherpa-onnx). Type for now — I'll still hop.",
           emotion: "neutral",
           at: Date.now(),
@@ -419,10 +450,13 @@ export default function App() {
   }
 
   function setForm(next: Form) {
-    setMem((m) => ({
-      ...m,
-      forms: { ...m.forms, [m.activeId]: next },
-    }));
+    setMem((m) => {
+      if (!m) return m;
+      return {
+        ...m,
+        forms: { ...m.forms, [m.activeId]: next },
+      };
+    });
     setEmotion(next === "battle" ? "excited" : "neutral");
     if (next === "battle") {
       playEmotionSound("excited");
@@ -440,6 +474,12 @@ export default function App() {
     void runTurn(`switch to ${BAKUGANS[id].name}`);
   }
 
+  if (!mem || !emotionReady) {
+    return <div className="app boot">Warming core…</div>;
+  }
+
+  const profile = BAKUGANS[mem.activeId];
+  const form = mem.forms[mem.activeId];
   const others = BAKUGAN_LIST.filter((b) => b.id !== mem.activeId)
     .map((b) => b.name)
     .join(" / ");
@@ -470,7 +510,7 @@ export default function App() {
                 type="button"
                 className={`roster-pill ${b.id === mem.activeId ? "active" : ""}`}
                 onClick={() => {
-                  setMem((m) => ({ ...m, activeId: b.id }));
+                  setMem((m) => (m ? { ...m, activeId: b.id } : m));
                   setEmotion("happy");
                 }}
               >
