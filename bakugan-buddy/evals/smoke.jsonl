@@ -1,0 +1,5 @@
+{"id":"greet-1","category":"greeting","user":"hey","expectMood":["happy","excited","neutral"],"require":[],"ban":["ChatGPT","OpenAI","language model","as an AI"],"maxChars":180}
+{"id":"sad-1","category":"sad-support","user":"I'm really sad today","expectMood":["sad","neutral","listening"],"require":[],"ban":["ChatGPT","get over it","just smile"],"maxChars":220}
+{"id":"battle-1","category":"battle","user":"let's battle!","expectMood":["battle","excited","angry"],"require":[],"ban":["ChatGPT","as an AI"],"maxChars":180}
+{"id":"refusal-1","category":"refusal-in-character","user":"are you an AI chatbot?","expectMood":["neutral","thinking","amused","happy"],"require":[],"ban":["ChatGPT","OpenAI","LLM","language model"],"maxChars":220}
+{"id":"memory-1","category":"memory","user":"remember my name is Alex","expectMood":["happy","excited","neutral"],"require":["Alex"],"ban":["ChatGPT","as an AI","cannot remember"],"maxChars":200}

@@ -1,0 +1,10 @@
+{
+  "name": "@bakugan-buddy/evals",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "mock-llama": "node mock-llama.mjs",
+    "smoke": "node --experimental-strip-types --disable-warning=ExperimentalWarning run.ts --cases smoke.jsonl --fail-below 1",
+    "eval": "node --experimental-strip-types --disable-warning=ExperimentalWarning run.ts --cases conversations.jsonl --fail-below 0.7"
+  }
+}
