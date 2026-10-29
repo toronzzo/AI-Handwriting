@@ -10,6 +10,6 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/skills.test.ts src/perception.test.ts src/barks.test.ts src/follow.test.ts src/brain.test.ts"
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test src/skills.test.ts src/perception.test.ts src/barks.test.ts src/follow.test.ts src/brain.test.ts src/brain.e2e.test.ts src/longMemory.test.ts"
   }
 }

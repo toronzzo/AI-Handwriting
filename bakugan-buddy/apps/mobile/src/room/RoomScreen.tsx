@@ -28,7 +28,7 @@ import {
   type MindAdvisor,
   type Mood,
 } from "../../../../packages/alive/src/index.ts";
-import { findBrain, normalizeBrainUrl, probeBrain, readBrainHost, writeBrainHost } from "./brain/brainLink";
+import { fetchRemembered, findBrain, normalizeBrainUrl, probeBrain, readBrainHost, sendMoment, writeBrainHost } from "./brain/brainLink";
 import { adviseOnDevice, onDeviceBrainEnabled } from "bakugan-on-device-brain";
 import { Canvas, useFrame, useThree } from "./fiber";
 import { loadPreyasBall } from "./loadPreyas";
@@ -599,7 +599,9 @@ export function RoomScreen() {
   useEffect(() => {
     let cancel = false;
     void readBrainHost().then((saved) => {
-      if (!cancel && saved) setBrainHost(saved);
+      if (cancel) return;
+      if (saved) setBrainHost(saved);
+      else if (process.env.EXPO_PUBLIC_BRAIN_URL) setBrainHost(process.env.EXPO_PUBLIC_BRAIN_URL);
     });
     return () => {
       cancel = true;
@@ -706,16 +708,37 @@ export function RoomScreen() {
         bag.adviseBusy = true;
         const snap: AdvisorInput = bag.sim.advisorSnapshot();
         snap.partnerName = bag.partnerName;
-        snap.facts = bag.facts;
-        void bag.advisorRef.current.advise(snap).then(
-          (suggestion) => {
-            bag.sim.offerAdvice(suggestion, Date.now());
-            bag.adviseBusy = false;
-          },
-          () => {
-            bag.adviseBusy = false;
-          },
-        );
+        const adviseWith = (remembered: string[]) => {
+          const local = bag.facts;
+          const combined: string[] = [];
+          for (let i = 0; i < remembered.length; i++) combined.push(remembered[i]!);
+          for (let i = 0; i < local.length && combined.length < 8; i++) combined.push(local[i]!);
+          snap.facts = combined;
+          void bag.advisorRef.current.advise(snap).then(
+            (suggestion) => {
+              bag.sim.offerAdvice(suggestion, Date.now());
+              if (suggestion?.line && bag.brainUrl) {
+                sendMoment(
+                  bag.brainUrl,
+                  JSON.stringify({
+                    line: suggestion.line,
+                    mood: suggestion.mood,
+                    events: snap.events.slice(-6),
+                  }),
+                );
+              }
+              bag.adviseBusy = false;
+            },
+            () => {
+              bag.adviseBusy = false;
+            },
+          );
+        };
+        if (bag.brainUrl) {
+          void fetchRemembered(bag.brainUrl, `${snap.skill} ${snap.mood}`).then(adviseWith, () => adviseWith([]));
+        } else {
+          adviseWith([]);
+        }
       }
       if (bag.streamGen !== seenStream) {
         seenStream = bag.streamGen;
@@ -845,7 +868,7 @@ export function RoomScreen() {
           }}
           autoCapitalize="none"
           autoCorrect={false}
-          placeholder="Mac brain http://192.168.x.x:8788"
+          placeholder="Mac :8788 or LiteLLM :4000"
           placeholderTextColor="#7d8792"
           style={styles.brainInput}
         />

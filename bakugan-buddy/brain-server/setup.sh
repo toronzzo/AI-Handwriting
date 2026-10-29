@@ -3,7 +3,7 @@
 #   ./setup.sh                  # ask for the volume, download the default 8B
 #   ./setup.sh --model fast
 #   ./setup.sh --model large    # 14B Q4, prints a 16 GB warning
-#   BAKUGAN_DATA_DIR=/Volumes/Drive/BakuganBuddy ./setup.sh
+#   BAKUGAN_DATA_DIR=/Volumes/Agent/agent ./setup.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/ensure-drive.sh
@@ -23,7 +23,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      echo "usage: ./setup.sh [--model fast|default|default-q5|large|all] [/Volumes/Drive/BakuganBuddy]"
+      echo "usage: ./setup.sh [--model fast|default|default-q5|large|all] [/Volumes/Agent/agent]"
       exit 0
       ;;
     *)
@@ -37,44 +37,17 @@ if [[ -n "${POSITIONAL[0]:-}" ]]; then
   BAKUGAN_DATA_DIR="${POSITIONAL[0]}"
 fi
 
-list_volumes() {
-  local name
-  [[ -d /Volumes ]] || return 0
-  for name in /Volumes/*; do
-    [[ -d "$name" ]] || continue
-    name="$(basename "$name")"
-    case "$name" in
-      "Macintosh HD"*|Recovery|Preboot|Update|VM|com.apple*) continue ;;
-    esac
-    if mount | grep -F " on /Volumes/$name " >/dev/null 2>&1; then
-      printf '%s\n' "$name"
-    fi
-  done
-}
-
 if [[ -z "${BAKUGAN_DATA_DIR:-}" ]]; then
-  volumes=()
-  while IFS= read -r name; do
-    [[ -n "$name" ]] && volumes+=("$name")
-  done < <(list_volumes || true)
-  if [[ ${#volumes[@]} -eq 0 ]]; then
-    echo "No external drive is mounted under /Volumes." >&2
-    echo "Plug in the drive (about 500 GB is plenty), then run ./setup.sh again." >&2
+  if mount | grep -F " on /Volumes/Agent " >/dev/null 2>&1; then
+    BAKUGAN_DATA_DIR="/Volumes/Agent/agent"
+    echo "Data root: $BAKUGAN_DATA_DIR"
+  else
+    echo "The Agent volume is not mounted at /Volumes/Agent." >&2
+    echo "Plug in the APFS drive named Agent, then run ./setup.sh again." >&2
+    echo "Or pass another mounted path: BAKUGAN_DATA_DIR=/Volumes/<Drive>/agent ./setup.sh" >&2
     echo "Nothing was written to the internal disk." >&2
     exit 1
   fi
-  echo "External volumes:"
-  printf '  /Volumes/%s\n' "${volumes[@]}"
-  pick="${volumes[0]}"
-  if [[ ${#volumes[@]} -gt 1 && -t 0 ]]; then
-    read -r -p "Drive name [${pick}]: " typed
-    if [[ -n "$typed" ]]; then pick="$typed"; fi
-  elif [[ ${#volumes[@]} -gt 1 ]]; then
-    echo "More than one volume. Re-run with BAKUGAN_DATA_DIR=/Volumes/<Drive>/BakuganBuddy" >&2
-    exit 1
-  fi
-  BAKUGAN_DATA_DIR="/Volumes/${pick}/BakuganBuddy"
-  echo "Data root: $BAKUGAN_DATA_DIR"
 fi
 
 export BAKUGAN_DATA_DIR
@@ -85,6 +58,7 @@ mkdir -p \
   "$BAKUGAN_DATA_DIR/hf" \
   "$BAKUGAN_DATA_DIR/logs" \
   "$BAKUGAN_DATA_DIR/memory" \
+  "$BAKUGAN_DATA_DIR/cache" \
   "$BAKUGAN_DATA_DIR/training" \
   "$BAKUGAN_DATA_DIR/rl"
 
@@ -93,7 +67,8 @@ Bakugan Buddy data. Safe to keep on this external drive.
   models/    GGUF weights (not in git)
   hf/        Hugging Face cache (HF_HOME)
   logs/      llama-server logs
-  memory/    room memory exports from the phone
+  memory/    room memory exports and facts.sqlite
+  cache/     llama prompt-cache slot
   training/  future training data
   rl/        future RL checkpoints
 EOF

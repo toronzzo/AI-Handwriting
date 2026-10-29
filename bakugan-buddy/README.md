@@ -64,7 +64,11 @@ cd bakugan-buddy/brain-server
 
 On the phone or in Expo web, paste that URL into the brain field (or tap **find** on the same Wi-Fi). With the server off, Preyas stays on his bark lines.
 
-Default model is an abliterated Qwen3 8B Q4_K_M, context 4096, sized for 16 GB unified memory. `fast` is a 4B. `large` is a 14B Q4 that swaps and asks you to confirm. Weights are downloaded to `/Volumes/<Drive>/BakuganBuddy` and are not in git.
+The default data root is `/Volumes/Agent/agent` (models in `models/`). Override with `BAKUGAN_DATA_DIR` if you must. Setup stops when Agent is not mounted.
+
+Default model is an abliterated Qwen3 8B Q4_K_M, context 4096, sized for 16 GB unified memory. `fast` is a 4B. `large` is a 14B Q4 that swaps and asks you to confirm. `./start.sh` turns on llama.cpp prompt-cache reuse and restores Preyas's system-prompt slot from `cache/` on the drive. The brain field also accepts a LiteLLM gateway on port 4000.
+
+Weights are not in git. After a talk, the Mac extracts a few lasting facts into SQLite (`memory/facts.sqlite`, cap 40) and the next prompt recalls the relevant ones. `sqlite-vec` is optional; without it, recall is word overlap.
 
 The on-device 1.7B (`llama.rn`) is off in Expo Go. A dev client turns it on with `EXPO_PUBLIC_ON_DEVICE_BRAIN=1` after `npx expo install llama.rn`, and the GGUF downloads on first use. iOS: `npx expo run:ios`. Android: `npx expo run:android`.
 

@@ -6,6 +6,8 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { FACT_EXTRACT_PROMPT } from "../../packages/alive/src/longMemory.ts";
+import { openMemory, parseExtractedFacts, relevantFacts, rememberFacts } from "./lib/memory.mjs";
 
 const llamaUrl = (process.env.LLAMA_URL || "http://127.0.0.1:8790").replace(/\/$/, "");
 const port = Number(process.env.BRAIN_PORT || 8788);
@@ -38,6 +40,47 @@ function readBody(req) {
   });
 }
 
+let memoryBook = null;
+function book() {
+  if (!dataDir) return null;
+  if (!memoryBook) memoryBook = openMemory(path.join(dataDir, "memory", "facts.sqlite"));
+  return memoryBook;
+}
+
+function extractLater(payload) {
+  const events = Array.isArray(payload.events) ? payload.events : [];
+  let moment = `mood=${payload.mood || ""}\nline=${payload.line || ""}\n`;
+  for (let i = 0; i < events.length && i < 8; i++) {
+    const event = events[i] || {};
+    moment += `${event.name || ""} ${event.detail || ""}\n`;
+  }
+  void fetch(`${llamaUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "preyas",
+      stream: false,
+      temperature: 0,
+      max_tokens: 120,
+      cache_prompt: true,
+      id_slot: 1,
+      messages: [
+        { role: "system", content: FACT_EXTRACT_PROMPT },
+        { role: "user", content: moment },
+      ],
+    }),
+  })
+    .then(async (res) => {
+      if (!res.ok) return;
+      const json = await res.json();
+      const content = json.choices?.[0]?.message?.content || "";
+      const facts = parseExtractedFacts(content);
+      const store = book();
+      if (store && facts.length) rememberFacts(store, facts);
+    })
+    .catch(() => {});
+}
+
 const server = http.createServer(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") {
@@ -66,6 +109,22 @@ const server = http.createServer(async (req, res) => {
           llama: llamaUrl,
         }),
       );
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/facts") {
+      const store = book();
+      const facts = store ? relevantFacts(store, url.searchParams.get("q") || "", 4) : [];
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ facts }));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/facts") {
+      const payload = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      res.writeHead(202, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      extractLater(payload);
       return;
     }
 

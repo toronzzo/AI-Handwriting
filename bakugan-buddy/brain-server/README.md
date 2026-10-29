@@ -6,14 +6,14 @@ Weights stay on the **external drive**. Nothing in this folder is a GGUF.
 
 ## One-time setup
 
-Plug in the external drive, then:
+Plug in the APFS volume named **Agent** (`/Volumes/Agent`), then:
 
 ```bash
 cd bakugan-buddy/brain-server
 ./setup.sh
 ```
 
-The script lists `/Volumes`, asks which drive when there are several, and uses `/Volumes/<Drive>/BakuganBuddy`. If the drive is not mounted it stops. It will not download onto the internal disk.
+The default data root is `/Volumes/Agent/agent` (GGUFs in `models/`). If Agent is not mounted, setup stops. Pass `BAKUGAN_DATA_DIR=/Volumes/<Other>/agent` to use another mounted volume. It will not download onto the internal disk.
 
 It installs `llama-server` with `brew install llama.cpp` when needed, then downloads the **default** model (about 5.1 GB).
 
@@ -30,7 +30,9 @@ It installs `llama-server` with `brew install llama.cpp` when needed, then downl
 ./start.sh
 ```
 
-That is the command you run each session. It prints a URL like `http://192.168.1.20:8788`. Put that in the room's brain field on the phone (same Wi-Fi). The server also advertises `_bakugan-brain._tcp` via `dns-sd`.
+That is the command you run each session. It prints a URL like `http://192.168.1.20:8788`. Put that in the room's brain field on the phone (same Wi-Fi). A LiteLLM gateway on port 4000 is the same field with a different URL. The server also advertises `_bakugan-brain._tcp` via `dns-sd`.
+
+`llama-server` is started with `--cache-reuse 256` when that flag exists, one slot for Preyas and a second slot for fact extraction. After the model is healthy, `lib/warm-cache.mjs` restores `cache/preyas-system.bin` if the system prompt hash matches, otherwise it warms the prefix and saves the slot. Do not edit facts into `PREYAS_SYSTEM_PROMPT`; that string is the cache prefix.
 
 Switch the loaded tier, then start again:
 
@@ -52,7 +54,8 @@ Switch the loaded tier, then start again:
 | `models/` | GGUF files |
 | `hf/` | `HF_HOME` and the Hugging Face cache |
 | `logs/` | llama-server log |
-| `memory/` | JSONL exports the phone posts |
+| `memory/` | JSONL exports plus `facts.sqlite` (at most 40 lasting facts) |
+| `cache/` | Saved llama slot for the system prompt |
 | `training/` | reserved for later training data |
 | `rl/` | reserved for later RL checkpoints |
 
