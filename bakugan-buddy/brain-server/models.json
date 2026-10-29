@@ -1,0 +1,46 @@
+{
+  "fast": {
+    "label": "Fast · Qwen3 4B abliterated Q4_K_M",
+    "repo": "bartowski/mlabonne_Qwen3-4B-abliterated-GGUF",
+    "file": "mlabonne_Qwen3-4B-abliterated-Q4_K_M.gguf",
+    "hf": "https://huggingface.co/bartowski/mlabonne_Qwen3-4B-abliterated-GGUF",
+    "context": 4096,
+    "weightsGb": 2.5,
+    "llamaGb": "about 4 GB",
+    "fits16": true,
+    "warn": false
+  },
+  "default": {
+    "label": "Default · Qwen3 8B v2 abliterated Q4_K_M",
+    "repo": "mradermacher/Huihui-Qwen3-8B-abliterated-v2-GGUF",
+    "file": "Huihui-Qwen3-8B-abliterated-v2.Q4_K_M.gguf",
+    "hf": "https://huggingface.co/mradermacher/Huihui-Qwen3-8B-abliterated-v2-GGUF",
+    "context": 4096,
+    "weightsGb": 5.1,
+    "llamaGb": "about 6.5–8 GB",
+    "fits16": true,
+    "warn": false
+  },
+  "default-q5": {
+    "label": "Sharper 8B · Qwen3 8B v2 abliterated Q5_K_M",
+    "repo": "mradermacher/Huihui-Qwen3-8B-abliterated-v2-GGUF",
+    "file": "Huihui-Qwen3-8B-abliterated-v2.Q5_K_M.gguf",
+    "hf": "https://huggingface.co/mradermacher/Huihui-Qwen3-8B-abliterated-v2-GGUF",
+    "context": 4096,
+    "weightsGb": 6.0,
+    "llamaGb": "about 8–9 GB",
+    "fits16": true,
+    "warn": false
+  },
+  "large": {
+    "label": "Large · Qwen3 14B v2 abliterated Q4_K_M",
+    "repo": "mradermacher/Huihui-Qwen3-14B-abliterated-v2-GGUF",
+    "file": "Huihui-Qwen3-14B-abliterated-v2.Q4_K_M.gguf",
+    "hf": "https://huggingface.co/mradermacher/Huihui-Qwen3-14B-abliterated-v2-GGUF",
+    "context": 2048,
+    "weightsGb": 9.1,
+    "llamaGb": "about 11 GB",
+    "fits16": false,
+    "warn": true
+  }
+}

@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { AppState, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { AppState, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import * as Network from "expo-network";
 import {
   AnimationAction,
   AnimationMixer,
@@ -16,17 +17,19 @@ import {
 import type { GLTF } from "three/addons/loaders/GLTFLoader.js";
 import {
   AliveController,
+  BRAIN_MIN_INTERVAL_MS,
   EXPLORE_POINTS,
   FOLLOW_RING_RADIUS,
-  MockMindAdvisor,
   POSE_LIMITS,
-  chainAdvisors,
-  createStudioAdvisor,
+  createBrainAdvisor,
   type AliveInput,
+  type AdvisorInput,
   type ClipName,
   type MindAdvisor,
   type Mood,
 } from "../../../../packages/alive/src/index.ts";
+import { findBrain, normalizeBrainUrl, probeBrain, readBrainHost, writeBrainHost } from "./brain/brainLink";
+import { adviseOnDevice, onDeviceBrainEnabled } from "bakugan-on-device-brain";
 import { Canvas, useFrame, useThree } from "./fiber";
 import { loadPreyasBall } from "./loadPreyas";
 import { applyAxis, closingHinge, floorLift, measureFootRadius, POSE_FADE_SEC } from "./poseRig";
@@ -97,6 +100,11 @@ type Sinks = {
   adviseBusy: boolean;
   frames: number;
   frameStamp: number;
+  partnerName: string;
+  facts: string[];
+  brainUrl: string;
+  streamText: string;
+  streamGen: number;
 };
 
 const MOODS: readonly Mood[] = ["neutral", "happy", "excited", "sad", "angry"];
@@ -269,7 +277,7 @@ function makeSinks(): Sinks {
       summonUntil: 0,
       mood: null,
     },
-    advisorRef: { current: new MockMindAdvisor() },
+    advisorRef: { current: { advise: async () => null } },
     sim: new AliveController({ x: 0.85, z: 0.35, seed: 11 }),
     bark: { text: "", mood: "neutral", until: 0, gen: 0 },
     readout: {
@@ -289,6 +297,11 @@ function makeSinks(): Sinks {
     adviseBusy: false,
     frames: 0,
     frameStamp: Date.now(),
+    partnerName: "partner",
+    facts: [],
+    brainUrl: "",
+    streamText: "",
+    streamGen: 0,
   };
 }
 
@@ -579,6 +592,52 @@ export function RoomScreen() {
   });
   const [tick, setTick] = useState(0);
   void tick;
+  const [brainHost, setBrainHost] = useState("");
+  const [brainStatus, setBrainStatus] = useState("barks");
+  bag.brainUrl = normalizeBrainUrl(brainHost);
+
+  useEffect(() => {
+    let cancel = false;
+    void readBrainHost().then((saved) => {
+      if (!cancel && saved) setBrainHost(saved);
+    });
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const url = normalizeBrainUrl(brainHost);
+    const remote: MindAdvisor = url
+      ? createBrainAdvisor({
+          baseUrl: url,
+          onPartial: (line) => {
+            bag.streamText = line;
+            bag.streamGen += 1;
+          },
+        })
+      : { advise: async () => null };
+    bag.advisorRef.current = {
+      async advise(input) {
+        if (onDeviceBrainEnabled) {
+          const local = await adviseOnDevice(input);
+          if (local) return local;
+        }
+        return remote.advise(input);
+      },
+    };
+    if (!url) {
+      setBrainStatus(onDeviceBrainEnabled ? "on device" : "barks");
+      return;
+    }
+    let cancel = false;
+    void probeBrain(url).then((ok) => {
+      if (!cancel) setBrainStatus(ok ? "connected" : "offline, barks");
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [bag, brainHost]);
 
   useEffect(() => {
     let cancel = false;
@@ -591,6 +650,8 @@ export function RoomScreen() {
       if (state) {
         bag.sim.seedMood(state.emotion.mood);
         bag.readout.mood = state.emotion.mood;
+        bag.partnerName = state.partnerName || "partner";
+        bag.facts = state.facts.slice(-6);
       }
       bag.booted = true;
       clearTimeout(timer);
@@ -602,20 +663,27 @@ export function RoomScreen() {
   }, [bag]);
 
   useEffect(() => {
-    let cancel = false;
-    void probeStudio().then((url) => {
-      if (cancel || !url) return;
-      bag.advisorRef.current = chainAdvisors(createStudioAdvisor(url), new MockMindAdvisor());
-    });
-    return () => {
-      cancel = true;
-    };
-  }, [bag]);
+    void probeStudio();
+  }, []);
 
   useEffect(() => {
     const save = () => {
       if (!bag.booted) return;
-      void writeAliveMemory(bag.sim.exportSnapshot());
+      const json = bag.sim.exportSnapshot();
+      void writeAliveMemory(json);
+      if (bag.brainUrl) {
+        void fetch(`${bag.brainUrl}/v1/memory`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: json,
+        }).catch(() => {});
+      }
+      void loadCompanionState()
+        .then((state) => {
+          bag.partnerName = state.partnerName || "partner";
+          bag.facts = state.facts.slice(-6);
+        })
+        .catch(() => {});
     };
     const interval = setInterval(save, SAVE_MS);
     const sub = AppState.addEventListener("change", (state) => {
@@ -630,12 +698,15 @@ export function RoomScreen() {
 
   useEffect(() => {
     let seen = bag.bark.gen;
+    let seenStream = bag.streamGen;
     const interval = setInterval(() => {
       const now = Date.now();
-      if (bag.booted && now - bag.adviseAt > 4000 && !bag.adviseBusy) {
+      if (bag.booted && now - bag.adviseAt > BRAIN_MIN_INTERVAL_MS && !bag.adviseBusy) {
         bag.adviseAt = now;
         bag.adviseBusy = true;
-        const snap = bag.sim.advisorSnapshot();
+        const snap: AdvisorInput = bag.sim.advisorSnapshot();
+        snap.partnerName = bag.partnerName;
+        snap.facts = bag.facts;
         void bag.advisorRef.current.advise(snap).then(
           (suggestion) => {
             bag.sim.offerAdvice(suggestion, Date.now());
@@ -645,6 +716,10 @@ export function RoomScreen() {
             bag.adviseBusy = false;
           },
         );
+      }
+      if (bag.streamGen !== seenStream) {
+        seenStream = bag.streamGen;
+        if (bag.streamText) setBark(bag.streamText);
       }
       if (bag.bark.gen === seen) return;
       seen = bag.bark.gen;
@@ -759,6 +834,51 @@ export function RoomScreen() {
           </View>
         )}
       </View>
+      <View style={styles.brainRow}>
+        <TextInput
+          value={brainHost}
+          onChangeText={setBrainHost}
+          onEndEditing={() => {
+            const url = normalizeBrainUrl(brainHost);
+            setBrainHost(url);
+            void writeBrainHost(url);
+          }}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="Mac brain http://192.168.x.x:8788"
+          placeholderTextColor="#7d8792"
+          style={styles.brainInput}
+        />
+        <Pressable
+          style={styles.pad}
+          onPress={() => {
+            void (async () => {
+              setBrainStatus("looking");
+              let localIp: string | null = null;
+              try {
+                localIp = await Network.getIpAddressAsync();
+              } catch {
+                localIp = null;
+              }
+              const found = await findBrain({
+                saved: brainHost,
+                envUrl: process.env.EXPO_PUBLIC_BRAIN_URL,
+                localIp,
+              });
+              if (found) {
+                setBrainHost(found);
+                void writeBrainHost(found);
+                setBrainStatus("connected");
+              } else {
+                setBrainStatus("offline, barks");
+              }
+            })();
+          }}
+        >
+          <Text style={styles.padText}>find</Text>
+        </Pressable>
+        <Text style={styles.brainStatus}>{brainStatus}</Text>
+      </View>
       {debug && (
         <View style={styles.controls}>
           <View style={styles.row}>
@@ -866,6 +986,25 @@ const styles = StyleSheet.create({
   stage: { flex: 1 },
   canvas: { flex: 1 },
   debugHit: { position: "absolute", top: 0, right: 0, width: 56, height: 56 },
+  brainRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#10141a",
+  },
+  brainInput: {
+    flex: 1,
+    color: "#e8e8e8",
+    fontSize: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(200,200,200,0.28)",
+  },
+  brainStatus: { color: "#8b97a3", fontSize: 11, width: 92 },
   readout: {
     position: "absolute",
     top: 8,

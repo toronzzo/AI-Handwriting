@@ -52,6 +52,22 @@ Private Bakugan-inspired skins stay in a private pack folder — never ship Spin
 
 **Feels real?** Read [`docs/PREYAS_FROM_ANIME.md`](./docs/PREYAS_FROM_ANIME.md) — anime body language, partner mind, and acted voice rules. Product spine: [`docs/CURSOR_PRODUCT_PROMPT.md`](./docs/CURSOR_PRODUCT_PROMPT.md).
 
+## Preyas brain (M1 Pro, external drive)
+
+The room's language model runs on the Mac, not in the render loop. Setup and RAM notes: [`brain-server/README.md`](./brain-server/README.md).
+
+```bash
+cd bakugan-buddy/brain-server
+./setup.sh    # once, with the external drive mounted
+./start.sh    # each session. Prints http://<mac-ip>:8788
+```
+
+On the phone or in Expo web, paste that URL into the brain field (or tap **find** on the same Wi-Fi). With the server off, Preyas stays on his bark lines.
+
+Default model is an abliterated Qwen3 8B Q4_K_M, context 4096, sized for 16 GB unified memory. `fast` is a 4B. `large` is a 14B Q4 that swaps and asks you to confirm. Weights are downloaded to `/Volumes/<Drive>/BakuganBuddy` and are not in git.
+
+The on-device 1.7B (`llama.rn`) is off in Expo Go. A dev client turns it on with `EXPO_PUBLIC_ON_DEVICE_BRAIN=1` after `npx expo install llama.rn`, and the GGUF downloads on first use. iOS: `npx expo run:ios`. Android: `npx expo run:android`.
+
 ## Home Studio v0 (offline LLM / STT / TTS)
 
 ```bash

@@ -85,6 +85,12 @@ jobs:
           node --check bakugan-buddy/studio/lib/paths.mjs
           node --check bakugan-buddy/studio/lib/prompt.mjs
           node --check bakugan-buddy/evals/mock-llama.mjs
+          node --check bakugan-buddy/brain-server/proxy.mjs
+          node --check bakugan-buddy/brain-server/lib/select-model.mjs
+          bash -n bakugan-buddy/brain-server/setup.sh
+          bash -n bakugan-buddy/brain-server/start.sh
+          bash -n bakugan-buddy/brain-server/use-model.sh
+          bash -n bakugan-buddy/brain-server/lib/ensure-drive.sh
 
       - name: Install studio (lockfile)
         run: npm ci
