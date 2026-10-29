@@ -55,6 +55,14 @@ bakugan-buddy/
 └─────────────────────────────────────────────┘
 ```
 
+## Alive layer (room)
+
+`packages/alive` is the phone-side brain for Preyas in ball form. `AliveController.tick` runs every frame and does not await anything: skill picker, follow ring, explore scan, perception timer, bark cooldowns, and procedural pose offsets. Mood ids are the canonical set in `packages/mood`. The ball performs five of them (`neutral`, `happy`, `excited`, `sad`, `angry`); the rest map onto those sets. `battle` does not change form.
+
+A `MindAdvisor` may suggest `{ goal, mood, moodDelta, line }` every few seconds. The picker ignores a goal whose skill does not want the frame. The Mac brain (`bakugan-buddy/brain-server`) is an OpenAI-compatible llama-server on the LAN. Calls are rate-limited, timed out, and off the frame. A bad or missing brain returns null and the bark pools keep talking. Home Studio TTS is used only if `/v1/tts` is up. The event log stays a 48-slot ring and is written to AsyncStorage at most every 10 seconds, plus when the app backgrounds. A copy can also land on the Mac's external drive. The resting mood is the emotion-state row in expo-sqlite.
+
+The room view is `apps/mobile/src/room`. Web loads the meshopt `preyas_ball.glb`. iOS and Android load `preyas_ball.native.glb` (KHR_mesh_quantization only) because Hermes has no WebAssembly. The native screen imports `@react-three/fiber/native`. Clips carry the shell: sleep plays `close` then `closed`, and waking plays `open`. Procedural flap follows each flap's tilted hinge, head tilt sits on the head bone, and roll lifts the root so the base stays on the floor. Offsets stay inside `POSE_LIMITS`. `npm run check:ball` in `apps/mobile` repeats that floor check.
+
 ## M1 scope (this milestone)
 
 - Ship `body.html` with public hooks + FPS HUD.
