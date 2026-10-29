@@ -30,6 +30,13 @@ export type AdvisorSuggestion = {
   mood: Mood;
   /** Short reason stored in the log, not spoken. */
   because: string;
+  /** Spoken line from a brain. The next tick says it instead of a canned bark. */
+  line?: string;
+  /**
+   * 1 adopt `mood`, 0 leave the body's mood alone, -1 calm the current mood.
+   * Missing means the older absolute hint: use `mood`.
+   */
+  moodDelta?: -1 | 0 | 1;
 };
 
 export type AdvisorInput = {
@@ -42,6 +49,9 @@ export type AdvisorInput = {
   sleepRequested: boolean;
   settled: boolean;
   events: readonly MemoryEvent[];
+  /** Partner facts from the emotion-state store. Optional. */
+  facts?: readonly string[];
+  partnerName?: string;
 };
 
 export interface MindAdvisor {

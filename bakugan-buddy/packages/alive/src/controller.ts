@@ -8,6 +8,12 @@ import { emptyFacts, EventLog, exportMemoryJson, loadMemoryJson } from "./memory
 import { makeSlot, resetSlot, tickNotice, type NoticeSlot } from "./perception.ts";
 import { clipFor, sampleIdle, type PoseSample } from "./pose.ts";
 import { pickSkill } from "./skills.ts";
+
+function calmer(mood: Mood): Mood {
+  if (mood === "excited" || mood === "angry" || mood === "surprised" || mood === "battle") return "neutral";
+  if (mood === "happy") return "neutral";
+  return mood;
+}
 import {
   ADVICE_HOLD_MS,
   IDLE_SPIN,
@@ -99,6 +105,9 @@ export class AliveController {
   private scanBase = 0;
   private adviceGoal: SkillId | null = null;
   private adviceMood: Mood | null = null;
+  /** 1 use the suggested mood, 0 keep the body's mood, -1 calm down. null is the old absolute hint. */
+  private adviceDelta: -1 | 0 | 1 | null = null;
+  private pendingLine = "";
   private adviceUntil = 0;
   private noticedAt = -1_000_000;
   private justNoticed = false;
@@ -157,7 +166,9 @@ export class AliveController {
     const changed = suggestion.goal !== this.adviceGoal || mood !== this.adviceMood;
     this.adviceGoal = suggestion.goal;
     this.adviceMood = mood;
+    this.adviceDelta = suggestion.moodDelta === undefined ? null : suggestion.moodDelta;
     this.adviceUntil = nowMs + ADVICE_HOLD_MS;
+    if (suggestion.line) this.pendingLine = suggestion.line;
     if (changed) {
       this.log.push(nowMs, "advice", `${suggestion.goal} ${mood}`);
       this.rev += 1;
@@ -203,6 +214,7 @@ export class AliveController {
   clearAdvice(): void {
     this.adviceGoal = null;
     this.adviceMood = null;
+    this.adviceDelta = null;
     this.adviceUntil = 0;
   }
 
@@ -366,10 +378,18 @@ export class AliveController {
       mood,
       moodJustChanged,
     });
-    const bark = pickBark(situation, input.nowMs, this.barkState, this.rng);
-    if (bark) {
+    let bark: string | null = null;
+    if (this.pendingLine) {
+      bark = this.pendingLine;
+      this.pendingLine = "";
       this.log.push(input.nowMs, "bark", bark);
       this.rev += 1;
+    } else {
+      bark = pickBark(situation, input.nowMs, this.barkState, this.rng);
+      if (bark) {
+        this.log.push(input.nowMs, "bark", bark);
+        this.rev += 1;
+      }
     }
 
     const notice01 = this.playerSlot.noticed ? 1 : Math.min(1, this.playerSlot.seenMs / this.noticeMs);
@@ -417,7 +437,10 @@ export class AliveController {
     if (this.playerSlot.noticed && input.nowMs - this.noticedAt < NOTICE_MOOD_MS) return "surprised";
     if (skill === "sleep") return "neutral";
     if (hurry) return "excited";
-    if (this.adviceMood && input.nowMs <= this.adviceUntil) return this.adviceMood;
+    if (this.adviceMood && input.nowMs <= this.adviceUntil && this.adviceDelta !== 0) {
+      if (this.adviceDelta === -1) return calmer(this.mood);
+      return this.adviceMood;
+    }
     if (skill === "explore" && this.explorePhase !== 1) return "thinking";
     if (skill === "follow") return "happy";
     return this.restMood;

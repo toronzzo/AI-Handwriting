@@ -36,6 +36,18 @@ export {
   type AdvisorSuggestion,
   type MindAdvisor,
 } from "./advisor.ts";
+export {
+  BRAIN_MIN_INTERVAL_MS,
+  BRAIN_TIMEOUT_MS,
+  PREYAS_SYSTEM_PROMPT,
+  brainReplyToSuggestion,
+  brainUserPrompt,
+  createBrainAdvisor,
+  parseBrainReply,
+  type BrainAdvisorOptions,
+  type BrainReply,
+  type MoodDelta,
+} from "./brain.ts";
 export type { Mood } from "../../mood/src/index.ts";
 export type {
   AliveFrame,

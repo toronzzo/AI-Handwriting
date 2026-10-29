@@ -29,7 +29,7 @@ type AdvisorSuggestion = { goal: SkillId; mood: Mood; because: string };
 
 Call `advise` every few seconds, off the frame. Pass `controller.advisorSnapshot()`. Feed a non-null result to `controller.offerAdvice(suggestion, nowMs)`. The hint expires on its own (`ADVICE_HOLD_MS`).
 
-`MockMindAdvisor` is the offline default. `createStudioAdvisor(baseUrl)` posts one `[mood] goal` request to Home Studio `POST /v1/chat` and returns null if the sidecar is down or the line is not a goal. `chainAdvisors(studio, mock)` prefers the studio.
+`createBrainAdvisor(baseUrl)` posts to the Mac brain (`/v1/chat/completions`), parses one JSON object `{ line, goal, mood, moodDelta }`, and returns null on timeout, a rate limit, or junk. The room then keeps the bark pools. `createStudioAdvisor` is the older `[mood] goal` line for Home Studio.
 
 The picker still runs `skillWants`. A suggestion whose skill does not want the frame changes nothing about what he does, other than a mood tint when no stronger performance (notice, hurry, sleep, a button) is in play.
 
