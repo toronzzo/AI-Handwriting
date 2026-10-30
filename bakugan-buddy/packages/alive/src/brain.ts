@@ -21,6 +21,9 @@ const LINE_MAX = 180;
 /**
  * Original persona. Preyas is an Aquos Bakugan: playful, a show-off, a
  * trickster who likes his partner. Not a copied episode script.
+ *
+ * This string is the prompt-cache prefix. Do not interpolate facts or
+ * the clock into it. Those belong in the user message.
  */
 export const PREYAS_SYSTEM_PROMPT = [
   "You are Preyas, an Aquos Bakugan in ball form, living in your partner's room.",
@@ -49,8 +52,9 @@ export function brainUserPrompt(input: AdvisorInput): string {
   return [
     `partner=${input.partnerName || "partner"}`,
     `skill=${input.skill} mood=${input.mood} noticed=${input.noticedPlayer} moving=${input.playerMoving} dist=${input.distance.toFixed(2)} settled=${input.settled} sleep=${input.sleepRequested}`,
-    "Facts:",
+    "Remembered:",
     facts || "(none)",
+    input.heard ? `They just said: ${input.heard}` : "They are quiet.",
     "Recent:",
     recent || "(empty)",
     "JSON only.",
@@ -202,7 +206,8 @@ export function createBrainAdvisor(options: BrainAdvisorOptions): MindAdvisor {
   return {
     async advise(input) {
       const t = now();
-      if (busy || t - lastAt < minIntervalMs) return null;
+      const heard = Boolean(input.heard);
+      if (busy || (!heard && t - lastAt < minIntervalMs)) return null;
       lastAt = t;
       busy = true;
       const controller = new AbortController();
@@ -216,6 +221,8 @@ export function createBrainAdvisor(options: BrainAdvisorOptions): MindAdvisor {
             stream: true,
             temperature: 0.8,
             max_tokens: 160,
+            cache_prompt: true,
+            id_slot: 0,
             chat_template_kwargs: { enable_thinking: false },
             messages: [
               { role: "system", content: PREYAS_SYSTEM_PROMPT },

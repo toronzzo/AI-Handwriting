@@ -52,6 +52,8 @@ export type AdvisorInput = {
   /** Partner facts from the emotion-state store. Optional. */
   facts?: readonly string[];
   partnerName?: string;
+  /** Something the partner just said. Bypasses the idle rate limit. */
+  heard?: string;
 };
 
 export interface MindAdvisor {

@@ -56,7 +56,12 @@ export async function findBrain(options: {
   envUrl?: string;
   localIp?: string | null;
 }): Promise<string | null> {
-  const first = [options.saved || "", options.envUrl || "", "http://127.0.0.1:8788"];
+  const first = [
+    options.saved || "",
+    options.envUrl || "",
+    "http://127.0.0.1:8788",
+    "http://127.0.0.1:4000",
+  ];
   for (let i = 0; i < first.length; i++) {
     const url = normalizeBrainUrl(first[i] || "");
     if (!url) continue;
@@ -75,9 +80,9 @@ export async function findBrain(options: {
     const host = hosts[i]!;
     if (host === own) continue;
     const url = `http://${prefix}.${host}:8788`;
-    pending.push(
-      probeBrain(url, 450).then((ok) => (ok ? url : null)),
-    );
+    const gateway = `http://${prefix}.${host}:4000`;
+    pending.push(probeBrain(url, 450).then((ok) => (ok ? url : null)));
+    pending.push(probeBrain(gateway, 450).then((ok) => (ok ? gateway : null)));
     if (pending.length >= 12) {
       const hit = (await Promise.all(pending)).find((item) => item);
       if (hit) return hit;
@@ -86,4 +91,36 @@ export async function findBrain(options: {
   }
   const hit = (await Promise.all(pending)).find((item) => item);
   return hit || null;
+}
+
+/** Relevant long-term facts. A slow or missing brain just means none. */
+export async function fetchRemembered(url: string, query: string, timeoutMs = 700): Promise<string[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${normalizeBrainUrl(url)}/v1/facts?q=${encodeURIComponent(query)}`, {
+      signal: controller.signal,
+    });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { facts?: unknown };
+    if (!Array.isArray(body.facts)) return [];
+    return body.facts.filter((fact): fact is string => typeof fact === "string").slice(0, 4);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function sendMoment(url: string, body: string): void {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 800);
+  void fetch(`${normalizeBrainUrl(url)}/v1/facts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+    signal: controller.signal,
+  })
+    .catch(() => {})
+    .finally(() => clearTimeout(timer));
 }
