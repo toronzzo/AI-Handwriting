@@ -32,13 +32,13 @@ It installs `llama-server` with `brew install llama.cpp` when needed, then downl
 
 That is the command you run each session. It prints a URL like `http://192.168.1.20:8788`. Put that in the room's brain field on the phone (same Wi-Fi). A LiteLLM gateway on port 4000 is the same field with a different URL. The server also advertises `_bakugan-brain._tcp` via `dns-sd`.
 
-`./start.sh` also starts `whisper-server` on port 8178 when the binary and `WHISPER_MODEL` are present. The proxy turns a finished utterance into text and streams Piper wavs back one sentence at a time.
+`./start.sh` also starts `whisper-server` on port 8178 when the binary and `WHISPER_MODEL` are present. The proxy turns a finished utterance into text and streams a wav back one sentence at a time: Kokoro `am_puck` for English, Piper `ru_RU-dmitri-medium` for Russian.
 
 ## Voice
 
 `./setup-all.sh` is the one-shot installer for this Mac. It is safe to run twice.
 
-It uses the llama-server already on PATH (build 11867 is enough; it is not reinstalled). It `brew install`s only `python@3.11`, `ffmpeg`, and `whisper-cpp`. It does not install Docker, Ollama, or full Xcode. The system Python 3.9 is not used. The Piper venv is `$BAKUGAN_DATA_DIR/venvs/tts`.
+It uses the llama-server already on PATH (build 11867 is enough; it is not reinstalled). It `brew install`s `python@3.11`, `ffmpeg`, `whisper-cpp`, and `espeak-ng`. It does not install Docker, Ollama, or full Xcode. The system Python 3.9 is not used. The Kokoro and Piper venv is `$BAKUGAN_DATA_DIR/venvs/tts`.
 
 Speech weights, also only on the drive:
 
@@ -53,7 +53,7 @@ Kokoro-82M is the English voice because it is small (well under 1 GB) and expres
 
 Rough 16 GB budget with the default 8B Q4 brain: macOS about 5 GB, llama about 7 GB, Whisper base under 1 GB, Kokoro under 1 GB. That fits if a browser is not also holding a few gigabytes. If the machine swaps, use `./use-model.sh fast` or stay on Whisper base rather than `ggml-small.bin`.
 
-The phone streams the mic only after voice activity says the person has stopped. If they start again, playback stops. Mood changes Piper's length and noise. If `/v1/stt` or `/v1/tts` is down, the room stays on text bubbles.
+The phone streams the mic only after voice activity says the person has stopped. If they start again, playback stops. An excited or happy mood speaks a little faster; a sad or sleepy mood speaks slower. If `/v1/stt` or `/v1/tts` is down, the room stays on text bubbles.
 
 A dev-client build can later swap in `whisper.rn` for on-device hearing. Expo Go keeps using the Mac. Do not import `whisper.rn` into the Expo Go bundle.
 
