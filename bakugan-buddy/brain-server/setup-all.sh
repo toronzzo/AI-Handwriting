@@ -8,8 +8,10 @@
 #   no ffmpeg, whisper.cpp, ollama, docker, or full Xcode
 #   external APFS volume Agent at /Volumes/Agent (~468 GiB)
 #
-# Does not install Docker, Ollama, or full Xcode. Does not replace llama-server
-# when it is already on PATH. Python venvs and model files go on the drive.
+# Does not install Docker, Ollama, or full Xcode. Does not call brew install.
+# On macOS 14, Homebrew has no bottles and compiles Python 3.15, which Apple
+# clang 16.2 cannot build. Python, ffmpeg, and whisper.cpp are prebuilt or
+# compiled with the Command Line Tools onto the Agent drive.
 #
 #   ./setup-all.sh
 #   ./setup-all.sh --model fast
@@ -27,8 +29,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       echo "usage: ./setup-all.sh [--model fast|default|default-q5|large|all]"
-      echo "Installs python@3.11, ffmpeg, and whisper-cpp with Homebrew."
-      echo "Downloads the brain GGUF, a Whisper model, and a Piper voice onto /Volumes/Agent/agent."
+      echo "Downloads Python 3.11, ffmpeg, and a whisper.cpp build onto /Volumes/Agent/agent."
+      echo "Does not run brew install. Also downloads the brain GGUF, Whisper weights, Kokoro, and a Russian Piper voice."
       exit 0
       ;;
     *)
@@ -41,11 +43,6 @@ done
 resolve_bakugan_data_dir
 ensure_bakugan_drive
 
-if ! command -v brew >/dev/null 2>&1; then
-  echo "Homebrew is not installed. Install it from https://brew.sh and run this again." >&2
-  exit 1
-fi
-
 mkdir -p \
   "$BAKUGAN_DATA_DIR/models/whisper" \
   "$BAKUGAN_DATA_DIR/models/piper-voices" \
@@ -54,39 +51,13 @@ mkdir -p \
   "$BAKUGAN_DATA_DIR/cache" \
   "$BAKUGAN_DATA_DIR/memory"
 
-have_formula() {
-  brew list --formula "$1" >/dev/null 2>&1
-}
-
-ensure_formula() {
-  local formula="$1"
-  if have_formula "$formula"; then
-    echo "have $formula"
-    return 0
-  fi
-  echo "brew install $formula"
-  brew install "$formula"
-}
-
-# llama-server build 11867 is already installed. Do not brew-upgrade it.
-if command -v llama-server >/dev/null 2>&1; then
-  echo "have llama-server: $(llama-server --version 2>&1 | head -n 1 || true)"
-else
-  echo "llama-server is missing. Installing llama.cpp with Homebrew."
-  ensure_formula llama.cpp
-fi
-
-ensure_formula python@3.11
-ensure_formula ffmpeg
-ensure_formula whisper-cpp
-ensure_formula espeak-ng
-
-PY311="$(brew --prefix python@3.11)/bin/python3.11"
-if [[ ! -x "$PY311" ]]; then
-  echo "python@3.11 did not land at $PY311" >&2
-  exit 1
-fi
-echo "python: $("$PY311" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')"
+# shellcheck source=lib/prebuilt-tools.sh
+source "$ROOT/lib/prebuilt-tools.sh"
+echo "Not using Homebrew. macOS 14 would compile Python 3.15 and fail."
+require_llama_server
+install_standalone_python
+install_ffmpeg_binary
+install_whisper_cpp
 
 install_piper_binary() {
   local dest="$BAKUGAN_DATA_DIR/models/piper/piper"
@@ -106,13 +77,14 @@ install_piper_binary() {
 }
 
 VENV="$BAKUGAN_DATA_DIR/venvs/tts"
-if [[ ! -x "$VENV/bin/python" ]]; then
+if [[ ! -x "$VENV/bin/python" ]] || ! "$VENV/bin/python" -c 'import sys' >/dev/null 2>&1; then
   echo "creating venv $VENV"
+  rm -rf "$VENV"
   "$PY311" -m venv "$VENV"
 else
   echo "have venv $VENV"
 fi
-if ! "$VENV/bin/python" -c "import piper" >/dev/null 2>&1; then
+if ! "$VENV/bin/python" -c "import piper, kokoro_onnx, soundfile" >/dev/null 2>&1; then
   "$VENV/bin/python" -m pip install -U pip
   if ! "$VENV/bin/python" -m pip install "piper-tts>=1.2.0" "kokoro-onnx>=0.4.0" soundfile; then
     echo "piper-tts wheel failed. Falling back to the macOS Piper binary on the drive."
@@ -158,7 +130,6 @@ fetch_voice ru ru_RU dmitri medium ru_RU-dmitri-medium
 # Brain GGUF. setup.sh skips a file that is already on the drive.
 "$ROOT/setup.sh" "${MODEL_ARGS[@]}"
 
-WHISPER_BIN="$(command -v whisper-cli || command -v whisper-cpp || true)"
 ENV_FILE="$ROOT/brain.env"
 touch "$ENV_FILE"
 put_env() {
@@ -180,7 +151,13 @@ put_env PIPER_VOICE "$BAKUGAN_DATA_DIR/models/piper-voices/en_US-ryan-high.onnx"
 put_env PIPER_VOICE_RU "$BAKUGAN_DATA_DIR/models/piper-voices/ru_RU-dmitri-medium.onnx"
 put_env WHISPER_MODEL "$WHISPER_MODEL"
 put_env WHISPER_BIN "$WHISPER_BIN"
-put_env FFMPEG "$(command -v ffmpeg)"
+put_env WHISPER_SERVER "$WHISPER_SERVER"
+put_env FFMPEG "$FFMPEG"
+put_env LLAMA_BIN "$LLAMA_BIN"
+
+if command -v xattr >/dev/null 2>&1; then
+  xattr -dr com.apple.quarantine "$BAKUGAN_DATA_DIR/tools" 2>/dev/null || true
+fi
 
 echo ""
 echo "Ready."
