@@ -17,10 +17,9 @@ source "$ROOT/brain.env"
 set +a
 ensure_bakugan_drive
 
-if ! command -v llama-server >/dev/null 2>&1; then
-  echo "llama-server is not installed. On the Mac: brew install llama.cpp" >&2
-  exit 1
-fi
+# shellcheck source=lib/prebuilt-tools.sh
+source "$ROOT/lib/prebuilt-tools.sh"
+require_llama_server
 if [[ ! -f "$BAKUGAN_DATA_DIR/brain.json" ]]; then
   echo "No brain.json on the drive. Run ./setup.sh." >&2
   exit 1
@@ -55,7 +54,7 @@ BRAIN_PORT="${BRAIN_PORT:-8788}"
 mkdir -p "$BAKUGAN_DATA_DIR/logs" "$BAKUGAN_DATA_DIR/memory" "$BAKUGAN_DATA_DIR/cache"
 
 CACHE_ARGS=()
-HELP="$(llama-server --help 2>&1 || true)"
+HELP="$("$LLAMA_BIN" --help 2>&1 || true)"
 if grep -q -- '--cache-reuse' <<<"$HELP"; then
   CACHE_ARGS+=(--cache-reuse 256)
 fi
@@ -69,7 +68,7 @@ if grep -q -- '--slots' <<<"$HELP"; then
   CACHE_ARGS+=(--slots)
 fi
 
-llama-server \
+"$LLAMA_BIN" \
   -m "$GGUF" \
   --host 127.0.0.1 \
   --port "$LLAMA_PORT" \
@@ -108,13 +107,16 @@ if [[ "$ready" != "1" ]]; then
   exit 1
 fi
 
-if [[ -n "${WHISPER_MODEL:-}" && -f "${WHISPER_MODEL}" ]] && command -v whisper-server >/dev/null 2>&1; then
-  whisper-server -m "$WHISPER_MODEL" --host 127.0.0.1 --port 8178 >/dev/null 2>&1 &
+if [[ -z "${WHISPER_SERVER:-}" ]]; then
+  WHISPER_SERVER="$(find_existing_bin whisper-server || true)"
+fi
+if [[ -n "${WHISPER_MODEL:-}" && -f "${WHISPER_MODEL}" && -n "${WHISPER_SERVER:-}" && -x "${WHISPER_SERVER}" ]]; then
+  "$WHISPER_SERVER" -m "$WHISPER_MODEL" --host 127.0.0.1 --port 8178 >/dev/null 2>&1 &
   WHISPER_PID=$!
   export WHISPER_URL="http://127.0.0.1:8178"
   echo "Whisper server: $WHISPER_URL"
 else
-  echo "Whisper server not started. ./setup-all.sh installs whisper-cpp and the base model."
+  echo "Whisper server not started. ./setup-all.sh builds whisper.cpp and downloads the base model."
 fi
 
 export LLAMA_URL="http://127.0.0.1:${LLAMA_PORT}"

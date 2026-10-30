@@ -68,16 +68,9 @@ HF_HOME=$BAKUGAN_DATA_DIR/hf
 HUGGINGFACE_HUB_CACHE=$BAKUGAN_DATA_DIR/hf/hub
 EOF
 
-if ! command -v llama-server >/dev/null 2>&1; then
-  if command -v brew >/dev/null 2>&1; then
-    echo "Installing llama.cpp with Homebrew (llama-server)..."
-    brew install llama.cpp
-  else
-    echo "llama-server is not on PATH and Homebrew is missing." >&2
-    echo "Install Homebrew, then: brew install llama.cpp" >&2
-    exit 1
-  fi
-fi
+# shellcheck source=lib/prebuilt-tools.sh
+source "$ROOT/lib/prebuilt-tools.sh"
+require_llama_server
 
 download_one() {
   local id="$1"

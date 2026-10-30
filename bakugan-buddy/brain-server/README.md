@@ -15,7 +15,7 @@ cd bakugan-buddy/brain-server
 
 The default data root is `/Volumes/Agent/agent` (GGUFs in `models/`). If Agent is not mounted, setup stops. Pass `BAKUGAN_DATA_DIR=/Volumes/<Other>/agent` to use another mounted volume. It will not download onto the internal disk.
 
-It installs `llama-server` with `brew install llama.cpp` when needed, then downloads the **default** model (about 5.1 GB).
+It uses the `llama-server` already on this Mac, then downloads the **default** model (about 5.1 GB). It does not run `brew install`.
 
 ```bash
 ./setup.sh --model fast          # 4B, quicker
@@ -38,7 +38,7 @@ That is the command you run each session. It prints a URL like `http://192.168.1
 
 `./setup-all.sh` is the one-shot installer for this Mac. It is safe to run twice.
 
-It uses the llama-server already on PATH (build 11867 is enough; it is not reinstalled). It `brew install`s `python@3.11`, `ffmpeg`, `whisper-cpp`, and `espeak-ng`. It does not install Docker, Ollama, or full Xcode. The system Python 3.9 is not used. The Kokoro and Piper venv is `$BAKUGAN_DATA_DIR/venvs/tts`.
+It uses the llama-server already on PATH (build 11867 is enough; it is not reinstalled). It does not run Homebrew. On macOS 14, `brew install whisper-cpp` tries to compile Python 3.15, and Apple clang 16.2 stops with "This compiler does not have support for efficient tail calling." Python 3.11 and ffmpeg are downloaded as finished binaries onto the Agent drive. whisper.cpp is compiled with the Command Line Tools you already have. espeak-ng comes inside the Kokoro Python packages. Docker, Ollama, and full Xcode are not required. The system Python 3.9 is not used. The Kokoro and Piper venv is `$BAKUGAN_DATA_DIR/venvs/tts`.
 
 Speech weights, also only on the drive:
 

@@ -91,7 +91,12 @@ jobs:
           bash -n bakugan-buddy/brain-server/start.sh
           bash -n bakugan-buddy/brain-server/use-model.sh
           bash -n bakugan-buddy/brain-server/lib/ensure-drive.sh
+          bash -n bakugan-buddy/brain-server/lib/prebuilt-tools.sh
           bash -n bakugan-buddy/brain-server/setup-all.sh
+          if grep -nE '^[[:space:]]*brew install' bakugan-buddy/brain-server/*.sh bakugan-buddy/brain-server/lib/*.sh; then
+            echo "brain-server must not brew-install; macOS 14 compiles Python 3.15 and fails"
+            exit 1
+          fi
           bash -n bakugan-buddy/brain-server/transcribe.sh
           bash -n bakugan-buddy/brain-server/speak.sh
           node --check bakugan-buddy/brain-server/lib/speech.mjs
