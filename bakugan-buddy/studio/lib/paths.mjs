@@ -44,14 +44,29 @@ export function ggufPath() {
   return hit ? path.join(MODELS_DIR, hit) : null;
 }
 
+export function dataRoot() {
+  return process.env.BAKUGAN_DATA_DIR || "";
+}
+
 export function piperBin() {
+  const data = dataRoot();
+  if (data) {
+    const onDrive = path.join(data, "models", "piper", "piper");
+    if (exists(onDrive)) return onDrive;
+  }
   const local = path.join(MODELS_DIR, "piper", "piper");
   if (exists(local)) return local;
   return which("piper");
 }
 
-/** Python with piper-tts (models/venv preferred). */
+/** Python with piper-tts. The drive venv wins over the system python3.9. */
 export function piperPython() {
+  if (process.env.PIPER_PYTHON && exists(process.env.PIPER_PYTHON)) return process.env.PIPER_PYTHON;
+  const data = dataRoot();
+  if (data) {
+    const onDrive = path.join(data, "venvs", "tts", "bin", "python");
+    if (exists(onDrive)) return onDrive;
+  }
   const venvPy = path.join(MODELS_DIR, "venv", "bin", "python");
   if (exists(venvPy)) return venvPy;
   return which("python3") || which("python");
@@ -65,8 +80,26 @@ export function piperEngineKind() {
 }
 
 export function piperVoice(id) {
-  const onnx = path.join(MODELS_DIR, "piper-voices", `${id}.onnx`);
+  const name = `${id}.onnx`;
+  const data = dataRoot();
+  if (data) {
+    const onDrive = path.join(data, "models", "piper-voices", name);
+    if (exists(onDrive)) return onDrive;
+  }
+  const onnx = path.join(MODELS_DIR, "piper-voices", name);
   return exists(onnx) ? onnx : null;
+}
+
+export function whisperModel() {
+  if (process.env.WHISPER_MODEL && exists(process.env.WHISPER_MODEL)) return process.env.WHISPER_MODEL;
+  const data = dataRoot();
+  if (!data) return null;
+  const model = path.join(data, "models", "whisper", "ggml-small.en.bin");
+  return exists(model) ? model : null;
+}
+
+export function whisperBin() {
+  return which("whisper-cli") || which("whisper-cpp") || which("whisper");
 }
 
 export function sherpaEncoder() {

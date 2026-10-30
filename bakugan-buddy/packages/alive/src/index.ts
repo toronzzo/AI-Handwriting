@@ -48,6 +48,24 @@ export {
   type BrainReply,
   type MoodDelta,
 } from "./brain.ts";
+export {
+  DEFAULT_VAD,
+  DEFAULT_VOICES,
+  envelopeFromPcm16,
+  freshVad,
+  pcm16FromWav,
+  prosodyFor,
+  stepVad,
+  synthesizeLine,
+  takeSentences,
+  transcribeClip,
+  voiceForLanguage,
+  type Heard,
+  type Prosody,
+  type VadOptions,
+  type VadState,
+  type VoiceConfig,
+} from "./speech.ts";
 export type { Mood } from "../../mood/src/index.ts";
 export type {
   AliveFrame,

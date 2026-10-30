@@ -52,7 +52,22 @@ fi
 
 LLAMA_PORT=8790
 BRAIN_PORT="${BRAIN_PORT:-8788}"
-mkdir -p "$BAKUGAN_DATA_DIR/logs" "$BAKUGAN_DATA_DIR/memory"
+mkdir -p "$BAKUGAN_DATA_DIR/logs" "$BAKUGAN_DATA_DIR/memory" "$BAKUGAN_DATA_DIR/cache"
+
+CACHE_ARGS=()
+HELP="$(llama-server --help 2>&1 || true)"
+if grep -q -- '--cache-reuse' <<<"$HELP"; then
+  CACHE_ARGS+=(--cache-reuse 256)
+fi
+if grep -q -- '--slot-save-path' <<<"$HELP"; then
+  CACHE_ARGS+=(--slot-save-path "$BAKUGAN_DATA_DIR/cache/llama-slots")
+fi
+if grep -q -- '--parallel' <<<"$HELP"; then
+  CACHE_ARGS+=(--parallel 2)
+fi
+if grep -q -- '--slots' <<<"$HELP"; then
+  CACHE_ARGS+=(--slots)
+fi
 
 llama-server \
   -m "$GGUF" \
@@ -64,12 +79,14 @@ llama-server \
   --jinja \
   --cache-type-k q8_0 \
   --cache-type-v q8_0 \
+  "${CACHE_ARGS[@]}" \
   --log-file "$BAKUGAN_DATA_DIR/logs/llama.log" \
   >/dev/null 2>&1 &
 LLAMA_PID=$!
 
 cleanup() {
   if [[ -n "${DNS_PID:-}" ]]; then kill "$DNS_PID" 2>/dev/null || true; fi
+  if [[ -n "${WHISPER_PID:-}" ]]; then kill "$WHISPER_PID" 2>/dev/null || true; fi
   kill "$LLAMA_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -91,6 +108,19 @@ if [[ "$ready" != "1" ]]; then
   exit 1
 fi
 
+if [[ -n "${WHISPER_MODEL:-}" && -f "${WHISPER_MODEL}" ]] && command -v whisper-server >/dev/null 2>&1; then
+  whisper-server -m "$WHISPER_MODEL" --host 127.0.0.1 --port 8178 >/dev/null 2>&1 &
+  WHISPER_PID=$!
+  export WHISPER_URL="http://127.0.0.1:8178"
+  echo "Whisper server: $WHISPER_URL"
+else
+  echo "Whisper server not started. ./setup-all.sh installs whisper-cpp and the base model."
+fi
+
+export LLAMA_URL="http://127.0.0.1:${LLAMA_PORT}"
+export BAKUGAN_DATA_DIR
+node --experimental-strip-types --disable-warning=ExperimentalWarning "$ROOT/lib/warm-cache.mjs" || true
+
 if command -v dns-sd >/dev/null 2>&1; then
   dns-sd -R "Bakugan Brain" _bakugan-brain._tcp local "$BRAIN_PORT" >/dev/null 2>&1 &
   DNS_PID=$!
@@ -101,6 +131,7 @@ echo "Preyas brain: $MODEL_LABEL"
 echo "Context $MODEL_CTX, llama RAM $MODEL_RAM"
 echo "Phone URL: http://${LAN_IP:-<this-mac-ip>}:${BRAIN_PORT}"
 echo "This Mac:  http://127.0.0.1:${BRAIN_PORT}"
+echo "LiteLLM, if you run one: http://${LAN_IP:-<this-mac-ip>}:4000"
 echo "Logs: $BAKUGAN_DATA_DIR/logs/llama.log"
 echo "Ctrl-C stops the server."
 
@@ -110,4 +141,4 @@ export BRAIN_HOST="${BRAIN_HOST:-0.0.0.0}"
 export BRAIN_LABEL="$MODEL_LABEL"
 export BRAIN_WARN="$MODEL_WARN"
 export BAKUGAN_DATA_DIR
-exec node "$ROOT/proxy.mjs"
+exec node --experimental-strip-types --disable-warning=ExperimentalWarning "$ROOT/proxy.mjs"

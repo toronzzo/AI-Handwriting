@@ -28,7 +28,8 @@ import {
   type MindAdvisor,
   type Mood,
 } from "../../../../packages/alive/src/index.ts";
-import { findBrain, normalizeBrainUrl, probeBrain, readBrainHost, writeBrainHost } from "./brain/brainLink";
+import { fetchRemembered, findBrain, normalizeBrainUrl, probeBrain, readBrainHost, sendMoment, writeBrainHost } from "./brain/brainLink";
+import { queueSpokenLine, VoiceSession } from "./voice/VoiceSession";
 import { adviseOnDevice, onDeviceBrainEnabled } from "bakugan-on-device-brain";
 import { Canvas, useFrame, useThree } from "./fiber";
 import { loadPreyasBall } from "./loadPreyas";
@@ -105,6 +106,15 @@ type Sinks = {
   brainUrl: string;
   streamText: string;
   streamGen: number;
+  heard: string;
+  hearLang: string;
+  talkGen: number;
+  talkEnv: number[];
+  talkStart: number;
+  talkUntil: number;
+  talkAmp: number;
+  spokenCount: number;
+  stopTalk: (() => void) | null;
 };
 
 const MOODS: readonly Mood[] = ["neutral", "happy", "excited", "sad", "angry"];
@@ -302,6 +312,15 @@ function makeSinks(): Sinks {
     brainUrl: "",
     streamText: "",
     streamGen: 0,
+    heard: "",
+    hearLang: "en",
+    talkGen: 0,
+    talkEnv: [],
+    talkStart: 0,
+    talkUntil: 0,
+    talkAmp: 0,
+    spokenCount: 0,
+    stopTalk: null,
   };
 }
 
@@ -453,7 +472,14 @@ const World = memo(function World({ sinks }: { sinks: Sinks }) {
     const root = rig.current;
     if (root) {
       const lift = floorLift(frame.roll, footRadius.current, MODEL_SCALE);
-      root.position.set(frame.x, frame.bob + frame.hop + lift, frame.z);
+      let talk = 0;
+      if (now < sinks.talkUntil && sinks.talkEnv.length > 0) {
+        const index = ((now - sinks.talkStart) / 20) | 0;
+        const sample = index >= 0 && index < sinks.talkEnv.length ? sinks.talkEnv[index] : 0;
+        talk = sample ?? 0;
+      }
+      sinks.talkAmp = talk;
+      root.position.set(frame.x, frame.bob + frame.hop + lift + talk * 0.03, frame.z);
       root.rotation.order = "YXZ";
       root.rotation.x = 0;
       root.rotation.y = frame.yaw;
@@ -500,12 +526,14 @@ const World = memo(function World({ sinks }: { sinks: Sinks }) {
       const flapL = bones.current.flapL;
       const flapR = bones.current.flapR;
       const head = bones.current.head;
+      const face = bones.current.faceplate;
       if (flapL) applyAxis(flapL, hingeL.current, -shownFlap.current);
       if (flapR) applyAxis(flapR, hingeR.current, -shownFlap.current);
       if (head) {
         applyAxis(head, AXIS_X, shownTilt.current);
         applyAxis(head, AXIS_Y, shownLook.current);
       }
+      if (face && sinks.talkAmp > 0.02) applyAxis(face, AXIS_X, sinks.talkAmp * 0.18);
     }
     if (eye.current) eye.current.intensity = 0.12 + frame.eye * 1.5;
 
@@ -599,7 +627,9 @@ export function RoomScreen() {
   useEffect(() => {
     let cancel = false;
     void readBrainHost().then((saved) => {
-      if (!cancel && saved) setBrainHost(saved);
+      if (cancel) return;
+      if (saved) setBrainHost(saved);
+      else if (process.env.EXPO_PUBLIC_BRAIN_URL) setBrainHost(process.env.EXPO_PUBLIC_BRAIN_URL);
     });
     return () => {
       cancel = true;
@@ -614,6 +644,7 @@ export function RoomScreen() {
           onPartial: (line) => {
             bag.streamText = line;
             bag.streamGen += 1;
+            queueSpokenLine(bag, line, bag.readout.mood, false);
           },
         })
       : { advise: async () => null };
@@ -706,16 +737,44 @@ export function RoomScreen() {
         bag.adviseBusy = true;
         const snap: AdvisorInput = bag.sim.advisorSnapshot();
         snap.partnerName = bag.partnerName;
-        snap.facts = bag.facts;
-        void bag.advisorRef.current.advise(snap).then(
-          (suggestion) => {
-            bag.sim.offerAdvice(suggestion, Date.now());
-            bag.adviseBusy = false;
-          },
-          () => {
-            bag.adviseBusy = false;
-          },
-        );
+        snap.heard = bag.heard;
+        bag.heard = "";
+        const adviseWith = (remembered: string[]) => {
+          const local = bag.facts;
+          const combined: string[] = [];
+          for (let i = 0; i < remembered.length; i++) combined.push(remembered[i]!);
+          for (let i = 0; i < local.length && combined.length < 8; i++) combined.push(local[i]!);
+          snap.facts = combined;
+          void bag.advisorRef.current.advise(snap).then(
+            (suggestion) => {
+              bag.sim.offerAdvice(suggestion, Date.now());
+              if (suggestion?.line) {
+                queueSpokenLine(bag, suggestion.line, suggestion.mood, true);
+                if (bag.brainUrl) {
+                  sendMoment(
+                    bag.brainUrl,
+                    JSON.stringify({
+                      line: suggestion.line,
+                      mood: suggestion.mood,
+                      events: snap.events.slice(-6),
+                    }),
+                  );
+                }
+              } else if (snap.heard) {
+                bag.heard = snap.heard;
+              }
+              bag.adviseBusy = false;
+            },
+            () => {
+              bag.adviseBusy = false;
+            },
+          );
+        };
+        if (bag.brainUrl) {
+          void fetchRemembered(bag.brainUrl, `${snap.skill} ${snap.mood}`).then(adviseWith, () => adviseWith([]));
+        } else {
+          adviseWith([]);
+        }
       }
       if (bag.streamGen !== seenStream) {
         seenStream = bag.streamGen;
@@ -799,6 +858,7 @@ export function RoomScreen() {
         <Canvas style={styles.canvas} dpr={[1, 1.5]} camera={CAMERA} gl={GL_PROPS}>
           <World sinks={bag} />
         </Canvas>
+        <VoiceSession sinks={bag} />
         <Pressable
           accessibilityLabel="debug"
           delayLongPress={700}
@@ -845,7 +905,7 @@ export function RoomScreen() {
           }}
           autoCapitalize="none"
           autoCorrect={false}
-          placeholder="Mac brain http://192.168.x.x:8788"
+          placeholder="Mac :8788 or LiteLLM :4000"
           placeholderTextColor="#7d8792"
           style={styles.brainInput}
         />
