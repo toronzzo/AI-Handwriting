@@ -1,0 +1,10 @@
+# Written onto the external drive by setup.sh. The drive is not this git repo.
+secrets/.env
+venv/
+cache/
+logs/
+history/
+*.gguf
+*.bin
+*.onnx
+.agent-drive-write-probe
