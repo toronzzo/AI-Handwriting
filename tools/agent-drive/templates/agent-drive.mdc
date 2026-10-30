@@ -1,0 +1,12 @@
+---
+description: Use the agent-drive workspace before starting work and save a skill after.
+alwaysApply: true
+---
+
+The workspace root is `$AGENT_DRIVE_ROOT` (default `/Volumes/Agent/agent`). If it is not mounted, stop. Do not write caches or secrets to the internal disk.
+
+Before a task: read `$AGENT_DRIVE_ROOT/skills/INDEX.md` and the matching skill, then `$AGENT_DRIVE_ROOT/notes/`. Check `$AGENT_DRIVE_ROOT/history/` and `$AGENT_DRIVE_ROOT/cache/` for an earlier result and reuse it.
+
+For a big task, write a short plan in `$AGENT_DRIVE_ROOT/notes/plans/` with only the goal, done-when, and essential steps. Use compact prompts. Send model calls to `http://127.0.0.1:4000/v1` model `local` so the disk cache and history apply. DeepSeek is the fallback or an explicit `deepseek-flash` / `deepseek-v4-pro` request, not the default. Do not rewrite `prompts/deepseek-prefix.txt`.
+
+After the task, save or update a skill recipe under `$AGENT_DRIVE_ROOT/skills/` and one row in `INDEX.md`. Never commit secrets or model weights.

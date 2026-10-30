@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-drive"
+version = "0.1.0"
+description = "Turn an external drive into a cost-saving local-first AI workspace."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "litellm[proxy,caching]==1.106.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<9"]
+
+[tool.setuptools.packages.find]
+include = ["agent_drive*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
