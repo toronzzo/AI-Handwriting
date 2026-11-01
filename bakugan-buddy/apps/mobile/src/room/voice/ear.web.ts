@@ -8,7 +8,9 @@ export type Ear = {
 
 export async function createEar(): Promise<Ear | null> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return null;
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
   const context = new AudioContext();
   const source = context.createMediaStreamSource(stream);
   const analyser = context.createAnalyser();

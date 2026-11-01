@@ -9,6 +9,8 @@ import path from "node:path";
 import { FACT_EXTRACT_PROMPT } from "../../packages/alive/src/longMemory.ts";
 import { openMemory, parseExtractedFacts, relevantFacts, rememberFacts } from "./lib/memory.mjs";
 import { synthesizeFile, transcribeFile } from "./lib/speech.mjs";
+import { withSampling } from "./lib/sampling.mjs";
+import { clipTooShort, isWhisperHallucination } from "../../packages/alive/src/speech.ts";
 import os from "node:os";
 
 const llamaUrl = (process.env.LLAMA_URL || "http://127.0.0.1:8790").replace(/\/$/, "");
@@ -128,6 +130,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/v1/stt") {
       const wav = await readBody(req, 4_000_000);
+      if (clipTooShort(wav)) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ text: "", language: "en" }));
+        return;
+      }
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preyas-hear-"));
       const file = path.join(dir, "in.wav");
       fs.writeFileSync(file, wav);
@@ -138,6 +145,7 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: "stt_unavailable" }));
           return;
         }
+        if (isWhisperHallucination(heard.text)) heard.text = "";
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(heard));
       } finally {
@@ -191,7 +199,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
-      const body = await readBody(req);
+      const body = withSampling(await readBody(req));
       const upstream = await fetch(`${llamaUrl}/v1/chat/completions`, {
         method: "POST",
         headers: { "content-type": "application/json" },

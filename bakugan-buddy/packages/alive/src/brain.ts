@@ -1,5 +1,6 @@
 import { normalizeMood, type Mood } from "../../mood/src/index.ts";
 import { isSkillId, type AdvisorInput, type AdvisorSuggestion, type MindAdvisor } from "./advisor.ts";
+import { dedupeSpoken } from "./speech.ts";
 import type { SkillId } from "./types.ts";
 
 /** Don't call the brain more often than this. A sooner call returns null. */
@@ -89,7 +90,7 @@ export function parseBrainReply(raw: string): BrainReply | null {
   }
   if (!data || typeof data !== "object") return null;
   const rec = data as Record<string, unknown>;
-  const line = typeof rec.line === "string" ? rec.line.trim() : "";
+  const line = dedupeSpoken(typeof rec.line === "string" ? rec.line : "");
   if (!line || line.length > LINE_MAX || outOfCharacter(line)) return null;
   const goalRaw = String(rec.goal ?? "")
     .trim()
@@ -220,6 +221,9 @@ export function createBrainAdvisor(options: BrainAdvisorOptions): MindAdvisor {
             model: "preyas",
             stream: true,
             temperature: 0.8,
+            repeat_penalty: 1.1,
+            presence_penalty: 0.3,
+            frequency_penalty: 0.3,
             max_tokens: 160,
             cache_prompt: true,
             id_slot: 0,

@@ -1,11 +1,17 @@
 import { useEffect, useRef } from "react";
 import {
+  BARGE_VAD,
+  clipTooShort,
+  earIsMuted,
   envelopeFromPcm16,
   freshVad,
+  hearsOwnVoice,
+  isWhisperHallucination,
   pcm16FromWav,
+  recentLines,
   stepVad,
   synthesizeLine,
-  takeSentences,
+  takeNewSentences,
   transcribeClip,
   type VadState,
 } from "../../../../../packages/alive/src/speech.ts";
@@ -56,16 +62,18 @@ export async function speakSentence(sinks: TalkSinks, sentence: string, mood: st
   };
 }
 
-/** Speak any new finished sentences in the partial line. */
+const speakChain = new WeakMap<object, Promise<void>>();
+
+/** Speak finished sentences once. A second final of the same line does not replay them. */
 export function queueSpokenLine(sinks: TalkSinks, line: string, mood: string, final: boolean): void {
-  const split = takeSentences(final ? `${line}.` : line);
-  const ready = final && split.rest ? [...split.ready, split.rest] : split.ready;
-  while (sinks.spokenCount < ready.length) {
-    const sentence = ready[sinks.spokenCount] ?? "";
-    sinks.spokenCount += 1;
-    void speakSentence(sinks, sentence, mood);
+  const fresh = takeNewSentences(sinks, line, final);
+  sinks.spokenCount += fresh.length;
+  let chain = speakChain.get(sinks) ?? Promise.resolve();
+  for (let i = 0; i < fresh.length; i++) {
+    const sentence = fresh[i]!;
+    chain = chain.then(() => speakSentence(sinks, sentence, mood)).catch(() => {});
   }
-  if (final) sinks.spokenCount = 0;
+  speakChain.set(sinks, chain);
 }
 
 export function VoiceSession({ sinks }: { sinks: TalkSinks }) {
@@ -79,18 +87,45 @@ export function VoiceSession({ sinks }: { sinks: TalkSinks }) {
       ear.current = next;
       void next.start();
     });
+    let muted = false;
     const timer = setInterval(() => {
       const current = ear.current;
       if (!current || !sinks.brainUrl) return;
+      const now = Date.now();
+      if (earIsMuted(now, sinks.talkUntil)) {
+        if (!muted) {
+          muted = true;
+          vad.current = freshVad();
+          void current.start();
+        }
+        const step = stepVad(vad.current, current.rms(), 50, BARGE_VAD);
+        vad.current = step.state;
+        if (step.bargeIn) {
+          interruptTalk(sinks);
+          muted = false;
+          vad.current = freshVad();
+          void current.start();
+        } else if (step.endpoint) {
+          vad.current = freshVad();
+          void current.start();
+        }
+        return;
+      }
+      if (muted) {
+        muted = false;
+        vad.current = freshVad();
+        void current.start();
+      }
       const step = stepVad(vad.current, current.rms(), 50);
       vad.current = step.state;
       if (step.bargeIn) interruptTalk(sinks);
       if (!step.endpoint) return;
       void current.stop().then(async (wav) => {
         void current.start();
-        if (!wav) return;
+        if (!wav || clipTooShort(wav)) return;
         const heard = await transcribeClip(sinks.brainUrl, wav);
-        if (!heard) return;
+        if (!heard || isWhisperHallucination(heard.text)) return;
+        if (hearsOwnVoice(heard.text, recentLines(sinks))) return;
         sinks.heard = heard.text;
         sinks.hearLang = heard.language;
         sinks.adviseAt = 0;
