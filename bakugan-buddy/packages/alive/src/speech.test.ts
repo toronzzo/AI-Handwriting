@@ -3,8 +3,13 @@ import http from "node:http";
 import { test } from "node:test";
 import { AliveController } from "./controller.ts";
 import {
+  BARGE_VAD,
+  ECHO_TAIL_MS,
+  earIsMuted,
   envelopeFromPcm16,
   freshVad,
+  isWhisperHallucination,
+  planSpeech,
   prosodyFor,
   stepVad,
   synthesizeLine,
@@ -26,6 +31,38 @@ test("vad endpoints when he stops talking and barges in on the next start", () =
   assert.equal(step.endpoint, true);
   const again = stepVad(step.state, 0.3, 40);
   assert.equal(again.bargeIn, true);
+});
+
+test("a final line does not speak a sentence the partial already queued", () => {
+  const partial = planSpeech("The window's mine.", { count: 0, line: "" }, false);
+  assert.deepEqual(partial.speak, ["The window's mine."]);
+  const again = planSpeech("The window's mine.", partial.cursor, true);
+  assert.deepEqual(again.speak, []);
+  const bare = planSpeech("The window's mine", partial.cursor, true);
+  assert.deepEqual(bare.speak, []);
+  const more = planSpeech("The window's mine. Don't rush me", partial.cursor, true);
+  assert.deepEqual(more.speak, ["Don't rush me."]);
+});
+
+test("the ear stays shut while he talks and for the tail after", () => {
+  assert.equal(ECHO_TAIL_MS, 400);
+  assert.equal(earIsMuted(1_000, 1_500), true);
+  assert.equal(earIsMuted(1_700, 1_500), true);
+  assert.equal(earIsMuted(1_900, 1_500), false);
+  assert.equal(earIsMuted(1_700, 0), false);
+  const quiet = stepVad(freshVad(), 0.05, 50, BARGE_VAD);
+  assert.equal(quiet.bargeIn, false);
+  assert.equal(stepVad(freshVad(), 0.2, 50, BARGE_VAD).bargeIn, true);
+});
+
+test("whisper fillers and repeated n-grams are dropped", () => {
+  assert.equal(isWhisperHallucination(""), true);
+  assert.equal(isWhisperHallucination("   "), true);
+  assert.equal(isWhisperHallucination("[BLANK_AUDIO]"), true);
+  assert.equal(isWhisperHallucination("Thank you."), true);
+  assert.equal(isWhisperHallucination("the the the"), true);
+  assert.equal(isWhisperHallucination("thank you thank you thank you"), true);
+  assert.equal(isWhisperHallucination("The window's mine."), false);
 });
 
 test("sentences split in English and Russian and keep a partial tail", () => {

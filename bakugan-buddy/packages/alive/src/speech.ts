@@ -21,6 +21,24 @@ export const DEFAULT_VAD: VadOptions = {
   minSpeechMs: 280,
 };
 
+/** While he is talking, speaker bleed sits near the normal start level. A real interruption is louder. */
+export const BARGE_VAD: VadOptions = {
+  start: 0.12,
+  stop: 0.08,
+  silenceMs: 420,
+  minSpeechMs: 280,
+};
+
+/** Keep the mic closed this long after his playback ends so the room tone is not a new turn. */
+export const ECHO_TAIL_MS = 400;
+
+export const MIN_CLIP_MS = 280;
+
+/** True while his wav is still playing, plus a short tail. A barge-in sets talkUntil to 0 and opens the ear. */
+export function earIsMuted(now: number, talkUntil: number, tailMs = ECHO_TAIL_MS): boolean {
+  return talkUntil > 0 && now < talkUntil + tailMs;
+}
+
 export type VadState = {
   speaking: boolean;
   speechMs: number;
@@ -74,6 +92,185 @@ export function takeSentences(buffer: string): { ready: string[]; rest: string }
     start = i + 1;
   }
   return { ready, rest: buffer.slice(start).trim() };
+}
+
+export type SpeechCursor = {
+  count: number;
+  line: string;
+};
+
+/**
+ * Sentences that still need a voice. A partial and the final call share one
+ * cursor, so the finished reply does not speak the same sentence again.
+ * A later final of that same line speaks nothing. A new line starts over.
+ */
+export function planSpeech(
+  line: string,
+  cursor: SpeechCursor,
+  final: boolean,
+): { cursor: SpeechCursor; speak: string[] } {
+  const trimmed = line.trim().replace(/\s+/g, " ");
+  const prev = normalizeHeard(cursor.line);
+  const next = normalizeHeard(trimmed);
+  const extended = prev.length > 0 && (next.startsWith(prev) || prev.startsWith(next));
+  const seen = new Set<string>();
+  const ended = final && trimmed && !/[.!?…。！？]$/.test(trimmed) ? `${trimmed}.` : trimmed;
+  const split = takeSentences(ended);
+  const ready = split.ready.map((sentence) => dedupeSpoken(sentence));
+  if (final && split.rest) ready.push(dedupeSpoken(split.rest));
+  const start = extended ? cursor.count : 0;
+  for (let i = 0; i < start && i < ready.length; i++) {
+    const key = normalizeHeard(ready[i] ?? "");
+    if (key) seen.add(key);
+  }
+  const speak: string[] = [];
+  for (let i = start; i < ready.length; i++) {
+    const sentence = ready[i] ?? "";
+    const key = normalizeHeard(sentence);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    speak.push(sentence);
+  }
+  return { cursor: { count: Math.max(start, ready.length), line: trimmed }, speak };
+}
+
+const mouths = new WeakMap<object, { cursor: SpeechCursor; said: string[] }>();
+
+/** Remember what this sink already sent to the speaker. */
+export function takeNewSentences(key: object, line: string, final: boolean): string[] {
+  const row = mouths.get(key) ?? { cursor: { count: 0, line: "" }, said: [] };
+  const plan = planSpeech(line, row.cursor, final);
+  row.cursor = plan.cursor;
+  for (let i = 0; i < plan.speak.length; i++) {
+    row.said.push(plan.speak[i]!);
+    if (row.said.length > 4) row.said.shift();
+  }
+  mouths.set(key, row);
+  return plan.speak;
+}
+
+export function recentLines(key: object): readonly string[] {
+  return mouths.get(key)?.said ?? [];
+}
+
+/** Collapse "mine mine mine" and a line that is the same phrase twice. */
+export function dedupeSpoken(text: string): string {
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  if (!trimmed) return "";
+  const words = trimmed.split(/\s+/);
+  const kept: string[] = [];
+  let prev = "";
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!;
+    const key = word.toLowerCase();
+    if (key === prev) continue;
+    kept.push(word);
+    prev = key;
+  }
+  const lower = kept.map((word) => word.toLowerCase());
+  for (let size = 1; size <= 4; size++) {
+    if (lower.length < size * 2 || lower.length % size !== 0) continue;
+    const chunk = lower.slice(0, size).join(" ");
+    let same = true;
+    for (let i = size; i < lower.length; i += size) {
+      if (lower.slice(i, i + size).join(" ") !== chunk) {
+        same = false;
+        break;
+      }
+    }
+    if (same) return kept.slice(0, size).join(" ");
+  }
+  return kept.join(" ");
+}
+
+export function normalizeHeard(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^0-9a-zA-Zа-яА-ЯёЁ']+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const WHISPER_FILLERS = new Set([
+  "you",
+  "thank you",
+  "thanks",
+  "thanks for watching",
+  "thank you for watching",
+  "bye",
+  "goodbye",
+  "okay",
+  "ok",
+  "hmm",
+  "mm",
+  "uh",
+  "um",
+  "subtitles",
+  "subscribe",
+  "please subscribe",
+  "продолжение следует",
+  "субтитры",
+  "спасибо за просмотр",
+]);
+
+/** Whisper loops on silence: one token repeated, or a short phrase three times, or a stock filler. */
+export function isWhisperHallucination(text: string): boolean {
+  const raw = text.trim();
+  if (!raw || /^\[?\s*blank[_\s-]*audio\s*\]?$/i.test(raw)) return true;
+  const norm = normalizeHeard(raw);
+  if (!norm || norm === "blank audio" || WHISPER_FILLERS.has(norm)) return true;
+  const words = norm.split(" ");
+  if (words.length >= 2 && new Set(words).size === 1) return true;
+  if (words.length >= 6) {
+    for (let size = 2; size <= 4; size++) {
+      if (words.length % size !== 0 || words.length / size < 3) continue;
+      const chunk = words.slice(0, size).join(" ");
+      let same = true;
+      for (let i = size; i < words.length; i += size) {
+        if (words.slice(i, i + size).join(" ") !== chunk) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return true;
+    }
+  }
+  return false;
+}
+
+/** The mic heard him. Short answers like "yes" stay; a transcript of his own line does not. */
+export function hearsOwnVoice(heard: string, spoken: readonly string[]): boolean {
+  const heardTokens = normalizeHeard(heard).split(" ").filter(Boolean);
+  if (heardTokens.length === 0) return true;
+  const heardLine = heardTokens.join(" ");
+  for (let i = 0; i < spoken.length; i++) {
+    const saidTokens = normalizeHeard(spoken[i] ?? "").split(" ").filter(Boolean);
+    if (saidTokens.length === 0) continue;
+    const saidLine = saidTokens.join(" ");
+    if (heardLine === saidLine) return true;
+    if (saidLine.includes(heardLine) && heardLine.length >= 8) return true;
+    if (heardLine.includes(saidLine) && saidLine.length >= 8) return true;
+    if (heardTokens.length >= 3) {
+      const said = new Set(saidTokens);
+      let hit = 0;
+      for (let w = 0; w < heardTokens.length; w++) if (said.has(heardTokens[w]!)) hit += 1;
+      if (hit / heardTokens.length >= 0.75) return true;
+    }
+  }
+  return false;
+}
+
+export function wavDurationMs(bytes: Uint8Array): number | null {
+  if (bytes.length < 44) return null;
+  const rate = bytes[24]! | (bytes[25]! << 8) | (bytes[26]! << 16) | (bytes[27]! << 24);
+  const pcm = pcm16FromWav(bytes);
+  if (!pcm || rate < 1000) return null;
+  return (pcm.length / rate) * 1000;
+}
+
+export function clipTooShort(bytes: Uint8Array, minMs = MIN_CLIP_MS): boolean {
+  const ms = wavDurationMs(bytes);
+  return ms == null || ms < minMs;
 }
 
 export type Prosody = {
