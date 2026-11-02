@@ -18,6 +18,7 @@ test("history on the drive keeps every turn and a short summary", () => {
   assert.match(book.summary, /not the clock/);
   const file = path.join(root, "history", "chat.jsonl");
   assert.equal(fs.existsSync(file), true);
+  assert.equal(fs.existsSync(path.join(root, "history", "summary.txt.tmp")), false);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
