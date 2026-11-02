@@ -52,14 +52,17 @@ function readBody(req, limit = 64_000) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let tooLarge = false;
     req.on("data", (chunk) => {
       size += chunk.length;
       if (size > limit) {
-        reject(new HttpError(413, "body too large"));
-        req.destroy();
+        if (!tooLarge) {
+          tooLarge = true;
+          reject(new HttpError(413, "body too large"));
+        }
         return;
       }
-      chunks.push(chunk);
+      if (!tooLarge) chunks.push(chunk);
     });
     req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
