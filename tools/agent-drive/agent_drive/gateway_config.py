@@ -14,6 +14,8 @@ from agent_drive.secrets import key_is_set, load_env_file
 DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8788/v1"
 AUTO_ALIAS = "auto"
 AUTO_TIMEOUT_S = 60
+KIMI_API_BASE = "https://api.moonshot.ai/v1"
+KIMI_MODEL = "kimi-k3"
 
 
 def local_api_base() -> str:
@@ -55,6 +57,28 @@ def _deepseek_entry(name: str, upstream: str) -> list[str]:
     ]
 
 
+def _kimi_entry(name: str, effort: str) -> list[str]:
+    """Kimi K3 for explicit, approved expert jobs only. Never a fallback.
+
+    Source: https://platform.kimi.ai/docs/pricing/chat checked 2026-11-02.
+    $3 / 1M input (cache miss, $0.30 cached) and $15 / 1M output.
+    K3 always reasons; reasoning_effort is low, high or max (default max).
+    """
+    return [
+        f"  - model_name: {name}",
+        "    litellm_params:",
+        f"      model: {_yaml_string(f'openai/{KIMI_MODEL}')}",
+        f"      api_base: {_yaml_string(KIMI_API_BASE)}",
+        "      api_key: os.environ/KIMI_API_KEY",
+        "      extra_body:",
+        f"        reasoning_effort: {_yaml_string(effort)}",
+        "    model_info:",
+        "      input_cost_per_token: 0.000003",
+        "      output_cost_per_token: 0.000015",
+        "      cache_read_input_token_cost: 0.0000003",
+    ]
+
+
 def _local_entry(name: str, local_base: str, *, timeout: int | None = None) -> list[str]:
     """A route served by llama-server, with thinking turned off at the template.
 
@@ -78,7 +102,7 @@ def _local_entry(name: str, local_base: str, *, timeout: int | None = None) -> l
     return lines
 
 
-def render_config(root: Path, *, include_paid: bool, local_base: str) -> str:
+def render_config(root: Path, *, include_paid: bool, local_base: str, include_kimi: bool = False) -> str:
     """Exact-match disk cache on the drive. DeepSeek is omitted without a key.
 
     ``auto`` and ``local`` both use llama-server. ``auto`` alone may fall back
@@ -94,6 +118,9 @@ def render_config(root: Path, *, include_paid: bool, local_base: str) -> str:
         lines.extend(_deepseek_entry("paid", FLASH_MODEL))
         lines.extend(_deepseek_entry(FLASH_MODEL, FLASH_MODEL))
         lines.extend(_deepseek_entry(PRO_MODEL, PRO_MODEL))
+    if include_kimi:
+        lines.extend(_kimi_entry("kimi", "high"))
+        lines.extend(_kimi_entry("kimi-low", "low"))
     lines.extend(
         [
             "",
@@ -142,6 +169,7 @@ def write_config(root: Path | None = None) -> Path:
         root,
         include_paid=include_paid,
         local_base=local_api_base(),
+        include_kimi=key_is_set(env.get("KIMI_API_KEY")),
     )
     path = config_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
