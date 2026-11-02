@@ -18,6 +18,15 @@ import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/n
 import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
 import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
+import {
+  addReminder,
+  deleteReminder,
+  loadReminders,
+  missedOnStartup,
+  notify,
+  tick,
+  updateReminder,
+} from "./lib/reminders.mjs";
 import { answerFromDocument, keyPointsFrom, summarizeDocument } from "./lib/docSummary.mjs";
 import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./lib/tasks.mjs";
 import { launchTaskRun, planTask, taskRunActive } from "./lib/taskRunner.mjs";
@@ -357,6 +366,69 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(204);
       res.end();
       return;
+    }
+
+    if (url.pathname === "/v1/reminders") {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      if (req.method === "GET") {
+        const rows = loadReminders(dataDir).sort(
+          (left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime(),
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ reminders: rows }));
+        return;
+      }
+      if (req.method === "POST") {
+        const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        const when = new Date(String(body.dueAt || ""));
+        if (Number.isNaN(when.getTime())) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "dueAt must be a date" }));
+          return;
+        }
+        const reminder = addReminder(dataDir, {
+          text: body.text,
+          dueAt: when.toISOString(),
+          repeat: body.repeat,
+          chatId: body.chatId,
+        });
+        res.writeHead(201, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ reminder }));
+        return;
+      }
+    }
+
+    const reminderRoute = url.pathname.match(/^\/v1\/reminders\/([^/]+)$/);
+    if (reminderRoute) {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      const id = decodeURIComponent(reminderRoute[1]);
+      try {
+        if (req.method === "PATCH" || req.method === "PUT") {
+          const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+          const reminder = updateReminder(dataDir, id, body);
+          res.writeHead(reminder ? 200 : 404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(reminder ? { reminder } : { error: "reminder not found" }));
+          return;
+        }
+        if (req.method === "DELETE") {
+          const ok = deleteReminder(dataDir, id);
+          res.writeHead(ok ? 200 : 404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok }));
+          return;
+        }
+      } catch (error) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        return;
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/v1/documents") {
@@ -849,6 +921,57 @@ if (dataDir) {
   }
 }
 
+let reminderTimer = null;
+
+/** Every 30 s: fire due reminders, notify, and post them into their chat. */
+function startReminderLoop() {
+  if (!dataDir || reminderTimer) return;
+  reminderTimer = setInterval(() => {
+    try {
+      const result = tick(dataDir, {
+        notifyImpl: (title, body) => {
+          void notify(title, body);
+        },
+      });
+      for (const reminder of result.fired) {
+        if (reminder.chatId) {
+          appendMessage(dataDir, reminder.chatId, {
+            role: "assistant",
+            who: "preyas",
+            model: "preyas",
+            content: `⏰ Reminder: ${reminder.text}`,
+          });
+        }
+      }
+    } catch {
+      /* a bad reminder must not stop the loop */
+    }
+  }, 30_000);
+  if (typeof reminderTimer.unref === "function") reminderTimer.unref();
+}
+
+function missedAtStartup() {
+  if (!dataDir) return;
+  try {
+    const message = missedOnStartup(loadReminders(dataDir));
+    if (!message) return;
+    void notify("Preyas", message);
+    const newest = newestChat(dataDir);
+    if (newest) {
+      appendMessage(dataDir, newest.id, {
+        role: "assistant",
+        who: "preyas",
+        model: "preyas",
+        content: `${message}\nPreyas is back.`,
+      });
+    }
+  } catch {
+    /* missing reminders are not fatal */
+  }
+}
+
 server.listen(port, host, () => {
   process.stdout.write(`brain proxy ${host}:${port} -> ${llamaUrl}\n`);
+  startReminderLoop();
+  missedAtStartup();
 });
