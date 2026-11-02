@@ -32,6 +32,7 @@ import { isWhisperHallucination, resetSpeech } from "../../../../packages/alive/
 import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../../../packages/alive/src/notes.ts";
 import { looksLikeTask, taskStatusLine, type TaskRecord } from "../../../../packages/alive/src/tasks.ts";
 import { confirmFor } from "../../../../packages/alive/src/confirm.ts";
+import { matchDocuments, parseDocumentRequest } from "../../../../packages/alive/src/documents.ts";
 import {
   needsWebSearch,
   searchQueryFrom,
@@ -41,7 +42,13 @@ import {
 import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "../room/voice/VoiceSession";
 import { PreyasHero } from "./PreyasHero";
 
-type Shown = ChatMessage & { t: number; thinking?: string; sources?: SearchResult[] };
+type Shown = ChatMessage & {
+  t: number;
+  thinking?: string;
+  sources?: SearchResult[];
+  document?: { name: string; summary?: string; points?: { text: string; kind: NoteKind }[] };
+};
+type InboxFile = { name: string; size: number; type: string; modified: number };
 type PartnerCard = { turns: number; level: number; bond: number; caption: string };
 type Pane = "companion" | "activity" | "collection";
 type ChatMeta = { id: string; title: string; created: number; updated: number };
@@ -149,6 +156,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const notesStamp = useRef(0);
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [searching, setSearching] = useState(false);
+  const [docsOpen, setDocsOpen] = useState(false);
+  const [inbox, setInbox] = useState<InboxFile[]>([]);
+  const [inboxPath, setInboxPath] = useState("");
+  const [docBusy, setDocBusy] = useState("");
+  const [docProgress, setDocProgress] = useState("");
+  const [docChoice, setDocChoice] = useState<{ name: string; matches: string[] } | null>(null);
   const [searchNote, setSearchNote] = useState("");
   const [openSteps, setOpenSteps] = useState<Record<number, boolean>>({});
   const taskPoll = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -418,6 +431,49 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     if (ok) setEditing(null);
   }
 
+  async function refreshInbox() {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/documents`);
+      if (!res.ok) return [];
+      const body = (await res.json()) as { inbox?: string; documents?: InboxFile[] };
+      const files = Array.isArray(body.documents) ? body.documents : [];
+      setInbox(files);
+      if (body.inbox) setInboxPath(body.inbox);
+      return files;
+    } catch {
+      return [];
+    }
+  }
+
+  /** Wait for a summary job, reporting chunk progress while it runs. */
+  async function waitForSummary(
+    name: string,
+  ): Promise<{ summary?: string; points?: { text: string; kind: NoteKind }[]; error?: string }> {
+    for (let attempt = 0; attempt < 160; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      try {
+        const res = await fetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/summary`);
+        if (!res.ok) continue;
+        const body = (await res.json()) as {
+          ok?: boolean;
+          status?: string;
+          done?: number;
+          total?: number;
+          summary?: string;
+          points?: { text: string; kind: NoteKind }[];
+          error?: string;
+        };
+        if ((body.total || 0) > 1) setDocProgress(`Reading chunk ${body.done} of ${body.total}…`);
+        if (body.status === "running") continue;
+        if (body.status === "error") return { error: body.error || "the document could not be read" };
+        if (body.summary) return { summary: body.summary, points: body.points || [] };
+      } catch {
+        /* keep polling */
+      }
+    }
+    return { error: "the summary took too long" };
+  }
+
   /** Run a web search for a message that needs fresh information. */
   async function runWebSearch(text: string): Promise<{ query: string; results: SearchResult[] }> {
     const query = searchQueryFrom(text) || text.trim();
@@ -492,6 +548,106 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       });
     } finally {
       busy.current = false;
+    }
+  }
+
+  /** Handle "summarize <file>", "read <file>", "what does <file> say about X", "/doc <file>". */
+  async function handleDocumentRequest(
+    request: { kind: string; name: string; question?: string },
+    raw: string,
+    chatId: string | null,
+  ): Promise<boolean> {
+    const files = inbox.length ? inbox : await refreshInbox();
+    const hits = matchDocuments(request.name, files.map((row) => row.name));
+    if (!hits.length) {
+      await addLocal({ t: Date.now(), role: "user", content: raw, who: "user" });
+      await addLocal({
+        t: Date.now(),
+        role: "assistant",
+        content: `I can't see a document called "${request.name}". Drop it into the inbox and ask again.`,
+        who: "preyas",
+        model: "preyas",
+      });
+      setDocsOpen(true);
+      return true;
+    }
+    if (hits.length > 1) {
+      setDocChoice({ name: raw, matches: hits.map((hit) => hit.name) });
+      return true;
+    }
+    const name = hits[0]!.name;
+    await addLocal({ t: Date.now(), role: "user", content: raw, who: "user" });
+
+    if (request.kind === "question") {
+      setDocBusy(name);
+      try {
+        const res = await fetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/ask`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ question: request.question }),
+        });
+        const body = (await res.json()) as { ok?: boolean; answer?: string; error?: string };
+        await addLocal({
+          t: Date.now(),
+          role: "assistant",
+          content: body.ok && body.answer ? body.answer : `I couldn't read ${name}: ${body.error || "unknown error"}.`,
+          who: "preyas",
+          model: "preyas",
+          document: { name },
+        });
+      } finally {
+        setDocBusy("");
+        setDocProgress("");
+      }
+      return true;
+    }
+
+    setDocBusy(name);
+    setDocProgress("");
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/summarize`, { method: "POST" });
+      if (!res.ok) throw new Error("could not start the summary");
+      const done = await waitForSummary(name);
+      const reply: Shown = {
+        t: Date.now(),
+        role: "assistant",
+        content: done.summary
+          ? done.summary
+          : `I couldn't summarise ${name}: ${done.error || "unknown error"}.`,
+        who: "preyas",
+        model: "preyas",
+        document: done.summary ? { name, summary: done.summary, points: done.points } : { name },
+      };
+      messagesRef.current = [...messagesRef.current, reply];
+      setMessages(messagesRef.current);
+      void remember(reply, chatId);
+    } catch (error) {
+      await addLocal({
+        t: Date.now(),
+        role: "assistant",
+        content: `I couldn't summarise ${name}: ${error instanceof Error ? error.message : String(error)}.`,
+        who: "preyas",
+        model: "preyas",
+      });
+    } finally {
+      setDocBusy("");
+      setDocProgress("");
+    }
+    return true;
+  }
+
+  async function saveKeyPoints(name: string, points: { text: string; kind: NoteKind }[]) {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/notes`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ points, chatId: activeIdRef.current || "" }),
+      });
+      const body = (await res.json()) as { saved?: number };
+      setChip(body.saved ? `Saved ${body.saved} key points to notes` : "Those points are already in notes");
+      void refreshNotes("");
+    } catch {
+      setChip("Could not save the key points");
     }
   }
 
@@ -702,6 +858,11 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     const chatId = activeIdRef.current;
     const epoch = sendEpoch.current;
     const isCurrent = () => activeIdRef.current === chatId && sendEpoch.current === epoch;
+    const docRequest = parseDocumentRequest(trimmed);
+    if (docRequest && !askPaid) {
+      const handled = await handleDocumentRequest(docRequest, trimmed, chatId);
+      if (handled) return;
+    }
     const command = parseNoteCommand(trimmed);
     if (command?.kind === "remember") {
       await handleRemember(trimmed, command.text);
@@ -947,6 +1108,16 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           >
             <Text style={styles.notesBtnText}>Notes</Text>
           </Pressable>
+          <Pressable
+            style={styles.notesBtn}
+            onPress={() => {
+              setDocsOpen(true);
+              setDrawerOpen(false);
+              void refreshInbox();
+            }}
+          >
+            <Text style={styles.notesBtnText}>Docs</Text>
+          </Pressable>
           {withClose ? (
             <Pressable onPress={() => setDrawerOpen(false)} hitSlop={8}>
               <Text style={styles.sidebarClose}>✕</Text>
@@ -1125,6 +1296,14 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                         </Pressable>
                       ) : null}
                       {openThink[index] && message.thinking ? <Text style={styles.thinkBody}>{message.thinking}</Text> : null}
+                      {message.document?.summary ? (
+                        <Pressable
+                          style={styles.savePoints}
+                          onPress={() => void saveKeyPoints(message.document!.name, message.document!.points || [])}
+                        >
+                          <Text style={styles.savePointsText}>Save key points to notes</Text>
+                        </Pressable>
+                      ) : null}
                       {message.sources?.length ? (
                         <View style={styles.sources}>
                           {message.sources.map((source, sourceIndex) => (
@@ -1155,7 +1334,11 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                   </View>
                 </View>
               ) : null}
-              {searching ? (
+              {docBusy ? (
+                <Text style={styles.typing}>
+                  {docProgress || `Reading ${docBusy}…`}
+                </Text>
+              ) : searching ? (
                 <Text style={styles.typing}>Searching the web…</Text>
               ) : phase === "thinking" && !live ? (
                 <Text style={styles.typing}>Preyas is thinking…</Text>
@@ -1256,6 +1439,75 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         <View style={styles.drawerWrap}>
           <Pressable style={styles.scrim} onPress={() => setDrawerOpen(false)} />
           <View style={styles.drawer}>{chatList(true)}</View>
+        </View>
+      ) : null}
+
+      {docsOpen ? (
+        <View style={styles.notesWrap}>
+          <Pressable style={styles.scrim} onPress={() => setDocsOpen(false)} />
+          <View style={styles.notesPanel}>
+            <View style={styles.notesHead}>
+              <Text style={styles.sidebarTitle}>DOCUMENTS</Text>
+              <Pressable onPress={() => setDocsOpen(false)} hitSlop={8}>
+                <Text style={styles.sidebarClose}>✕</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.docHint}>
+              Drop files into the Agent drive, in BakuganBuddy/documents{inboxPath ? ` (${inboxPath})` : ""}, then refresh.
+            </Text>
+            <Pressable style={styles.newChat} onPress={() => void refreshInbox()}>
+              <Text style={styles.newChatText}>Refresh</Text>
+            </Pressable>
+            <ScrollView style={styles.notesScroll} contentContainerStyle={styles.notesList}>
+              {inbox.map((file) => (
+                <View key={file.name} style={styles.noteRow}>
+                  <View style={styles.noteMain}>
+                    <Text style={styles.noteKind}>{file.type} · {Math.max(1, Math.round(file.size / 1024))} KB</Text>
+                    <Text style={styles.noteText} numberOfLines={2}>{file.name}</Text>
+                  </View>
+                  <Pressable
+                    style={styles.docBtn}
+                    onPress={() => {
+                      setDocsOpen(false);
+                      void send(`summarize ${file.name}`, false);
+                    }}
+                  >
+                    <Text style={styles.docBtnText}>Summarize</Text>
+                  </Pressable>
+                </View>
+              ))}
+              {inbox.length === 0 ? (
+                <Text style={styles.chatEmpty}>No documents yet. Drop one into the inbox folder.</Text>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      ) : null}
+
+      {docChoice ? (
+        <View style={styles.modalWrap}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>Which document?</Text>
+            {docChoice.matches.map((name) => (
+              <Pressable
+                key={name}
+                style={styles.docChoice}
+                onPress={() => {
+                  const raw = docChoice.name;
+                  setDocChoice(null);
+                  void send(`summarize ${name}`, false);
+                  void raw;
+                }}
+              >
+                <Text style={styles.noteText}>{name}</Text>
+              </Pressable>
+            ))}
+            <View style={styles.modalRow}>
+              <Pressable onPress={() => setDocChoice(null)}>
+                <Text style={styles.modalCancel}>Cancel</Text>
+              </Pressable>
+            </View>
+          </View>
         </View>
       ) : null}
 
@@ -1533,6 +1785,12 @@ const styles = StyleSheet.create({
   time: { color: "#7e909a", fontSize: 11, marginTop: 4, textAlign: "right" },
   typing: { color: aqua, fontSize: 13, marginTop: 4 },
   sources: { marginTop: 6, gap: 2 },
+  docHint: { color: "#8aa0ab", fontSize: 11, lineHeight: 16 },
+  docBtn: { borderWidth: 1, borderColor: "rgba(126,212,234,0.45)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
+  docBtnText: { color: aqua, fontSize: 11, fontWeight: "700" },
+  docChoice: { borderWidth: 1, borderColor: "rgba(126,212,234,0.3)", borderRadius: 10, padding: 8 },
+  savePoints: { marginTop: 8, alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(61,222,138,0.5)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5 },
+  savePointsText: { color: "#8ff0bd", fontSize: 12, fontWeight: "700" },
   sourceLink: { color: "#9fdcf0", fontSize: 12, textDecorationLine: "underline" },
   thinkToggle: { color: "#7e909a", fontSize: 11, marginTop: 6 },
   thinkBody: { color: "#8aa0ab", fontSize: 12, marginTop: 4 },
