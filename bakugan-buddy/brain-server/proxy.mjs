@@ -17,7 +17,7 @@ import { notesContext, queryForRetrieval } from "../packages/alive/src/notes.ts"
 import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
 import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./lib/tasks.mjs";
-import { planTask, runTask } from "./lib/taskRunner.mjs";
+import { launchTaskRun, planTask, taskRunActive } from "./lib/taskRunner.mjs";
 import os from "node:os";
 
 const llamaUrl = (process.env.LLAMA_URL || "http://127.0.0.1:8790").replace(/\/$/, "");
@@ -38,7 +38,14 @@ const warn = process.env.BRAIN_WARN === "1";
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
+}
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
 }
 
 function readBody(req, limit = 64_000) {
@@ -48,7 +55,7 @@ function readBody(req, limit = 64_000) {
     req.on("data", (chunk) => {
       size += chunk.length;
       if (size > limit) {
-        reject(new Error("body too large"));
+        reject(new HttpError(413, "body too large"));
         req.destroy();
         return;
       }
@@ -58,6 +65,80 @@ function readBody(req, limit = 64_000) {
     req.on("error", reject);
   });
 }
+
+async function readJson(req, limit = 64_000) {
+  const body = await readBody(req, limit);
+  try {
+    return JSON.parse(body.toString("utf8") || "{}");
+  } catch {
+    throw new HttpError(400, "bad json");
+  }
+}
+
+function sendJson(res, status, body) {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
+const CHAT_PROXY_TIMEOUT_MS = Number(process.env.BRAIN_UPSTREAM_TIMEOUT_MS || 90_000);
+
+/** Pipe one model response, but stop paying for generation after the client leaves. */
+async function pipeChatCompletion(req, res, target, body, downError) {
+  const controller = new AbortController();
+  let timedOut = false;
+  let clientClosed = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, CHAT_PROXY_TIMEOUT_MS);
+  const onClose = () => {
+    if (!res.writableEnded) {
+      clientClosed = true;
+      controller.abort();
+    }
+  };
+  res.on("close", onClose);
+  try {
+    let upstream;
+    try {
+      upstream = await fetch(target, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+        signal: controller.signal,
+      });
+    } catch {
+      if (clientClosed) return;
+      sendJson(res, timedOut ? 504 : 503, { error: timedOut ? "model timed out" : downError });
+      return;
+    }
+    res.writeHead(upstream.status, {
+      "Content-Type": upstream.headers.get("content-type") || "text/event-stream",
+      "Cache-Control": "no-cache",
+    });
+    if (!upstream.body) {
+      res.end(await upstream.text());
+      return;
+    }
+    const reader = upstream.body.getReader();
+    for (;;) {
+      const step = await reader.read();
+      if (step.done || clientClosed) break;
+      res.write(step.value);
+    }
+    if (!clientClosed) res.end();
+  } catch {
+    if (!clientClosed && !res.writableEnded) {
+      if (!res.headersSent) sendJson(res, timedOut ? 504 : 503, { error: timedOut ? "model timed out" : downError });
+      else res.end();
+    }
+  } finally {
+    clearTimeout(timer);
+    res.off("close", onClose);
+    controller.abort();
+  }
+}
+
 
 let memoryBook = null;
 function book() {
@@ -76,6 +157,7 @@ function extractLater(payload) {
   void fetch(`${llamaUrl}/v1/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(30_000),
     body: JSON.stringify({
       model: "preyas",
       stream: false,
@@ -146,7 +228,8 @@ async function startTask(title, chatId) {
     .join("\n");
   const steps = await planTask(llamaUrl, title, seed);
   const task = newTask(dataDir, { title, chatId, steps });
-  void runTask(dataDir, task, { llamaUrl }).catch(() => {});
+  const run = launchTaskRun(dataDir, task, { llamaUrl });
+  if (run) void run.catch(() => {});
   return task;
 }
 
@@ -163,7 +246,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/v1/health") {
       let llama = false;
       try {
-        const probe = await fetch(`${llamaUrl}/health`);
+        const probe = await fetch(`${llamaUrl}/health`, { signal: AbortSignal.timeout(2_000) });
         llama = probe.ok;
       } catch {
         llama = false;
@@ -220,7 +303,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/v1/tts") {
-      const payload = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const payload = await readJson(req);
       const wav = await synthesizeFile(payload);
       if (!wav) {
         res.writeHead(503, { "Content-Type": "application/json" });
@@ -241,7 +324,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/v1/facts") {
-      const payload = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const payload = await readJson(req);
       res.writeHead(202, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
       extractLater(payload);
@@ -276,7 +359,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (req.method === "POST") {
-        const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        const body = await readJson(req);
         const title = String(body.title || "").trim().slice(0, 300);
         if (!title) {
           res.writeHead(400, { "Content-Type": "application/json" });
@@ -314,16 +397,24 @@ const server = http.createServer(async (req, res) => {
         }
         if (resuming && req.method === "POST") {
           if (task.status !== "done") {
+            if (taskRunActive(task.id)) {
+              sendJson(res, 409, { error: "task is already running", task });
+              return;
+            }
             for (const step of task.steps) {
               if (step.status === "running" || step.status === "error") step.status = "pending";
             }
             task.status = "planned";
             task.updated = Date.now();
             saveTask(dataDir, task);
-            void runTask(dataDir, task, { llamaUrl }).catch(() => {});
+            const run = launchTaskRun(dataDir, task, { llamaUrl });
+            if (!run) {
+              sendJson(res, 409, { error: "task is already running", task: loadTask(dataDir, task.id) || task });
+              return;
+            }
+            void run.catch(() => {});
           }
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ task }));
+          sendJson(res, 200, { task: loadTask(dataDir, task.id) || task });
           return;
         }
         if (!resuming && req.method === "GET") {
@@ -357,7 +448,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (req.method === "POST") {
-        const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        const body = await readJson(req);
         const saved = addNote(dataDir, body);
         if (!saved.note) {
           res.writeHead(400, { "Content-Type": "application/json" });
@@ -380,7 +471,7 @@ const server = http.createServer(async (req, res) => {
       const id = decodeURIComponent(noteRoute[1]);
       try {
         if (req.method === "PATCH" || req.method === "PUT") {
-          const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+          const body = await readJson(req);
           const note = updateNote(dataDir, id, body);
           res.writeHead(note ? 200 : 404, { "Content-Type": "application/json" });
           res.end(JSON.stringify(note ? { note } : { error: "note not found" }));
@@ -412,7 +503,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       if (req.method === "POST") {
-        const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        const body = await readJson(req);
         const chat = createChat(dataDir, typeof body.title === "string" ? body.title : undefined);
         res.writeHead(201, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ chat }));
@@ -431,7 +522,7 @@ const server = http.createServer(async (req, res) => {
       const onMessages = Boolean(chatRoute[2]);
       try {
         if (onMessages && req.method === "POST") {
-          const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+          const body = await readJson(req);
           const saved = appendMessage(dataDir, id, body);
           if (!saved) {
             res.writeHead(404, { "Content-Type": "application/json" });
@@ -459,7 +550,7 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         if (!onMessages && (req.method === "PATCH" || req.method === "PUT")) {
-          const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+          const body = await readJson(req);
           const chat = renameChat(dataDir, id, body.title);
           if (!chat) {
             res.writeHead(404, { "Content-Type": "application/json" });
@@ -504,7 +595,7 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: "drive missing" }));
         return;
       }
-      const entry = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const entry = await readJson(req);
       const chat = newestChat(dataDir) || createChat(dataDir);
       const saved = appendMessage(dataDir, chat.id, entry);
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -525,7 +616,7 @@ const server = http.createServer(async (req, res) => {
       const status = paidAvailability(envText);
       let gateway = false;
       try {
-        const probe = await fetch("http://127.0.0.1:4000/v1/models");
+        const probe = await fetch("http://127.0.0.1:4000/v1/models", { signal: AbortSignal.timeout(2_000) });
         gateway = probe.ok;
       } catch {
         gateway = false;
@@ -553,33 +644,13 @@ const server = http.createServer(async (req, res) => {
         model === "paid"
           ? "http://127.0.0.1:4000/v1/chat/completions"
           : `${llamaUrl}/v1/chat/completions`;
-      let upstream;
-      try {
-        upstream = await fetch(target, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body,
-        });
-      } catch {
-        res.writeHead(503, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: model === "paid" ? "paid gateway is down" : "llama is down" }));
-        return;
-      }
-      res.writeHead(upstream.status, {
-        "Content-Type": upstream.headers.get("content-type") || "text/event-stream",
-        "Cache-Control": "no-cache",
-      });
-      if (!upstream.body) {
-        res.end(await upstream.text());
-        return;
-      }
-      const reader = upstream.body.getReader();
-      for (;;) {
-        const step = await reader.read();
-        if (step.done) break;
-        res.write(step.value);
-      }
-      res.end();
+      await pipeChatCompletion(
+        req,
+        res,
+        target,
+        body,
+        model === "paid" ? "paid gateway is down" : "llama is down",
+      );
       return;
     }
 
@@ -587,7 +658,8 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ error: "not_found" }));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" });
+    const status = error instanceof HttpError ? error.status : 500;
+    if (!res.headersSent) res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));
   }
 });

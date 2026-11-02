@@ -95,6 +95,25 @@ export function stepContext(root, task, step, options = {}) {
   return chunks.join("\n\n");
 }
 
+const runningTasks = new Set();
+
+export function taskRunActive(id) {
+  return runningTasks.has(String(id));
+}
+
+/**
+ * Start one runner per task id. A second resume while the first is still
+ * waiting on the local model returns null instead of doubling llama calls.
+ */
+export function launchTaskRun(root, task, options = {}) {
+  const id = String(task?.id || "");
+  if (!id || runningTasks.has(id)) return null;
+  runningTasks.add(id);
+  return runTask(root, task, options).finally(() => {
+    runningTasks.delete(id);
+  });
+}
+
 export async function runTask(root, task, options = {}) {
   const { llamaUrl, fetchImpl = fetch, fsRoot, searchNotesImpl } = options;
   task.status = "running";
