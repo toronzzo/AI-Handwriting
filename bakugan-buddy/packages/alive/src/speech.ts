@@ -233,10 +233,26 @@ const WHISPER_FILLERS = new Set([
   "спасибо за просмотр",
 ]);
 
+/** Bracketed or parenthesised sound tags Whisper emits instead of speech: [Music], (noise), ♪. */
+const SOUND_TAG = /[\[(（][^\])\n]{0,40}[\])）]/g;
+
+/**
+ * True when a transcript is only non-speech annotation ("[Music]", "(noise)",
+ * "[BLANK_AUDIO]", "♪") with no actual words around it. Tags wrapped around
+ * real speech are stripped first, so "[Music] tell me a story" survives.
+ */
+export function isNonSpeechTranscript(text: string): boolean {
+  const raw = text.trim();
+  if (!raw) return true;
+  const spoken = raw.replace(SOUND_TAG, " ").replace(/[♪♫♬\s.,!?…—–-]+/g, " ").trim();
+  return spoken.length === 0;
+}
+
 /** Whisper loops on silence: one token repeated, or a short phrase three times, or a stock filler. */
 export function isWhisperHallucination(text: string): boolean {
   const raw = text.trim();
-  if (!raw || /^\[?\s*blank[_\s-]*audio\s*\]?$/i.test(raw)) return true;
+  if (!raw || isNonSpeechTranscript(raw)) return true;
+  if (/^\[?\s*blank[_\s-]*audio\s*\]?$/i.test(raw)) return true;
   const norm = normalizeHeard(raw);
   if (!norm || norm === "blank audio" || WHISPER_FILLERS.has(norm)) return true;
   const words = norm.split(" ");
