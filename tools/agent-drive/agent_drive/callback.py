@@ -12,6 +12,7 @@ from typing import Any
 from litellm.integrations.custom_logger import CustomLogger
 
 from agent_drive.deepseek import (
+    PAID_ALIAS,
     estimate_cost,
     is_deepseek_route,
     load_prefix,
@@ -19,12 +20,20 @@ from agent_drive.deepseek import (
     offpeak_block_reason,
     with_stable_prefix,
 )
+from agent_drive.gateway_config import AUTO_ALIAS
 from agent_drive.history import log_exchange
 from agent_drive.logging_io import append_jsonl
 from agent_drive.paths import agent_root
 from agent_drive.secrets import deepseek_off_peak_only
+from agent_drive.thinking import (
+    ThinkStripper,
+    chunk_text,
+    set_chunk_text,
+    strip_think_from_response,
+)
 
 _MAX_CHARS = 8000
+LOCAL_ROUTES = frozenset({AUTO_ALIAS, "local"})
 
 
 def _clip(text: str) -> str:
@@ -243,7 +252,8 @@ class HistoryCallback(CustomLogger):
         _safe_record(kwargs, response_obj)
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):  # noqa: ANN001
-        """Keep DeepSeek's prefix stable, and hold paid calls during peak when asked."""
+        """Keep DeepSeek's prefix stable, hold paid calls during peak when asked,
+        and turn thinking off for the llama-server routes."""
         if not isinstance(data, dict):
             return data
         model = data.get("model")
@@ -252,9 +262,91 @@ class HistoryCallback(CustomLogger):
         reason = offpeak_block_reason(model_name, now_utc(), deepseek_off_peak_only(root))
         if reason:
             return reason
+        if model_name in LOCAL_ROUTES:
+            # Override a client value: the local routes never show reasoning text.
+            data["chat_template_kwargs"] = {"enable_thinking": False}
         if is_deepseek_route(model_name) and isinstance(data.get("messages"), list):
             data["messages"] = with_stable_prefix(data["messages"], load_prefix(root))
         return data
+
+    async def async_post_call_success_hook(self, data, user_api_key_dict, response):  # noqa: ANN001
+        """Strip a leftover reasoning block from a whole reply."""
+        try:
+            strip_think_from_response(response)
+        except Exception as exc:  # noqa: BLE001 - never fail a good reply
+            print(f"agent-drive thinking: {exc}", file=sys.stderr)
+        return response
+
+    async def async_post_call_streaming_iterator_hook(  # noqa: ANN001
+        self, user_api_key_dict, response, request_data
+    ):
+        """Strip reasoning from a streamed reply, tolerating tags split per chunk."""
+        stripper = ThinkStripper()
+        async for chunk in response:
+            try:
+                text = chunk_text(chunk)
+                if text is not None:
+                    set_chunk_text(chunk, stripper.feed(text))
+            except Exception as exc:  # noqa: BLE001 - pass the chunk through
+                print(f"agent-drive thinking: {exc}", file=sys.stderr)
+            yield chunk
+        stripper.flush()
+
+    async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):  # noqa: ANN001
+        """A failed ``auto`` call is the one case where paid is tried next."""
+        _safe_fallback(kwargs, response_obj)
+
+
+def _failure_reason(kwargs: dict[str, Any], response_obj: Any) -> str:
+    error = kwargs.get("exception") if isinstance(kwargs, dict) else None
+    if error is None and isinstance(response_obj, Exception):
+        error = response_obj
+    if error is None:
+        message = getattr(response_obj, "message", None)
+        error = message if message else response_obj
+    text = str(error).strip().replace("\n", " ")
+    return text[:240] if text else "local route failed"
+
+
+def requested_group(kwargs: Any) -> str:
+    """The route the client asked for.
+
+    LiteLLM reports ``kwargs["model"]`` as the deployment's upstream model, so
+    the model group is the only reliable name here; it is ``auto`` on the
+    failed attempt and ``paid`` on the retry.
+    """
+    if not isinstance(kwargs, dict):
+        return ""
+    standard = kwargs.get("standard_logging_object") or {}
+    if isinstance(standard, dict) and standard.get("model_group"):
+        return str(standard["model_group"])
+    return str(kwargs.get("model") or "")
+
+
+def record_fallback(reason: str, root=None) -> None:  # noqa: ANN001 - Path | None
+    """Log one fallback: ``auto`` failed, the router retries on ``paid``."""
+    target = root if root is not None else agent_root()
+    append_jsonl(
+        {
+            "event": "fallback",
+            "from": AUTO_ALIAS,
+            "to": PAID_ALIAS,
+            "reason": reason,
+        },
+        target,
+    )
+    print(f"agent-drive: {AUTO_ALIAS} failed, falling back to {PAID_ALIAS}: {reason}", file=sys.stderr)
+
+
+def _safe_fallback(kwargs: Any, response_obj: Any) -> None:
+    try:
+        if not isinstance(kwargs, dict):
+            return
+        if requested_group(kwargs) != AUTO_ALIAS:
+            return
+        record_fallback(_failure_reason(kwargs, response_obj))
+    except Exception as exc:  # noqa: BLE001 - logging must not break the retry
+        print(f"agent-drive fallback log: {exc}", file=sys.stderr)
 
 
 def _safe_record(kwargs: Any, response_obj: Any) -> None:

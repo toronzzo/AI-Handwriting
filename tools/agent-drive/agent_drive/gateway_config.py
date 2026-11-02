@@ -12,6 +12,8 @@ from agent_drive.paths import agent_root
 from agent_drive.secrets import key_is_set, load_env_file
 
 DEFAULT_LOCAL_API_BASE = "http://127.0.0.1:8788/v1"
+AUTO_ALIAS = "auto"
+AUTO_TIMEOUT_S = 60
 
 
 def local_api_base() -> str:
@@ -53,22 +55,41 @@ def _deepseek_entry(name: str, upstream: str) -> list[str]:
     ]
 
 
-def render_config(root: Path, *, include_paid: bool, local_base: str) -> str:
-    """Exact-match disk cache on the drive. DeepSeek is omitted without a key.
+def _local_entry(name: str, local_base: str, *, timeout: int | None = None) -> list[str]:
+    """A route served by llama-server, with thinking turned off at the template.
 
-    ``local`` is the only automatic route. ``paid`` is an alias of
-    ``deepseek-flash`` and is used only as the fallback. ``deepseek-v4-pro``
-    is listed for an explicit request; it is not a fallback.
+    llama.cpp leaves the Qwen3 reasoning block in ``content`` unless the chat
+    template gets ``enable_thinking: false``; the callback also strips any
+    leftover block for clients that ignore the flag.
     """
-    cache_dir = root / "cache" / "litellm"
     lines = [
-        "model_list:",
-        "  - model_name: local",
+        f"  - model_name: {name}",
         "    litellm_params:",
         "      model: openai/local",
         f"      api_base: {_yaml_string(local_base)}",
         '      api_key: "local"',
+        "      extra_body:",
+        "        chat_template_kwargs:",
+        "          enable_thinking: false",
     ]
+    if timeout is not None:
+        lines.append(f"      timeout: {timeout}")
+        lines.append(f"      stream_timeout: {timeout}")
+    return lines
+
+
+def render_config(root: Path, *, include_paid: bool, local_base: str) -> str:
+    """Exact-match disk cache on the drive. DeepSeek is omitted without a key.
+
+    ``auto`` and ``local`` both use llama-server. ``auto`` alone may fall back
+    to ``paid`` (an alias of ``deepseek-flash``) after an error or a 60 s
+    timeout; a plain ``local`` request never reaches a paid model.
+    ``deepseek-v4-pro`` is listed for an explicit request; it is not a fallback.
+    """
+    cache_dir = root / "cache" / "litellm"
+    lines = ["model_list:"]
+    lines.extend(_local_entry("local", local_base))
+    lines.extend(_local_entry(AUTO_ALIAS, local_base, timeout=AUTO_TIMEOUT_S))
     if include_paid:
         lines.extend(_deepseek_entry("paid", FLASH_MODEL))
         lines.extend(_deepseek_entry(FLASH_MODEL, FLASH_MODEL))
@@ -100,7 +121,7 @@ def render_config(root: Path, *, include_paid: bool, local_base: str) -> str:
                 "",
                 "router_settings:",
                 "  fallbacks:",
-                "    - local:",
+                f"    - {AUTO_ALIAS}:",
                 "        - paid",
             ]
         )
