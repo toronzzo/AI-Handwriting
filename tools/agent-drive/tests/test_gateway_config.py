@@ -33,6 +33,11 @@ def test_paid_fallback_is_deepseek_and_hides_the_key(tmp_path: Path) -> None:
     assert 'model: "openai/deepseek-v4-pro"' in text
     assert "https://api.deepseek.com" in text
     assert "os.environ/DEEPSEEK_API_KEY" in text
+    assert "input_cost_per_token: 0.00000015" in text
+    assert "output_cost_per_token: 0.0000006" in text
+    assert "input_cost_per_token: 0.00000066" in text
+    assert "output_cost_per_token: 0.00000198" in text
+    assert 'type: "disabled"' in text
     assert "OPENAI_API_KEY" not in text
     assert secret not in text
     fallback = text.split("fallbacks:", 1)[1]

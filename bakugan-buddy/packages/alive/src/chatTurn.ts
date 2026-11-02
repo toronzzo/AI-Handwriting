@@ -5,6 +5,8 @@
  */
 
 export const CHAT_MAX_TOKENS = 512;
+/** Paid flash can spend a short cap on reasoning and return an empty answer. */
+export const PAID_MAX_TOKENS = 2048;
 /** Input budget. 4096 context minus this reply cap, the system prompt, and slack. */
 export const HISTORY_TOKEN_BUDGET = 2400;
 export const LOCAL_TIMEOUT_MS = 20_000;
@@ -133,7 +135,88 @@ export function toModelMessages(messages: readonly ChatMessage[], summary: strin
   ];
 }
 
-export type SsePiece = { text: string; usage: TokenUsage | null };
+export type SsePiece = { text: string; reasoning: string; usage: TokenUsage | null };
+
+export function isPaidModel(model: string): boolean {
+  const name = model.toLowerCase();
+  return name === "paid" || name.includes("deepseek");
+}
+
+/** Local Qwen gets a short cap. Paid DeepSeek thinking is turned off, with room if it still reasons. */
+export function completionExtras(model: string): {
+  max_tokens: number;
+  temperature: number;
+  thinking?: { type: "disabled" };
+  chat_template_kwargs?: { enable_thinking: boolean };
+} {
+  if (isPaidModel(model)) {
+    return { max_tokens: PAID_MAX_TOKENS, temperature: 0.4, thinking: { type: "disabled" } };
+  }
+  return {
+    max_tokens: CHAT_MAX_TOKENS,
+    temperature: 0.8,
+    chat_template_kwargs: { enable_thinking: false },
+  };
+}
+
+const THINK_OPEN = "<think>";
+const THINK_CLOSE = "</think>";
+
+function partialTagSuffix(text: string, tag: string): number {
+  const lower = text.toLowerCase();
+  const want = tag.toLowerCase();
+  const max = Math.min(want.length - 1, lower.length);
+  for (let n = max; n >= 1; n--) {
+    if (lower.endsWith(want.slice(0, n))) return n;
+  }
+  return 0;
+}
+
+/**
+ * Pull Qwen `<think>` blocks out of a growing stream.
+ * A tag split across chunks is held back until it is complete.
+ * An unclosed `<think>` at the end stays in thinking, not in the answer.
+ */
+export function stripThinking(raw: string): { answer: string; thinking: string; inThink: boolean } {
+  const lower = raw.toLowerCase();
+  let answer = "";
+  let thinking = "";
+  let i = 0;
+  let inThink = false;
+  while (i < raw.length) {
+    const tag = inThink ? THINK_CLOSE : THINK_OPEN;
+    const at = lower.indexOf(tag, i);
+    if (at < 0) {
+      const rest = raw.slice(i);
+      if (inThink) thinking += rest;
+      else answer += rest;
+      break;
+    }
+    if (inThink) thinking += raw.slice(i, at);
+    else answer += raw.slice(i, at);
+    i = at + tag.length;
+    inThink = !inThink;
+  }
+  if (!inThink) {
+    const held = partialTagSuffix(answer, THINK_OPEN);
+    if (held > 0) answer = answer.slice(0, answer.length - held);
+  } else {
+    const held = partialTagSuffix(thinking, THINK_CLOSE);
+    if (held > 0) thinking = thinking.slice(0, thinking.length - held);
+  }
+  return {
+    answer: answer.replace(/[ \t]{2,}/g, " ").trim(),
+    thinking: thinking.trim(),
+    inThink,
+  };
+}
+
+/** Spoken and shown text. Thinking is never the answer. */
+export function visibleReply(text: string, reasoning: string): { answer: string; thinking: string; inThink: boolean } {
+  const stripped = stripThinking(text);
+  const thinking = [reasoning.trim(), stripped.thinking].filter(Boolean).join("\n").trim();
+  return { answer: stripped.answer, thinking, inThink: stripped.inThink };
+}
 
 /** Pull text and optional usage out of one OpenAI SSE block. */
 export async function resolveChatBase(
@@ -163,14 +246,24 @@ export async function resolveChatBase(
   return { base: brainUrl.replace(/\/$/, ""), via: "proxy" };
 }
 
+function messagesForModel(messages: readonly ChatMessage[], model: string): ChatMessage[] {
+  const copy = messages.map((message) => ({ ...message }));
+  if (isPaidModel(model)) return copy;
+  const last = copy[copy.length - 1];
+  if (last && last.role === "user" && !/\/(?:no_)?think\b/.test(last.content)) {
+    last.content = `${last.content}\n/no_think`;
+  }
+  return copy;
+}
+
 export async function streamReply(options: {
   base: string;
   model: string;
   messages: readonly ChatMessage[];
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
-  onDelta?: (text: string) => void;
-}): Promise<{ text: string; usage: TokenUsage | null; ok: boolean; error: string }> {
+  onDelta?: (update: { answer: string; thinking: string; inThink: boolean }) => void;
+}): Promise<{ text: string; thinking: string; usage: TokenUsage | null; ok: boolean; error: string }> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? LOCAL_TIMEOUT_MS);
@@ -181,24 +274,26 @@ export async function streamReply(options: {
       body: JSON.stringify({
         model: options.model,
         stream: true,
-        temperature: options.model === "paid" ? 0.4 : 0.8,
-        max_tokens: CHAT_MAX_TOKENS,
+        ...completionExtras(options.model),
         repeat_penalty: 1.1,
         presence_penalty: 0.3,
         frequency_penalty: 0.3,
         stream_options: { include_usage: true },
-        chat_template_kwargs: { enable_thinking: false },
-        messages: options.messages.map((message) => ({ role: message.role, content: message.content })),
+        messages: messagesForModel(options.messages, options.model).map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
       }),
       signal: controller.signal,
     });
     if (!res.ok || !res.body) {
-      return { text: "", usage: null, ok: false, error: res.ok ? "empty" : `status ${res.status}` };
+      return { text: "", thinking: "", usage: null, ok: false, error: res.ok ? "empty" : `status ${res.status}` };
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = "";
     let text = "";
+    let reasoning = "";
     let usage: TokenUsage | null = null;
     for (;;) {
       const step = await reader.read();
@@ -208,31 +303,52 @@ export async function streamReply(options: {
       buf = parts.pop() ?? "";
       for (let i = 0; i < parts.length; i++) {
         const piece = parseSseBlock(parts[i]!);
-        if (piece.text) {
-          text += piece.text;
-          options.onDelta?.(text);
-        }
+        text += piece.text;
+        reasoning += piece.reasoning;
+        if (piece.text || piece.reasoning) options.onDelta?.(visibleReply(text, reasoning));
         if (piece.usage) usage = piece.usage;
       }
     }
     if (buf.trim()) {
       const piece = parseSseBlock(buf);
       text += piece.text;
+      reasoning += piece.reasoning;
       if (piece.usage) usage = piece.usage;
-      if (piece.text) options.onDelta?.(text);
+      const shown = visibleReply(text, reasoning);
+      if (shown.answer || shown.thinking) options.onDelta?.(shown);
     }
-    return { text: text.trim(), usage, ok: Boolean(text.trim()), error: text.trim() ? "" : "empty reply" };
+    const shown = visibleReply(text, reasoning);
+    return {
+      text: shown.answer,
+      thinking: shown.thinking,
+      usage,
+      ok: Boolean(shown.answer),
+      error: shown.answer ? "" : "empty reply",
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { text: "", usage: null, ok: false, error: message };
+    return { text: "", thinking: "", usage: null, ok: false, error: message };
   } finally {
     clearTimeout(timer);
   }
 }
 
+/** Bond and level come only from how many turns are stored on the drive. */
+export function partnerFromTurns(turns: number): { turns: number; level: number; bond: number; caption: string } {
+  const n = Number.isFinite(turns) ? Math.max(0, Math.floor(turns)) : 0;
+  const level = Math.min(40, 1 + Math.floor(n / 3));
+  const bond = Math.min(100, n * 4);
+  let caption = "Just met. The room is still new.";
+  if (bond >= 80) caption = "Trusted friend and battle partner.";
+  else if (bond >= 48) caption = "He shows off, but he stays.";
+  else if (bond >= 16) caption = "Getting used to your voice.";
+  return { turns: n, level, bond, caption };
+}
+
 export function parseSseBlock(block: string): SsePiece {
   const lines = block.split("\n");
   let text = "";
+  let reasoning = "";
   let usage: TokenUsage | null = null;
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i]!.trim();
@@ -241,15 +357,19 @@ export function parseSseBlock(block: string): SsePiece {
     if (!payload || payload === "[DONE]") continue;
     try {
       const json = JSON.parse(payload) as {
-        choices?: { delta?: { content?: string }; message?: { content?: string } }[];
+        choices?: {
+          delta?: { content?: string; reasoning_content?: string };
+          message?: { content?: string; reasoning_content?: string };
+        }[];
         usage?: TokenUsage;
       };
       const choice = json.choices?.[0];
       text += choice?.delta?.content || choice?.message?.content || "";
+      reasoning += choice?.delta?.reasoning_content || choice?.message?.reasoning_content || "";
       if (json.usage && (json.usage.prompt_tokens || json.usage.completion_tokens)) usage = json.usage;
     } catch {
       /* incomplete chunk */
     }
   }
-  return { text, usage };
+  return { text, reasoning, usage };
 }
