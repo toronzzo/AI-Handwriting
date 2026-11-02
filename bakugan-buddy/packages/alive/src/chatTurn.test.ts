@@ -9,6 +9,7 @@ import {
   estimateTokens,
   paidButton,
   parseSseBlock,
+  partnerFromTurns,
   resolveChatBase,
   trimHistory,
   type ChatMessage,
@@ -59,6 +60,16 @@ test("the paid button stays off without a key and during off-peak-only peak hour
   assert.equal(held.enabled, false);
   assert.match(held.reason, /peak/i);
   assert.equal(paidButton({ available: true, offPeakOnly: true, now: weekend }).enabled, true);
+});
+
+test("bond and level grow only from stored turns", () => {
+  const fresh = partnerFromTurns(0);
+  assert.equal(fresh.level, 1);
+  assert.equal(fresh.bond, 0);
+  const later = partnerFromTurns(10);
+  assert.equal(later.level, 4);
+  assert.equal(later.bond, 40);
+  assert.equal(partnerFromTurns(80).bond, 100);
 });
 
 test("the chat base falls back to the proxy when the gateway is down", async () => {

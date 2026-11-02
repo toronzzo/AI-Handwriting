@@ -4,6 +4,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { partnerFromTurns } from "../../packages/alive/src/chatTurn.ts";
 
 const SUMMARY_MAX = 800;
 
@@ -37,18 +38,21 @@ export function readHistory(root, limit = 40) {
   const file = path.join(dir, "chat.jsonl");
   const summaryPath = path.join(dir, "summary.txt");
   const summary = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, "utf8") : "";
-  if (!fs.existsSync(file)) return { summary, messages: [] };
+  if (!fs.existsSync(file)) return { summary, messages: [], partner: partnerFromTurns(0) };
   const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
-  const start = lines.length > limit ? lines.length - limit : 0;
-  const messages = [];
-  for (let i = start; i < lines.length; i++) {
+  let userTurns = 0;
+  const parsed = [];
+  for (let i = 0; i < lines.length; i++) {
     try {
-      messages.push(JSON.parse(lines[i]));
+      const row = JSON.parse(lines[i]);
+      parsed.push(row);
+      if (row.role === "user" || row.who === "user") userTurns += 1;
     } catch {
       /* skip a torn line */
     }
   }
-  return { summary, messages };
+  const start = parsed.length > limit ? parsed.length - limit : 0;
+  return { summary, messages: parsed.slice(start), partner: partnerFromTurns(userTurns) };
 }
 
 /** Read the key file without returning the secret. */

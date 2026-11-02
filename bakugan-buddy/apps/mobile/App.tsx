@@ -21,18 +21,14 @@ export default function App() {
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
-      <View style={styles.top}>
+      {tab !== "chat" ? <View style={styles.top}>
         <Text style={styles.brand}>BAKUGAN BUDDY</Text>
         <Text style={styles.sub}>
-          {tab === "chat"
-            ? "Preyas · chat · local brain, paid model when you ask"
-            : tab === "room"
-              ? "Preyas · ball form · alive in his room"
-              : "M1 · body @ 60fps · Aquos joker pack"}
+          {tab === "room" ? "Preyas · ball form · alive in his room" : "M1 · body @ 60fps · Aquos joker pack"}
         </Text>
         <View style={styles.tabs}>
           <Pressable
-            style={[styles.tab, tab === "chat" && styles.tabOn]}
+            style={styles.tab}
             onPress={() => setTab("chat")}
           >
             <Text style={styles.tabT}>Chat</Text>
@@ -56,10 +52,10 @@ export default function App() {
             <Text style={styles.tabT}>Benchmark</Text>
           </Pressable>
         </View>
-      </View>
+      </View> : null}
 
       <View style={styles.stage}>
-        {tab === "chat" && <ChatScreen />}
+        {tab === "chat" && <ChatScreen onNavigate={setTab} />}
         {tab === "room" && <RoomScreen />}
         {/* Keep WebView mounted while benchmarking so it can drive the body */}
         {(tab === "body" || tab === "bench") && (

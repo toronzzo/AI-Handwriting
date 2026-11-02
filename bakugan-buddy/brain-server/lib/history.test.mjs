@@ -11,6 +11,9 @@ test("history on the drive keeps every turn and a short summary", () => {
   appendHistory(root, { role: "assistant", who: "preyas", content: "I live in the room, not the clock." });
   const book = readHistory(root, 10);
   assert.equal(book.messages.length, 2);
+  assert.equal(book.partner.turns, 1);
+  assert.equal(book.partner.level, 1);
+  assert.equal(book.partner.bond, 4);
   assert.match(book.summary, /What time is it/);
   assert.match(book.summary, /not the clock/);
   const file = path.join(root, "history", "chat.jsonl");

@@ -230,6 +230,18 @@ export async function streamReply(options: {
   }
 }
 
+/** Bond and level come only from how many turns are stored on the drive. */
+export function partnerFromTurns(turns: number): { turns: number; level: number; bond: number; caption: string } {
+  const n = Number.isFinite(turns) ? Math.max(0, Math.floor(turns)) : 0;
+  const level = Math.min(40, 1 + Math.floor(n / 3));
+  const bond = Math.min(100, n * 4);
+  let caption = "Just met. The room is still new.";
+  if (bond >= 80) caption = "Trusted friend and battle partner.";
+  else if (bond >= 48) caption = "He shows off, but he stays.";
+  else if (bond >= 16) caption = "Getting used to your voice.";
+  return { turns: n, level, bond, caption };
+}
+
 export function parseSseBlock(block: string): SsePiece {
   const lines = block.split("\n");
   let text = "";
