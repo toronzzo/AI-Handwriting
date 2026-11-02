@@ -23,6 +23,7 @@ import {
 import { addNote } from "./notes.mjs";
 import { addReminder } from "./reminders.mjs";
 import { newTask, saveTask } from "./tasks.mjs";
+import { saveDeck } from "./study.mjs";
 
 /** Monday 2 Nov 2026, 09:00 Warsaw (CET). */
 const NOW = new Date("2026-11-02T08:00:00.000Z");
@@ -93,6 +94,32 @@ test("unfinished tasks and paused tasks are listed, finished ones are not", () =
     saveTask(root, finished);
     const facts = gatherFacts(root, { now: NOW });
     assert.deepEqual(facts.tasks.map((task) => task.title), ["plan my week"]);
+  } finally {
+    done();
+  }
+});
+
+test("flashcards due today get one line in the briefing", () => {
+  const { root, done } = drive();
+  try {
+    const now = NOW.getTime();
+    const deck = {
+      id: "d1",
+      title: "Arena",
+      language: "en",
+      createdAt: now,
+      updatedAt: now,
+      quizzes: [],
+      cards: [
+        { id: "a", question: "q1", answer: "a1", source: "", due: now - 1000, interval: 0, ease: 2.5, reps: 0, lapses: 0, createdAt: now },
+        { id: "b", question: "q2", answer: "a2", source: "", due: now - 1000, interval: 0, ease: 2.5, reps: 0, lapses: 0, createdAt: now },
+        { id: "c", question: "q3", answer: "a3", source: "", due: now + 86_400_000, interval: 0, ease: 2.5, reps: 0, lapses: 0, createdAt: now },
+      ],
+    };
+    saveDeck(root, deck);
+    const facts = gatherFacts(root, { now: NOW });
+    assert.equal(facts.studyDue, 2);
+    assert.ok(factLines(facts).some((line) => line === "2 flashcards due today"));
   } finally {
     done();
   }

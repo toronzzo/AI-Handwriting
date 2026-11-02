@@ -20,6 +20,18 @@ import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
 import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
 import { collectStatus, restartArgs } from "./lib/status.mjs";
 import {
+  buildDeck,
+  buildQuiz,
+  deleteDeck,
+  dueCards,
+  dueCount,
+  gradeCard,
+  listDecks,
+  loadDeck,
+  recordQuiz,
+  saveDeck,
+} from "./lib/study.mjs";
+import {
   addDevice,
   attemptPair,
   authorizeRequest,
@@ -577,6 +589,127 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }));
       }
       return;
+    }
+
+    if (url.pathname === "/v1/study/decks") {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      if (req.method === "GET") {
+        const now = Date.now();
+        const decks = listDecks(dataDir).map((deck) => ({
+          id: deck.id,
+          title: deck.title,
+          language: deck.language,
+          cards: deck.cards.length,
+          due: dueCount(deck, now),
+          quizzes: deck.quizzes.length,
+          updatedAt: deck.updatedAt,
+        }));
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ decks }));
+        return;
+      }
+      if (req.method === "POST") {
+        const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        const name = String(body.document || "").trim();
+        if (!name) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "document is required" }));
+          return;
+        }
+        try {
+          const book = await readDocumentText(name);
+          const deck = await buildDeck(dataDir, {
+            title: name.replace(/\.[a-z0-9]+$/i, ""),
+            name,
+            text: book.text,
+            language: String(body.language || "en"),
+            llamaUrl,
+          });
+          res.writeHead(201, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, deck: { id: deck.id, title: deck.title, cards: deck.cards.length } }));
+        } catch (error) {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+        }
+        return;
+      }
+    }
+
+    const deckRoute = url.pathname.match(/^\/v1\/study\/decks\/([^/]+)(?:\/(review|quiz|due))?$/);
+    if (deckRoute) {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      const id = decodeURIComponent(deckRoute[1]);
+      const action = deckRoute[2];
+      try {
+        const deck = loadDeck(dataDir, id);
+        if (!deck) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "deck not found" }));
+          return;
+        }
+        if (!action && req.method === "GET") {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ deck, due: dueCards(deck).length }));
+          return;
+        }
+        if (!action && req.method === "DELETE") {
+          const ok = deleteDeck(dataDir, id);
+          res.writeHead(ok ? 200 : 404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok }));
+          return;
+        }
+        if (action === "due" && req.method === "GET") {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ cards: dueCards(deck), total: deck.cards.length }));
+          return;
+        }
+        if (action === "review" && req.method === "POST") {
+          const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+          const graded = gradeCard(dataDir, id, String(body.cardId || ""), String(body.grade || ""));
+          if (!graded) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "unknown card or grade" }));
+            return;
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, card: graded.card, due: dueCount(graded.deck) }));
+          return;
+        }
+        if (action === "quiz" && req.method === "POST") {
+          const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+          if (body.result) {
+            const updated = recordQuiz(dataDir, id, body.result);
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, saved: true, quizzes: updated ? updated.quizzes.length : 0 }));
+            return;
+          }
+          const source = deck.cards.map((card) => `${card.question} ${card.answer}`).join("\n");
+          const questions = await buildQuiz(llamaUrl, source, {
+            language: deck.language,
+            question: String(body.topic || ""),
+          });
+          if (!questions.length) {
+            res.writeHead(502, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "the model did not return a usable quiz" }));
+            return;
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, questions }));
+          return;
+        }
+      } catch (error) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        return;
+      }
     }
 
     if (url.pathname === "/v1/reminders") {

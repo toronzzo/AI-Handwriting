@@ -63,21 +63,29 @@ test("only the newest fourteen are kept, and only preyas zips are removed", () =
   try {
     const dir = path.join(buddy, "backups");
     fs.mkdirSync(dir, { recursive: true });
-    for (let day = 1; day <= 16; day += 1) {
-      fs.writeFileSync(path.join(dir, `preyas-2026-10-${String(day).padStart(2, "0")}.zip`), "old");
+    // Seed relative to today so the test does not rot when the calendar moves.
+    const base = Date.now();
+    const seeded = [];
+    for (let offset = 16; offset >= 1; offset -= 1) {
+      const day = new Date(base - offset * 86_400_000);
+      const localDay = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+      const name = `preyas-${localDay}.zip`;
+      seeded.push(name);
+      fs.writeFileSync(path.join(dir, name), "old");
     }
     fs.writeFileSync(path.join(dir, "keep-me.zip"), "another tool");
     fs.writeFileSync(path.join(dir, "notes.txt"), "keep");
     run(root);
     const names = fs.readdirSync(dir).sort();
     const preyas = names.filter((name) => /^preyas-.*\.zip$/.test(name));
-    const today = new Date().toISOString().slice(0, 10);
+    const local = new Date();
+    const today = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, "0")}-${String(local.getDate()).padStart(2, "0")}`;
     assert.ok(preyas.length <= 14, `kept ${preyas.length}`);
     assert.ok(preyas.includes(`preyas-${today}.zip`), "today's archive is kept");
     assert.equal(names.includes("keep-me.zip"), true, "foreign zips are never deleted");
     assert.equal(names.includes("notes.txt"), true);
-    const oldest = preyas.filter((name) => name.includes("2026-10-01"));
-    if (preyas.length >= 14) assert.equal(oldest.length, 0, "oldest removed first");
+    assert.equal(preyas.includes(seeded[0]), false, "the oldest seeded archive is removed first");
+    assert.equal(preyas.includes(seeded[seeded.length - 1]), true, "the newest seeded archive survives");
   } finally {
     done();
   }
