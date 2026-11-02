@@ -48,6 +48,7 @@ type Shown = ChatMessage & {
   thinking?: string;
   sources?: SearchResult[];
   document?: { name: string; summary?: string; points?: { text: string; kind: NoteKind }[] };
+  briefing?: boolean;
 };
 type InboxFile = { name: string; size: number; type: string; modified: number };
 type PendingReminder = { text: string; dueAt: string; repeat: "none" | "daily" | "weekly" | "weekdays"; label: string };
@@ -64,7 +65,9 @@ type ChatDialog =
   | { kind: "paid"; text: string }
   | { kind: "deleteReminders"; reminders: Reminder[] }
   | { kind: "remind"; pending: PendingReminder }
-  | { kind: "restart" };
+  | { kind: "restart" }
+  | { kind: "briefingTime"; time: string }
+  | { kind: "briefingOff" };
 type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string };
 
 function toShown(rows: StoredRow[]): Shown[] {
@@ -171,6 +174,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [docChoice, setDocChoice] = useState<{ name: string; matches: string[] } | null>(null);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
+  const [briefing, setBriefing] = useState<string>("");
   const [remindersOpen, setRemindersOpen] = useState(false);
   const [pendingReminder, setPendingReminder] = useState<PendingReminder | null>(null);
   const [searchNote, setSearchNote] = useState("");
@@ -442,6 +446,56 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     if (ok) setEditing(null);
   }
 
+  async function refreshBriefing() {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/briefing/today`);
+      if (!res.ok) return "";
+      const body = (await res.json()) as { text?: string | null };
+      const text = body.text || "";
+      setBriefing(text);
+      return text;
+    } catch {
+      return "";
+    }
+  }
+
+  async function runBriefingNow(chatId: string | null) {
+    setChip("Building your briefing…");
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/briefing/run`, { method: "POST" });
+      const body = (await res.json()) as { ok?: boolean; text?: string; error?: string };
+      if (!body.ok || !body.text) throw new Error(body.error || "no briefing");
+      setBriefing(body.text);
+      setChip("Briefing ready");
+      const reply: Shown = {
+        t: Date.now(),
+        role: "assistant",
+        content: body.text,
+        who: "preyas",
+        model: "preyas",
+        briefing: true,
+      };
+      messagesRef.current = [...messagesRef.current, reply];
+      setMessages(messagesRef.current);
+      void remember(reply, chatId);
+    } catch {
+      setChip("Could not build the briefing");
+    }
+  }
+
+  async function saveBriefingSettings(patch: { briefingTime?: string; briefingOn?: boolean }) {
+    try {
+      await fetch(`${bag.brainUrl}/v1/briefing/settings`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      setChip(patch.briefingOn === false ? "Briefing off" : patch.briefingTime ? `Briefing at ${patch.briefingTime}` : "Briefing updated");
+    } catch {
+      setChip("Could not save the setting");
+    }
+  }
+
   async function refreshHealth() {
     try {
       const res = await fetch(`${bag.brainUrl}/v1/status`);
@@ -503,6 +557,53 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     } catch {
       setChip("Could not update the reminder");
     }
+  }
+
+  /** "/briefing", "what's my day", "briefing at 9", "turn off briefing". */
+  async function handleBriefingCommand(text: string, chatId: string | null): Promise<boolean> {
+    const lower = text.trim().toLowerCase();
+    if (/^\/briefing\b|^what'?s my day\b|^my day\b|^what is my day\b/.test(lower)) {
+      await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+      await runBriefingNow(chatId);
+      return true;
+    }
+    const at = lower.match(/^briefing\s+at\s+(\d{1,2})(?::(\d{2}))?$/i);
+    if (at) {
+      const hour = String(Number(at[1])).padStart(2, "0");
+      const minute = (at[2] || "00").padStart(2, "0");
+      const time = `${hour}:${minute}`;
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+        await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+        await addLocal({
+          t: Date.now(),
+          role: "assistant",
+          content: "That is not a time I can use. Try \"briefing at 9\" or \"briefing at 08:30\".",
+          who: "preyas",
+          model: "preyas",
+        });
+        return true;
+      }
+      setDialog({ kind: "briefingTime", time });
+      return true;
+    }
+    if (/^turn off (the )?briefing\b|^briefing off\b/.test(lower)) {
+      setDialog({ kind: "briefingOff" });
+      return true;
+    }
+    if (/^turn on (the )?briefing\b|^briefing on\b/.test(lower)) {
+      await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+      await saveBriefingSettings({ briefingOn: true });
+      await addLocal({
+        t: Date.now(),
+        role: "assistant",
+        content: "Morning briefings are back on.",
+        who: "preyas",
+        model: "preyas",
+      });
+      return true;
+    }
+    void chatId;
+    return false;
   }
 
   /** "remind me …" → confirm card; "what are my reminders"; "cancel the X reminder". */
@@ -1006,6 +1107,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       const handled = await handleDocumentRequest(docRequest, trimmed, chatId);
       if (handled) return;
     }
+    if (!askPaid && (await handleBriefingCommand(trimmed, chatId))) return;
     if (!askPaid && (await handleReminderCommand(trimmed, chatId))) return;
     const command = parseNoteCommand(trimmed);
     if (command?.kind === "remember") {
@@ -1204,7 +1306,31 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             });
           },
         }
-      : dialog.kind === "restart"
+      : dialog.kind === "briefingTime"
+        ? {
+            title: `Briefing at ${dialog.time}?`,
+            body: "I will send your day each morning at this time.",
+            confirm: "Yes",
+            no: "No",
+            danger: false,
+            run: () => {
+              setDialog(null);
+              void saveBriefingSettings({ briefingTime: dialog.time, briefingOn: true });
+            },
+          }
+        : dialog.kind === "briefingOff"
+          ? {
+              title: "Turn off the daily briefing?",
+              body: "You can still ask for one any time with /briefing.",
+              confirm: "Yes",
+              no: "No",
+              danger: true,
+              run: () => {
+                setDialog(null);
+                void saveBriefingSettings({ briefingOn: false });
+              },
+            }
+          : dialog.kind === "restart"
         ? {
             title: "Restart Preyas?",
             body: "Stops and starts the brain, model and web app. Takes about a minute.",
@@ -1538,6 +1664,32 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                         </Pressable>
                       ) : null}
                       {openThink[index] && message.thinking ? <Text style={styles.thinkBody}>{message.thinking}</Text> : null}
+                      {message.briefing ? (
+                        <View style={styles.briefingCard}>
+                          <Text style={styles.briefingTitle}>Your day</Text>
+                          <Text style={styles.briefingText}>{message.content}</Text>
+                          <View style={styles.briefingActions}>
+                            <Pressable
+                              style={styles.docBtn}
+                              onPress={() => {
+                                setPane("status");
+                                void refreshHealth();
+                              }}
+                            >
+                              <Text style={styles.docBtnText}>Open status</Text>
+                            </Pressable>
+                            <Pressable
+                              style={styles.docBtn}
+                              onPress={() => {
+                                setRemindersOpen(true);
+                                void refreshReminders();
+                              }}
+                            >
+                              <Text style={styles.docBtnText}>Done on reminders</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      ) : null}
                       {message.document?.summary ? (
                         <Pressable
                           style={styles.savePoints}
@@ -2079,6 +2231,10 @@ const styles = StyleSheet.create({
   sources: { marginTop: 6, gap: 2 },
   docHint: { color: "#8aa0ab", fontSize: 11, lineHeight: 16 },
   healthList: { gap: 8, marginVertical: 10 },
+  briefingCard: { marginTop: 8, borderWidth: 1, borderColor: "rgba(126,212,234,0.35)", borderRadius: 12, backgroundColor: "#0c141c", padding: 10, gap: 6 },
+  briefingTitle: { color: aqua, fontSize: 12, fontWeight: "700", letterSpacing: 1 },
+  briefingText: { color: "#e7f3f7", fontSize: 13, lineHeight: 19 },
+  briefingActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   healthRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   healthLabel: { color: "#e7f3f7", fontSize: 14, width: 120 },
   healthDetail: { color: "#9aa8b2", fontSize: 12, flex: 1 },
