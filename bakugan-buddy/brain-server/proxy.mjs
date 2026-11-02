@@ -18,6 +18,8 @@ import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/n
 import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
 import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
+import { collectStatus, restartArgs } from "./lib/status.mjs";
+import { spawn } from "node:child_process";
 import {
   addReminder,
   deleteReminder,
@@ -365,6 +367,27 @@ const server = http.createServer(async (req, res) => {
       fs.appendFileSync(path.join(dir, "room.jsonl"), body.toString("utf8").trim() + "\n");
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/status") {
+      const status = await collectStatus({ drive: "/Volumes/Agent", buddy: buddyRoot });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(status));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/restart") {
+      const launcher = path.join(process.cwd(), "..", "launcher");
+      try {
+        const child = spawn("/bin/bash", restartArgs(launcher), { detached: true, stdio: "ignore" });
+        child.unref();
+        res.writeHead(202, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, restarting: true }));
+      } catch (error) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+      }
       return;
     }
 
