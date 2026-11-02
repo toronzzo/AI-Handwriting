@@ -15,8 +15,10 @@ set -a
 # shellcheck disable=SC1091
 source "$ROOT/brain.env"
 set +a
-apply_canonical_data_dir "$ROOT/brain.env"
+split_agent_roots "$ROOT/brain.env"
 ensure_bakugan_drive
+echo "Preyas data: $BAKUGAN_DATA_DIR"
+echo "Gateway root: $AGENT_DRIVE_ROOT"
 
 # shellcheck source=lib/prebuilt-tools.sh
 source "$ROOT/lib/prebuilt-tools.sh"
@@ -135,6 +137,15 @@ if command -v dns-sd >/dev/null 2>&1; then
 fi
 
 GATEWAY_PID=""
+mkdir -p "$AGENT_DRIVE_ROOT/logs" "$BAKUGAN_DATA_DIR/history" 2>/dev/null || true
+node --experimental-strip-types --disable-warning=ExperimentalWarning --input-type=module <<EOF || true
+import { mergeHistoryFiles } from "${ROOT}/lib/history.mjs";
+const data = process.env.BAKUGAN_DATA_DIR;
+const agent = process.env.AGENT_DRIVE_ROOT || "/Volumes/Agent/agent";
+const buddy = "/Volumes/Agent/BakuganBuddy";
+const merged = mergeHistoryFiles(data, agent).added + mergeHistoryFiles(data, buddy).added;
+if (merged) console.log("Merged " + merged + " chat lines into " + data + "/history (sources kept).");
+EOF
 SECRETS="$AGENT_DRIVE_ROOT/secrets/.env"
 GW_DIR="$(cd "$ROOT/../../tools/agent-drive" && pwd)"
 if [[ -x "$AGENT_DRIVE_ROOT/venv/bin/litellm" && -f "$SECRETS" ]] && grep -Eq '^DEEPSEEK_API_KEY=.+' "$SECRETS" && ! grep -Eq '^DEEPSEEK_API_KEY=(changeme)?$' "$SECRETS"; then

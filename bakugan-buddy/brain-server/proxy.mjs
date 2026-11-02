@@ -10,7 +10,7 @@ import { FACT_EXTRACT_PROMPT } from "../packages/alive/src/longMemory.ts";
 import { openMemory, parseExtractedFacts, relevantFacts, rememberFacts } from "./lib/memory.mjs";
 import { synthesizeFile, transcribeFile } from "./lib/speech.mjs";
 import { withSampling } from "./lib/sampling.mjs";
-import { appendHistory, paidAvailability, readHistory } from "./lib/history.mjs";
+import { appendHistory, mergeHistoryFiles, paidAvailability, readHistory } from "./lib/history.mjs";
 import { clipTooShort, isWhisperHallucination } from "../packages/alive/src/speech.ts";
 import os from "node:os";
 
@@ -18,6 +18,14 @@ const llamaUrl = (process.env.LLAMA_URL || "http://127.0.0.1:8790").replace(/\/$
 const port = Number(process.env.BRAIN_PORT || 8788);
 const host = process.env.BRAIN_HOST || "0.0.0.0";
 const dataDir = process.env.BAKUGAN_DATA_DIR || "";
+const gatewayRoot = process.env.AGENT_DRIVE_ROOT || "/Volumes/Agent/agent";
+const buddyRoot = "/Volumes/Agent/BakuganBuddy";
+
+function syncHistory() {
+  if (!dataDir) return;
+  mergeHistoryFiles(dataDir, gatewayRoot);
+  mergeHistoryFiles(dataDir, buddyRoot);
+}
 const label = process.env.BRAIN_LABEL || "preyas";
 const warn = process.env.BRAIN_WARN === "1";
 
@@ -200,6 +208,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/v1/history") {
+      syncHistory();
       const book = dataDir ? readHistory(dataDir, 40) : { summary: "", messages: [] };
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(book));
@@ -221,9 +230,10 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/v1/paid") {
       let envText = "";
-      if (dataDir) {
+      const secretDirs = [gatewayRoot, dataDir].filter(Boolean);
+      for (let i = 0; i < secretDirs.length && !envText; i++) {
         try {
-          envText = fs.readFileSync(path.join(dataDir, "secrets", ".env"), "utf8");
+          envText = fs.readFileSync(path.join(secretDirs[i], "secrets", ".env"), "utf8");
         } catch {
           envText = "";
         }

@@ -34,6 +34,36 @@ export function appendHistory(root, entry) {
   return { summary: next };
 }
 
+/**
+ * Copy chat lines from another root into dest. Skips lines already present.
+ * Does not delete or edit the source file. Safe to run twice.
+ */
+export function mergeHistoryFiles(destRoot, otherRoot) {
+  if (!destRoot || !otherRoot) return { added: 0 };
+  if (path.resolve(destRoot) === path.resolve(otherRoot)) return { added: 0 };
+  const otherFile = path.join(historyDir(otherRoot), "chat.jsonl");
+  if (!fs.existsSync(otherFile)) return { added: 0 };
+  const destDir = historyDir(destRoot);
+  fs.mkdirSync(destDir, { recursive: true });
+  const destFile = path.join(destDir, "chat.jsonl");
+  const have = new Set();
+  if (fs.existsSync(destFile)) {
+    for (const line of fs.readFileSync(destFile, "utf8").split("\n")) {
+      if (line) have.add(line);
+    }
+  }
+  const extra = [];
+  for (const line of fs.readFileSync(otherFile, "utf8").split("\n")) {
+    if (!line || have.has(line)) continue;
+    have.add(line);
+    extra.push(line);
+  }
+  if (extra.length === 0) return { added: 0 };
+  const prefix = fs.existsSync(destFile) && !fs.readFileSync(destFile, "utf8").endsWith("\n") ? "\n" : "";
+  fs.appendFileSync(destFile, prefix + extra.join("\n") + "\n");
+  return { added: extra.length };
+}
+
 export function readHistory(root, limit = 40) {
   const dir = historyDir(root);
   const file = path.join(dir, "chat.jsonl");
