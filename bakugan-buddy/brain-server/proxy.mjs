@@ -19,6 +19,20 @@ import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
 import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
 import { collectStatus, restartArgs } from "./lib/status.mjs";
+import {
+  BRIEFING_CHAT_TITLE,
+  dayKey,
+  gatherFacts,
+  hasBriefingToday,
+  loadSettings,
+  readBriefing,
+  readLastBriefingDay,
+  saveBriefing,
+  saveSettings,
+  shouldRun,
+  topLine,
+  writeBriefing,
+} from "./lib/briefing.mjs";
 import { spawn } from "node:child_process";
 import {
   addReminder,
@@ -257,6 +271,51 @@ function docJobKey(name) {
   return String(name).toLowerCase();
 }
 
+/** One long-lived "Daily briefing" chat, reused every day. */
+function briefingChatId() {
+  const existing = listChats(dataDir).find((chat) => chat.title === BRIEFING_CHAT_TITLE);
+  if (existing) return existing.id;
+  return createChat(dataDir, BRIEFING_CHAT_TITLE).id;
+}
+
+/** Build, save and deliver one briefing. Returns { day, text }. */
+async function runBriefing(options = {}) {
+  const now = options.now || new Date();
+  const day = dayKey(now);
+  const facts = gatherFacts(dataDir, {
+    now,
+    buddyRoot: buddyRoot,
+    lastBriefingDay: readLastBriefingDay(dataDir),
+  });
+  const written = await writeBriefing(facts, { llamaUrl, fetchImpl: options.fetchImpl });
+  saveBriefing(dataDir, day, written.text);
+  if (options.deliver !== false) {
+    void notify("Preyas: your day", topLine(written.text));
+    try {
+      appendMessage(dataDir, briefingChatId(), {
+        role: "assistant",
+        who: "preyas",
+        model: "preyas",
+        content: `Briefing ${day}\n\n${written.text}`,
+      });
+    } catch {
+      /* the chat is a convenience; the file is the record */
+    }
+  }
+  return { day, text: written.text, model: written.model };
+}
+
+/** Called from the reminder tick: no separate timer. */
+function maybeBriefing() {
+  try {
+    const settings = loadSettings(dataDir);
+    if (!shouldRun(new Date(), settings, hasBriefingToday(dataDir))) return;
+    void runBriefing({}).catch(() => {});
+  } catch {
+    /* a missed briefing is not fatal */
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") {
@@ -368,6 +427,54 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(204);
       res.end();
       return;
+    }
+
+    if (url.pathname === "/v1/briefing/today" && req.method === "GET") {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      const day = dayKey(new Date());
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ day, text: readBriefing(dataDir, day), settings: loadSettings(dataDir) }));
+      return;
+    }
+
+    if (url.pathname === "/v1/briefing/run" && req.method === "POST") {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      try {
+        const result = await runBriefing({});
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, ...result }));
+      } catch (error) {
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+      }
+      return;
+    }
+
+    if (url.pathname === "/v1/briefing/settings") {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      if (req.method === "GET") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(loadSettings(dataDir)));
+        return;
+      }
+      if (req.method === "PATCH" || req.method === "PUT") {
+        const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(saveSettings(dataDir, body)));
+        return;
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/v1/status") {
@@ -966,6 +1073,7 @@ function startReminderLoop() {
           });
         }
       }
+      maybeBriefing();
     } catch {
       /* a bad reminder must not stop the loop */
     }
