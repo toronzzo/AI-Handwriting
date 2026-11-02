@@ -9,4 +9,4 @@ Do:
 - Pass `"metadata": {"session_id": "<id from new_session.py>"}` when you have a session.
 - Leave `prompts/deepseek-prefix.txt` unchanged. The gateway puts that text first on DeepSeek calls so the server-side prefix cache can hit. Put variable text after it.
 
-Skip: DeepSeek, unless the local server is down (the gateway falls back to `deepseek-flash` on its own) or the task is explicitly `deepseek-flash` or `deepseek-v4-pro`. Do not call DeepSeek directly. `deepseek-v4-pro` is for a harder task, not the automatic fallback.
+Skip: DeepSeek. `local` never falls back to a paid model. Ask for `auto` instead when a single retry on `deepseek-flash` is acceptable if the local server errors or runs past 60 s; that fallback is logged as `event: "fallback"` in `logs/gateway.jsonl`. For a harder task ask for `deepseek-v4-pro` explicitly; it is never automatic.

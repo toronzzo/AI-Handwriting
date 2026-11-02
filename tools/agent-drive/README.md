@@ -101,8 +101,10 @@ Override the workspace with `AGENT_DRIVE_ROOT` if the drive is not named `Agent`
 
 `gateway/start.sh` writes a config on the drive (not in git) and runs LiteLLM on port 4000, bound to `127.0.0.1`, one worker.
 
-- `local` → `openai/local` at `AGENT_DRIVE_LOCAL_API_BASE` (default `http://127.0.0.1:8788/v1`) with a dummy key, so it does not use a paid credential. This is the route to ask for.
-- `paid` → DeepSeek `deepseek-flash` (DeepSeek-V4.1-Flash-1017) at `https://api.deepseek.com`, and only as the fallback when `local` fails. It is added only when `secrets/.env` contains `DEEPSEEK_API_KEY`. The config stores `os.environ/DEEPSEEK_API_KEY`, not the key.
+- `local` → `openai/local` at `AGENT_DRIVE_LOCAL_API_BASE` (default `http://127.0.0.1:8788/v1`) with a dummy key, so it does not use a paid credential. This is the route to ask for, and it never falls back.
+- `auto` → the same local upstream, with a 60 s request and stream timeout. It is the only route that may fall back: if local errors or times out, the router retries once on `paid` and the callback appends an `event: "fallback"` line to `logs/gateway.jsonl` with the reason.
+- Both local routes send `chat_template_kwargs.enable_thinking: false`, and the callback strips any `<think>...</think>` block that still arrives, for whole and streamed replies.
+- `paid` → DeepSeek `deepseek-flash` (DeepSeek-V4.1-Flash-1017) at `https://api.deepseek.com`, as the fallback for `auto`. It is added only when `secrets/.env` contains `DEEPSEEK_API_KEY`. The config stores `os.environ/DEEPSEEK_API_KEY`, not the key.
 - `deepseek-flash` is the same upstream model, for an explicit request. `deepseek-v4-pro` (DeepSeek-V4-Pro-0813) is for a harder task and is never the automatic fallback.
 - On the way to DeepSeek the gateway puts `prompts/deepseek-prefix.txt` in front of the messages and does not add a timestamp. Keep that file stable so DeepSeek's server-side context cache hits. A cache-hit input token is 50× cheaper than a cache miss ($0.003 vs $0.15 per 1M tokens, off-peak). Variable text goes after the prefix.
 - `DEEPSEEK_OFF_PEAK_ONLY=1` refuses DeepSeek calls during weekday peak (01:00–04:00 and 06:00–10:00 UTC, 2× the off-peak price) and tells you when off-peak starts. `./bin/offpeak.sh --wait` sleeps until then for batch jobs. Weekends are off-peak. DeepSeek also bills Chinese public holidays as off-peak; this estimate uses the weekday clock only.
