@@ -28,6 +28,7 @@ import {
 import type { MicPhase } from "../../../../packages/alive/src/speech.ts";
 import { readBrainHost } from "../room/brain/brainLink";
 import { isWhisperHallucination, resetSpeech } from "../../../../packages/alive/src/speech.ts";
+import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../../../packages/alive/src/notes.ts";
 import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "../room/voice/VoiceSession";
 import { PreyasHero } from "./PreyasHero";
 
@@ -35,7 +36,11 @@ type Shown = ChatMessage & { t: number; thinking?: string };
 type PartnerCard = { turns: number; level: number; bond: number; caption: string };
 type Pane = "companion" | "activity" | "collection";
 type ChatMeta = { id: string; title: string; created: number; updated: number };
-type ChatDialog = { kind: "rename"; id: string; value: string } | { kind: "delete"; id: string; title: string };
+type ChatDialog =
+  | { kind: "rename"; id: string; value: string }
+  | { kind: "delete"; id: string; title: string }
+  | { kind: "deleteNote"; id: string; text: string }
+  | { kind: "forget"; notes: Note[] };
 type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string };
 
 function toShown(rows: StoredRow[]): Shown[] {
@@ -125,6 +130,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const activeIdRef = useRef<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [dialog, setDialog] = useState<ChatDialog | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesList, setNotesList] = useState<Note[]>([]);
+  const [notesQuery, setNotesQuery] = useState("");
+  const [editing, setEditing] = useState<{ id: string; text: string; kind: NoteKind } | null>(null);
+  const [chip, setChip] = useState("");
+  const notesStamp = useRef(0);
   const [pane, setPane] = useState<Pane>("companion");
   const [menu, setMenu] = useState(false);
   const [profile, setProfile] = useState(false);
@@ -228,6 +239,174 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
   }
 
+  async function fetchNotes(query: string, limit = 50): Promise<Note[]> {
+    try {
+      const params = new URLSearchParams();
+      if (query.trim()) params.set("q", query.trim());
+      params.set("limit", String(limit));
+      const res = await fetch(`${bag.brainUrl}/v1/notes?${params.toString()}`);
+      if (!res.ok) return [];
+      const body = (await res.json()) as { notes?: Note[] };
+      return Array.isArray(body.notes) ? body.notes : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function stampOf(rows: Note[]): number {
+    return rows.reduce((max, note) => Math.max(max, note.updated || 0), 0);
+  }
+
+  async function refreshNotes(query = notesQuery) {
+    const rows = await fetchNotes(query);
+    setNotesList(rows);
+    return rows;
+  }
+
+  /** The model extracts notes after a reply; poll a few times, then show the chip. */
+  function scheduleNotesCheck() {
+    for (const delay of [1500, 4000, 8000]) {
+      setTimeout(() => {
+        void (async () => {
+          const rows = await fetchNotes("", 100);
+          const stamp = stampOf(rows);
+          if (stamp > notesStamp.current) {
+            notesStamp.current = stamp;
+            setChip("Saved to notes");
+            if (notesOpen) setNotesList(rows);
+          }
+        })();
+      }, delay);
+    }
+  }
+
+  async function postNote(text: string, kind: NoteKind): Promise<Note | null> {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/notes`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text, kind, sourceChatId: activeIdRef.current || "" }),
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as { note?: Note };
+      const note = body.note || null;
+      if (note) {
+        notesStamp.current = Math.max(notesStamp.current, note.updated);
+        setNotesList((rows) => [note, ...rows.filter((row) => row.id !== note.id)]);
+      }
+      return note;
+    } catch {
+      return null;
+    }
+  }
+
+  async function patchNote(id: string, text: string, kind: NoteKind): Promise<boolean> {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/notes/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text, kind }),
+      });
+      if (!res.ok) return false;
+      const body = (await res.json()) as { note?: Note };
+      if (body.note) {
+        const note = body.note;
+        notesStamp.current = Math.max(notesStamp.current, note.updated);
+        setNotesList((rows) => rows.map((row) => (row.id === note.id ? note : row)));
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function removeNote(id: string) {
+    try {
+      await fetch(`${bag.brainUrl}/v1/notes/${encodeURIComponent(id)}`, { method: "DELETE" });
+    } catch {
+      /* the row goes away locally either way */
+    }
+    setNotesList((rows) => rows.filter((row) => row.id !== id));
+    setEditing(null);
+    setDialog(null);
+  }
+
+  async function addLocal(entry: Shown) {
+    messagesRef.current = [...messagesRef.current, entry];
+    setMessages(messagesRef.current);
+    await remember(entry);
+  }
+
+  async function handleRemember(raw: string, text: string) {
+    busy.current = true;
+    try {
+      await addLocal({ t: Date.now(), role: "user", content: raw, who: "user" });
+      const note = await postNote(text, "fact");
+      await addLocal({
+        t: Date.now(),
+        role: "assistant",
+        content: note ? `Saved to notes: ${note.text}` : "I couldn't save that note.",
+        who: "preyas",
+        model: "preyas",
+      });
+      if (note) setChip("Saved to notes");
+    } finally {
+      busy.current = false;
+    }
+  }
+
+  async function handleForget(raw: string, query: string) {
+    busy.current = true;
+    try {
+      await addLocal({ t: Date.now(), role: "user", content: raw, who: "user" });
+      const hits = await fetchNotes(query, 5);
+      if (hits.length === 0) {
+        await addLocal({
+          t: Date.now(),
+          role: "assistant",
+          content: `I don't have a note about ${query}.`,
+          who: "preyas",
+          model: "preyas",
+        });
+        return;
+      }
+      setDialog({ kind: "forget", notes: hits });
+    } finally {
+      busy.current = false;
+    }
+  }
+
+  async function forgetNotes(notes: Note[]) {
+    for (const note of notes) {
+      try {
+        await fetch(`${bag.brainUrl}/v1/notes/${encodeURIComponent(note.id)}`, { method: "DELETE" });
+      } catch {
+        /* keep going: the rest still need forgetting */
+      }
+    }
+    setNotesList((rows) => rows.filter((row) => !notes.some((note) => note.id === row.id)));
+    setDialog(null);
+    await addLocal({
+      t: Date.now(),
+      role: "assistant",
+      content: notes.length === 1 ? `Forgot: ${notes[0]!.text}` : `Forgot ${notes.length} notes.`,
+      who: "preyas",
+      model: "preyas",
+    });
+  }
+
+  async function saveEditing() {
+    if (!editing) return;
+    const ok = await patchNote(editing.id, editing.text, editing.kind);
+    if (ok) setEditing(null);
+  }
+
+  useEffect(() => {
+    if (!chip) return;
+    const id = setTimeout(() => setChip(""), 4000);
+    return () => clearTimeout(id);
+  }, [chip]);
+
   useEffect(() => {
     let cancel = false;
     void (async () => {
@@ -254,6 +433,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         }
       } catch {
         /* the thread still works for this session */
+      }
+      try {
+        const rows = await fetchNotes("", 100);
+        if (!cancel) notesStamp.current = stampOf(rows);
+      } catch {
+        /* notes arrive with the next exchange */
       }
       try {
         const res = await fetch(`${bag.brainUrl}/v1/paid`);
@@ -393,6 +578,34 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       const chat = await startChat();
       if (chat) setActiveChat(chat.id);
     }
+    const command = parseNoteCommand(trimmed);
+    if (command?.kind === "remember") {
+      await handleRemember(trimmed, command.text);
+      return;
+    }
+    if (command?.kind === "forget") {
+      await handleForget(trimmed, command.query);
+      return;
+    }
+    if (command?.kind === "recall") {
+      const hits = await fetchNotes(command.query, 5);
+      if (hits.length === 0) {
+        busy.current = true;
+        try {
+          await addLocal({ t: Date.now(), role: "user", content: trimmed, who: "user" });
+          await addLocal({
+            t: Date.now(),
+            role: "assistant",
+            content: `I don't have a note about ${command.query}.`,
+            who: "preyas",
+            model: "preyas",
+          });
+        } finally {
+          busy.current = false;
+        }
+        return;
+      }
+    }
     busy.current = true;
     bag.thinking = true;
     const userMsg: Shown = { t: Date.now(), role: "user", content: trimmed, who: "user" };
@@ -433,6 +646,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           setMessages(messagesRef.current);
           void speakPreyas(cleaned.text, true);
           void remember(reply);
+          scheduleNotesCheck();
           return;
         }
         route = chooseRoute({
@@ -465,6 +679,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       messagesRef.current = [...messagesRef.current, paidMsg];
       setMessages(messagesRef.current);
       void remember(paidMsg);
+      scheduleNotesCheck();
       const reaction = await ask(
         "local",
         messagesRef.current,
@@ -484,6 +699,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         setMessages(messagesRef.current);
         void speakPreyas(line, true);
         void remember(reply);
+        scheduleNotesCheck();
       }
     } finally {
       bag.thinking = false;
@@ -518,24 +734,54 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           danger: false,
           run: () => void saveRename(dialog.id, dialog.value),
         }
-      : {
-          title: "Are you sure?",
-          body: `Delete "${dialog.title}"? This cannot be undone.`,
-          confirm: "Delete",
-          danger: true,
-          run: () => void removeChat(dialog.id),
-        }
+      : dialog.kind === "delete"
+        ? {
+            title: "Are you sure?",
+            body: `Delete "${dialog.title}"? This cannot be undone.`,
+            confirm: "Delete",
+            danger: true,
+            run: () => void removeChat(dialog.id),
+          }
+        : dialog.kind === "deleteNote"
+          ? {
+              title: "Are you sure?",
+              body: `Delete this note?\n\n${dialog.text}`,
+              confirm: "Delete",
+              danger: true,
+              run: () => void removeNote(dialog.id),
+            }
+          : {
+              title: "Forget these?",
+              body: `${dialog.notes.length} note${dialog.notes.length === 1 ? "" : "s"} will be deleted.\n\n${dialog.notes
+                .map((note) => `- ${note.text}`)
+                .join("\n")}`,
+              confirm: "Forget",
+              danger: true,
+              run: () => void forgetNotes(dialog.notes),
+            }
     : null;
 
   const chatList = (withClose: boolean) => (
     <View style={styles.sidebarInner}>
       <View style={styles.sidebarHead}>
         <Text style={styles.sidebarTitle}>CHATS</Text>
-        {withClose ? (
-          <Pressable onPress={() => setDrawerOpen(false)} hitSlop={8}>
-            <Text style={styles.sidebarClose}>✕</Text>
+        <View style={styles.sidebarHeadRight}>
+          <Pressable
+            style={styles.notesBtn}
+            onPress={() => {
+              setNotesOpen(true);
+              setDrawerOpen(false);
+              void refreshNotes("");
+            }}
+          >
+            <Text style={styles.notesBtnText}>Notes</Text>
           </Pressable>
-        ) : null}
+          {withClose ? (
+            <Pressable onPress={() => setDrawerOpen(false)} hitSlop={8}>
+              <Text style={styles.sidebarClose}>✕</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
       <Pressable style={styles.newChat} onPress={() => void newChat()}>
         <Text style={styles.newChatText}>+ New chat</Text>
@@ -729,6 +975,11 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 </View>
               ) : null}
             </View>
+            {chip ? (
+              <View style={styles.chipSaved}>
+                <Text style={styles.chipSavedText}>✓ {chip}</Text>
+              </View>
+            ) : null}
             <View style={styles.composer}>
               <TextInput
                 value={draft}
@@ -794,6 +1045,85 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         <View style={styles.drawerWrap}>
           <Pressable style={styles.scrim} onPress={() => setDrawerOpen(false)} />
           <View style={styles.drawer}>{chatList(true)}</View>
+        </View>
+      ) : null}
+
+      {notesOpen ? (
+        <View style={styles.notesWrap}>
+          <Pressable style={styles.scrim} onPress={() => setNotesOpen(false)} />
+          <View style={styles.notesPanel}>
+            <View style={styles.notesHead}>
+              <Text style={styles.sidebarTitle}>NOTES</Text>
+              <Pressable onPress={() => setNotesOpen(false)} hitSlop={8}>
+                <Text style={styles.sidebarClose}>✕</Text>
+              </Pressable>
+            </View>
+            <TextInput
+              value={notesQuery}
+              onChangeText={(value) => {
+                setNotesQuery(value);
+                void refreshNotes(value);
+              }}
+              placeholder="Search notes..."
+              placeholderTextColor="#6d7c88"
+              style={styles.modalInput}
+            />
+            <ScrollView style={styles.notesScroll} contentContainerStyle={styles.notesList}>
+              {notesList.map((note) => (
+                <View key={note.id} style={styles.noteRow}>
+                  {editing?.id === note.id ? (
+                    <View style={styles.noteEditing}>
+                      <TextInput
+                        value={editing.text}
+                        onChangeText={(value) => setEditing({ ...editing, text: value })}
+                        style={styles.modalInput}
+                        multiline
+                      />
+                      <View style={styles.kindRow}>
+                        {NOTE_KINDS.map((kind) => (
+                          <Pressable
+                            key={kind}
+                            style={[styles.kindChip, editing.kind === kind && styles.kindChipOn]}
+                            onPress={() => setEditing({ ...editing, kind })}
+                          >
+                            <Text style={styles.kindText}>{kind}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      <View style={styles.noteActions}>
+                        <Pressable onPress={() => setEditing(null)}>
+                          <Text style={styles.modalCancel}>Cancel</Text>
+                        </Pressable>
+                        <Pressable onPress={() => void saveEditing()}>
+                          <Text style={styles.modalOk}>Save</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : (
+                    <>
+                      <Pressable
+                        style={styles.noteMain}
+                        onPress={() => setEditing({ id: note.id, text: note.text, kind: note.kind })}
+                      >
+                        <Text style={styles.noteKind}>{note.kind}</Text>
+                        <Text style={styles.noteText}>{note.text}</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.chatRowIcon}
+                        hitSlop={6}
+                        onPress={() => setDialog({ kind: "deleteNote", id: note.id, text: note.text })}
+                      >
+                        <Text style={styles.chatRowIconText}>🗑</Text>
+                      </Pressable>
+                    </>
+                  )}
+                </View>
+              ))}
+              {notesList.length === 0 ? (
+                <Text style={styles.chatEmpty}>No notes yet. Say "remember …" in chat.</Text>
+              ) : null}
+            </ScrollView>
+          </View>
         </View>
       ) : null}
 
@@ -914,6 +1244,26 @@ const styles = StyleSheet.create({
   chatRowIcon: { paddingHorizontal: 3 },
   chatRowIconText: { color: "#9aa8b2", fontSize: 13 },
   chatEmpty: { color: "#7e909a", fontSize: 12 },
+  sidebarHeadRight: { flexDirection: "row", alignItems: "center", gap: 8 },
+  notesBtn: { borderWidth: 1, borderColor: "rgba(126,212,234,0.4)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  notesBtnText: { color: aqua, fontSize: 11, fontWeight: "700" },
+  chipSaved: { alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(61,222,138,0.5)", backgroundColor: "rgba(61,222,138,0.12)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 6 },
+  chipSavedText: { color: "#8ff0bd", fontSize: 12, fontWeight: "700" },
+  notesWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 25, flexDirection: "row", justifyContent: "flex-end" },
+  notesPanel: { width: 340, maxWidth: "88%", backgroundColor: "#0b1218", borderLeftWidth: 1, borderLeftColor: "rgba(126,212,234,0.3)", padding: 12, gap: 8 },
+  notesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  notesScroll: { flex: 1 },
+  notesList: { gap: 8, paddingBottom: 12 },
+  noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, borderWidth: 1, borderColor: "rgba(126,212,234,0.18)", borderRadius: 10, padding: 8 },
+  noteEditing: { flex: 1, gap: 6 },
+  kindRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  kindChip: { borderWidth: 1, borderColor: "rgba(126,212,234,0.3)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
+  kindChipOn: { backgroundColor: "rgba(126,212,234,0.2)" },
+  kindText: { color: "#d5eef5", fontSize: 11 },
+  noteActions: { flexDirection: "row", justifyContent: "flex-end", gap: 14 },
+  noteMain: { flex: 1, minWidth: 0 },
+  noteKind: { color: aqua, fontSize: 10, letterSpacing: 1 },
+  noteText: { color: "#e7f3f7", fontSize: 13, lineHeight: 18, marginTop: 2 },
   drawerBtn: { paddingHorizontal: 4, paddingVertical: 2 },
   drawerBtnText: { color: aqua, fontSize: 20 },
   drawerWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 20, flexDirection: "row" },

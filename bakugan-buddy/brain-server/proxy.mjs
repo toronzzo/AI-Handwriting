@@ -13,6 +13,9 @@ import { withSampling } from "./lib/sampling.mjs";
 import { mergeHistoryFiles, paidAvailability } from "./lib/history.mjs";
 import { appendMessage, createChat, deleteChat, listChats, newestChat, readChat, renameChat } from "./lib/chats.mjs";
 import { clipTooShort, isWhisperHallucination } from "../packages/alive/src/speech.ts";
+import { notesContext, queryForRetrieval } from "../packages/alive/src/notes.ts";
+import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
+import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import os from "node:os";
 
 const llamaUrl = (process.env.LLAMA_URL || "http://127.0.0.1:8790").replace(/\/$/, "");
@@ -93,6 +96,45 @@ function extractLater(payload) {
       if (store && facts.length) rememberFacts(store, facts);
     })
     .catch(() => {});
+}
+
+/**
+ * Put the five most relevant notes in front of the local model. The paid route
+ * keeps the deployment's stable prefix, so notes are never injected there.
+ */
+function withNotes(raw) {
+  if (!dataDir) return raw;
+  let json;
+  try {
+    json = JSON.parse(raw.toString("utf8"));
+  } catch {
+    return raw;
+  }
+  if (!json || !Array.isArray(json.messages)) return raw;
+  const lastUser = [...json.messages].reverse().find((message) => message && message.role === "user");
+  const content = typeof lastUser?.content === "string" ? lastUser.content : "";
+  const hits = searchNotes(dataDir, queryForRetrieval(content), 5);
+  if (!hits.length) return raw;
+  const messages = [...json.messages];
+  const firstSystem = messages.findIndex((message) => message && message.role === "system");
+  messages.splice(firstSystem >= 0 ? firstSystem + 1 : 0, 0, { role: "system", content: notesContext(hits) });
+  json.messages = messages;
+  return Buffer.from(JSON.stringify(json));
+}
+
+/** Best-effort note extraction after a reply; never awaited by a request. */
+async function extractNotesForChat(chatId) {
+  if (!dataDir) return;
+  try {
+    const book = readChat(dataDir, chatId, 6);
+    if (!book || !book.messages.length) return;
+    const items = await askForNotes(llamaUrl, chatLines(book.messages));
+    for (const item of items) {
+      addNote(dataDir, { text: item.text, kind: item.kind, sourceChatId: chatId });
+    }
+  } catch {
+    /* notes are a bonus, not part of the reply */
+  }
 }
 
 const server = http.createServer(async (req, res) => {
@@ -208,6 +250,67 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/v1/notes") {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      if (req.method === "GET") {
+        const query = (url.searchParams.get("q") || "").trim();
+        const asked = Number(url.searchParams.get("limit") || 0);
+        const limit = Number.isFinite(asked) && asked > 0 ? Math.min(asked, 100) : 50;
+        const notes = query
+          ? searchNotes(dataDir, query, limit)
+          : [...loadNotes(dataDir)].sort((left, right) => right.updated - left.updated).slice(0, limit);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ notes }));
+        return;
+      }
+      if (req.method === "POST") {
+        const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        const saved = addNote(dataDir, body);
+        if (!saved.note) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "note text is too short" }));
+          return;
+        }
+        res.writeHead(201, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ note: saved.note, duplicate: saved.duplicate }));
+        return;
+      }
+    }
+
+    const noteRoute = url.pathname.match(/^\/v1\/notes\/([^/]+)$/);
+    if (noteRoute) {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      const id = decodeURIComponent(noteRoute[1]);
+      try {
+        if (req.method === "PATCH" || req.method === "PUT") {
+          const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+          const note = updateNote(dataDir, id, body);
+          res.writeHead(note ? 200 : 404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(note ? { note } : { error: "note not found" }));
+          return;
+        }
+        if (req.method === "DELETE") {
+          const ok = deleteNote(dataDir, id);
+          res.writeHead(ok ? 200 : 404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok }));
+          return;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: message }));
+        return;
+      }
+    }
+
     if (url.pathname === "/v1/chats") {
       if (!dataDir) {
         res.writeHead(503, { "Content-Type": "application/json" });
@@ -245,6 +348,9 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(404, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: "chat not found" }));
             return;
+          }
+          if (body && (body.role === "assistant" || body.who === "preyas" || body.who === "paid")) {
+            void extractNotesForChat(id);
           }
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true, chat: saved.chat, summary: saved.summary }));
@@ -352,7 +458,8 @@ const server = http.createServer(async (req, res) => {
       } catch {
         model = "";
       }
-      const body = withSampling(raw);
+      const sampled = withSampling(raw);
+      const body = model === "paid" ? sampled : withNotes(sampled);
       const target =
         model === "paid"
           ? "http://127.0.0.1:4000/v1/chat/completions"
