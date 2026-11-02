@@ -52,7 +52,9 @@ type Shown = ChatMessage & {
 type InboxFile = { name: string; size: number; type: string; modified: number };
 type PendingReminder = { text: string; dueAt: string; repeat: "none" | "daily" | "weekly" | "weekdays"; label: string };
 type PartnerCard = { turns: number; level: number; bond: number; caption: string };
-type Pane = "companion" | "activity" | "collection";
+type Pane = "companion" | "activity" | "collection" | "status";
+type HealthPart = { ok: boolean; label: string; detail: string };
+type Health = { ok: boolean; parts: Record<string, HealthPart>; drive?: { mounted: boolean; freeGb: number | null }; memory?: { swapUsedMb: number | null } };
 type ChatMeta = { id: string; title: string; created: number; updated: number };
 type ChatDialog =
   | { kind: "rename"; id: string; value: string }
@@ -61,7 +63,8 @@ type ChatDialog =
   | { kind: "forget"; notes: Note[] }
   | { kind: "paid"; text: string }
   | { kind: "deleteReminders"; reminders: Reminder[] }
-  | { kind: "remind"; pending: PendingReminder };
+  | { kind: "remind"; pending: PendingReminder }
+  | { kind: "restart" };
 type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string };
 
 function toShown(rows: StoredRow[]): Shown[] {
@@ -167,6 +170,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [docProgress, setDocProgress] = useState("");
   const [docChoice, setDocChoice] = useState<{ name: string; matches: string[] } | null>(null);
   const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [health, setHealth] = useState<Health | null>(null);
   const [remindersOpen, setRemindersOpen] = useState(false);
   const [pendingReminder, setPendingReminder] = useState<PendingReminder | null>(null);
   const [searchNote, setSearchNote] = useState("");
@@ -436,6 +440,27 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     if (!editing) return;
     const ok = await patchNote(editing.id, editing.text, editing.kind);
     if (ok) setEditing(null);
+  }
+
+  async function refreshHealth() {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/status`);
+      if (!res.ok) return null;
+      const body = (await res.json()) as Health;
+      setHealth(body);
+      return body;
+    } catch {
+      return null;
+    }
+  }
+
+  async function restartPreyas() {
+    try {
+      await fetch(`${bag.brainUrl}/v1/restart`, { method: "POST" });
+      setChip("Restarting Preyas…");
+    } catch {
+      setChip("Could not restart");
+    }
   }
 
   async function refreshReminders() {
@@ -1179,7 +1204,19 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             });
           },
         }
-      : dialog.kind === "deleteReminders"
+      : dialog.kind === "restart"
+        ? {
+            title: "Restart Preyas?",
+            body: "Stops and starts the brain, model and web app. Takes about a minute.",
+            confirm: "Yes",
+            no: "No",
+            danger: true,
+            run: () => {
+              setDialog(null);
+              void restartPreyas();
+            },
+          }
+        : dialog.kind === "deleteReminders"
         ? {
             title: `Cancel ${dialog.reminders.length} reminder${dialog.reminders.length === 1 ? "" : "s"}?`,
             body: dialog.reminders.map((row) => `- ${row.text}`).join("\n"),
@@ -1340,6 +1377,14 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           <Pressable style={styles.navOn} onPress={() => setPane("companion")}><Text style={styles.navTabOn}>Companion</Text></Pressable>
           <Pressable onPress={() => setPane("activity")}><Text style={[styles.navTab, pane === "activity" && styles.navTabOn]}>Activity</Text></Pressable>
           <Pressable onPress={() => setPane("collection")}><Text style={[styles.navTab, pane === "collection" && styles.navTabOn]}>Collection</Text></Pressable>
+          <Pressable
+            onPress={() => {
+              setPane("status");
+              void refreshHealth();
+            }}
+          >
+            <Text style={[styles.navTab, pane === "status" && styles.navTabOn]}>Status</Text>
+          </Pressable>
         </View>
         <View style={styles.navRight}>
           <Pressable style={styles.partnerBtn} onPress={() => setMenu((open) => !open)}>
@@ -1367,6 +1412,37 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
               {clock(message.t)} · {message.who === "paid" ? "deepseek-flash" : message.who === "user" ? "You" : "Preyas"} · {message.content}
             </Text>
           ))}
+        </ScrollView>
+      ) : pane === "status" ? (
+        <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
+          <Text style={styles.kicker}>STATUS</Text>
+          <Text style={styles.bigName}>PREYAS</Text>
+          {health ? (
+            <View style={styles.healthList}>
+              {Object.entries(health.parts).map(([key, part]) => (
+                <View key={key} style={styles.healthRow}>
+                  <View style={[styles.dot, part.ok ? styles.dotOn : styles.dotOff]} />
+                  <Text style={styles.healthLabel}>{part.label}</Text>
+                  <Text style={styles.healthDetail}>{part.detail}</Text>
+                </View>
+              ))}
+              <Text style={styles.dim}>
+                Drive: {health.drive?.mounted ? `mounted, ${health.drive.freeGb ?? "?"} GB free` : "not mounted"}
+                {health.memory?.swapUsedMb != null ? ` · swap ${health.memory.swapUsedMb} MB` : ""}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.dim}>Checking…</Text>
+          )}
+          <Pressable style={styles.profileBtn} onPress={() => void refreshHealth()}>
+            <Text style={styles.profileText}>Refresh</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.profileBtn, styles.restartBtn]}
+            onPress={() => setDialog({ kind: "restart" })}
+          >
+            <Text style={styles.modalDanger}>Restart Preyas</Text>
+          </Pressable>
         </ScrollView>
       ) : pane === "collection" ? (
         <View style={[styles.fill, styles.pad]}>
@@ -2002,6 +2078,11 @@ const styles = StyleSheet.create({
   typing: { color: aqua, fontSize: 13, marginTop: 4 },
   sources: { marginTop: 6, gap: 2 },
   docHint: { color: "#8aa0ab", fontSize: 11, lineHeight: 16 },
+  healthList: { gap: 8, marginVertical: 10 },
+  healthRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  healthLabel: { color: "#e7f3f7", fontSize: 14, width: 120 },
+  healthDetail: { color: "#9aa8b2", fontSize: 12, flex: 1 },
+  restartBtn: { borderColor: "rgba(255,138,138,0.5)", marginTop: 8 },
   reminderBanner: { position: "absolute", top: 56, left: 12, right: 12, zIndex: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderWidth: 1, borderColor: "rgba(126,212,234,0.5)", backgroundColor: "#0f222c", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
   reminderBannerText: { color: "#d5eef5", fontSize: 13, flex: 1 },
   docBtn: { borderWidth: 1, borderColor: "rgba(126,212,234,0.45)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
