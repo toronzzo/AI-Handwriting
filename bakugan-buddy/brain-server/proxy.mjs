@@ -16,6 +16,7 @@ import { clipTooShort, isWhisperHallucination } from "../packages/alive/src/spee
 import { notesContext, queryForRetrieval } from "../packages/alive/src/notes.ts";
 import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
 import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
+import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
 import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./lib/tasks.mjs";
 import { launchTaskRun, planTask, taskRunActive } from "./lib/taskRunner.mjs";
 import os from "node:os";
@@ -346,6 +347,35 @@ const server = http.createServer(async (req, res) => {
       fs.appendFileSync(path.join(dir, "room.jsonl"), body.toString("utf8").trim() + "\n");
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/search") {
+      const query = (url.searchParams.get("q") || "").trim();
+      if (!query) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "q is required" }));
+        return;
+      }
+      const result = await searchWeb(query, { root: dataDir || undefined });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          ok: result.ok,
+          query,
+          cached: Boolean(result.cached),
+          results: result.results,
+          error: result.ok ? undefined : result.error,
+        }),
+      );
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/search/page") {
+      const target = (url.searchParams.get("url") || "").trim();
+      const page = await fetchPageText(target);
+      res.writeHead(page.ok ? 200 : 400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: page.ok, url: target, text: page.text, error: page.error }));
       return;
     }
 

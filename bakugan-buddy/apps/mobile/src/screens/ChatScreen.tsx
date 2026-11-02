@@ -32,10 +32,16 @@ import { isWhisperHallucination, resetSpeech } from "../../../../packages/alive/
 import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../../../packages/alive/src/notes.ts";
 import { looksLikeTask, taskStatusLine, type TaskRecord } from "../../../../packages/alive/src/tasks.ts";
 import { confirmFor } from "../../../../packages/alive/src/confirm.ts";
+import {
+  needsWebSearch,
+  searchQueryFrom,
+  withSources,
+  type SearchResult,
+} from "../../../../packages/alive/src/webSearch.ts";
 import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "../room/voice/VoiceSession";
 import { PreyasHero } from "./PreyasHero";
 
-type Shown = ChatMessage & { t: number; thinking?: string };
+type Shown = ChatMessage & { t: number; thinking?: string; sources?: SearchResult[] };
 type PartnerCard = { turns: number; level: number; bond: number; caption: string };
 type Pane = "companion" | "activity" | "collection";
 type ChatMeta = { id: string; title: string; created: number; updated: number };
@@ -142,6 +148,8 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [chip, setChip] = useState("");
   const notesStamp = useRef(0);
   const [task, setTask] = useState<TaskRecord | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchNote, setSearchNote] = useState("");
   const [openSteps, setOpenSteps] = useState<Record<number, boolean>>({});
   const taskPoll = useRef<ReturnType<typeof setInterval> | null>(null);
   const [pane, setPane] = useState<Pane>("companion");
@@ -410,6 +418,27 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     if (ok) setEditing(null);
   }
 
+  /** Run a web search for a message that needs fresh information. */
+  async function runWebSearch(text: string): Promise<{ query: string; results: SearchResult[] }> {
+    const query = searchQueryFrom(text) || text.trim();
+    setSearching(true);
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/search?q=${encodeURIComponent(query)}`);
+      const body = (await res.json()) as { ok?: boolean; results?: SearchResult[]; error?: string };
+      if (!body.ok || !body.results?.length) {
+        setSearchNote(body.error ? `No web results (${body.error}).` : "No web results.");
+        return { query, results: [] };
+      }
+      setSearchNote("");
+      return { query, results: body.results.slice(0, 5) };
+    } catch {
+      setSearchNote("No internet, answering from memory.");
+      return { query, results: [] };
+    } finally {
+      setSearching(false);
+    }
+  }
+
   function watchTask(id: string) {
     if (taskPoll.current) clearInterval(taskPoll.current);
     taskPoll.current = setInterval(() => {
@@ -621,6 +650,8 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     prior: ChatMessage[],
     userText: string,
     isCurrent: () => boolean = () => true,
+    sources: SearchResult[] = [],
+    searchQuery = "",
   ) {
     const endpoint = await resolveChatBase(bag.brainUrl);
     if (isCurrent()) setVia(endpoint.via);
@@ -632,7 +663,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     const result = await streamReply({
       base,
       model,
-      messages: toModelMessages(prior, summaryRef.current, userText),
+      messages: toModelMessages(prior, summaryRef.current, withSources(userText, searchQuery, sources)),
       timeoutMs: route === "paid" ? 45_000 : LOCAL_TIMEOUT_MS,
       onDelta: (update) => {
         const shown = splitPaidHint(update.answer).text;
@@ -727,7 +758,15 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         setNote(paidButton({ available: paid.available, offPeakOnly: paid.offPeakOnly, now: new Date(), downReason: paid.reason }).reason);
       }
       if (!askPaid) {
-        const local = await ask("local", history, trimmed, isCurrent);
+        let sources: SearchResult[] = [];
+        let searchQuery = "";
+        if (needsWebSearch(trimmed)) {
+          const found = await runWebSearch(trimmed);
+          sources = found.results;
+          searchQuery = found.query;
+          if (!sources.length && isCurrent()) setChip("Web search found nothing");
+        }
+        const local = await ask("local", history, trimmed, isCurrent, sources, searchQuery);
         const cleaned = splitPaidHint(local.text);
         if (isCurrent() && cleaned.suggestPaid) setHintPaid(true);
         if (local.ok) {
@@ -738,6 +777,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             who: "preyas",
             model: "preyas",
             thinking: local.thinking || undefined,
+            sources: sources.length ? sources : undefined,
           };
           void remember(reply, chatId);
           if (isCurrent()) {
@@ -1085,6 +1125,22 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                         </Pressable>
                       ) : null}
                       {openThink[index] && message.thinking ? <Text style={styles.thinkBody}>{message.thinking}</Text> : null}
+                      {message.sources?.length ? (
+                        <View style={styles.sources}>
+                          {message.sources.map((source, sourceIndex) => (
+                            <Pressable
+                              key={`${source.url}-${sourceIndex}`}
+                              onPress={() => {
+                                if (typeof window !== "undefined" && window.open) window.open(source.url, "_blank", "noopener");
+                              }}
+                            >
+                              <Text style={styles.sourceLink} numberOfLines={1}>
+                                [{sourceIndex + 1}] {source.title}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      ) : null}
                       <Text style={styles.time}>{clock(message.t)}{mine ? (read ? "  ✓✓" : "  ✓") : ""}</Text>
                     </View>
                   </View>
@@ -1099,9 +1155,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                   </View>
                 </View>
               ) : null}
-              {phase === "thinking" && !live ? (
+              {searching ? (
+                <Text style={styles.typing}>Searching the web…</Text>
+              ) : phase === "thinking" && !live ? (
                 <Text style={styles.typing}>Preyas is thinking…</Text>
               ) : null}
+              {searchNote && !searching ? <Text style={styles.note}>{searchNote}</Text> : null}
               {note ? <Text style={styles.note}>{note}</Text> : null}
               {task ? (
                 <View style={styles.taskCard}>
@@ -1473,6 +1532,8 @@ const styles = StyleSheet.create({
   bubbleText: { color: "#e7f3f7", fontSize: 15, lineHeight: 21 },
   time: { color: "#7e909a", fontSize: 11, marginTop: 4, textAlign: "right" },
   typing: { color: aqua, fontSize: 13, marginTop: 4 },
+  sources: { marginTop: 6, gap: 2 },
+  sourceLink: { color: "#9fdcf0", fontSize: 12, textDecorationLine: "underline" },
   thinkToggle: { color: "#7e909a", fontSize: 11, marginTop: 6 },
   thinkBody: { color: "#8aa0ab", fontSize: 12, marginTop: 4 },
   note: { color: "#e2c27a", fontSize: 13 },
