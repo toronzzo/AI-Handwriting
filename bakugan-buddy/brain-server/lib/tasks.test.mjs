@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { addNote } from "./notes.mjs";
 import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./tasks.mjs";
-import { planTask, runTask, stepContext } from "./taskRunner.mjs";
+import { launchTaskRun, planTask, runTask, stepContext, taskRunActive } from "./taskRunner.mjs";
 
 function drive() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "preyas-tasks-"));
@@ -57,6 +57,16 @@ test("an interrupted run comes back as paused and resumable", () => {
   done();
 });
 
+test("a planned task that never started stays planned after a restart", () => {
+  const { root, done } = drive();
+  const task = newTask(root, { title: "t", steps: [{ text: "one" }] });
+  assert.equal(pauseInterrupted(root), 0);
+  const loaded = loadTask(root, task.id);
+  assert.equal(loaded.status, "planned");
+  assert.equal(loaded.steps[0].status, "pending");
+  done();
+});
+
 test("the planner turns model text into steps and falls back to one step", async () => {
   const { root, done } = drive();
   const plan = await planTask(
@@ -96,6 +106,27 @@ test("a failed step stops the task and is saved as an error", async () => {
   assert.equal(finished.steps[0].status, "error");
   assert.match(finished.steps[0].result, /llama is down/);
   assert.equal(loadTask(root, task.id).status, "error");
+  done();
+});
+
+test("a task cannot run twice at the same time", async () => {
+  const { root, done } = drive();
+  const task = newTask(root, { title: "t", steps: [{ text: "one" }] });
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const waiting = async () => {
+    await gate;
+    return { ok: true, json: async () => ({ choices: [{ message: { content: "done" } }] }) };
+  };
+  const first = launchTaskRun(root, task, { llamaUrl: "http://llama", fetchImpl: waiting });
+  assert.ok(first);
+  assert.equal(taskRunActive(task.id), true);
+  assert.equal(launchTaskRun(root, task, { llamaUrl: "http://llama", fetchImpl: waiting }), null);
+  release();
+  await first;
+  assert.equal(taskRunActive(task.id), false);
   done();
 });
 

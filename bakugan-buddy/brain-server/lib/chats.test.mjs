@@ -135,3 +135,18 @@ test("a chat id cannot escape the chats folder", () => {
   assert.throws(() => readChat(root, "../../etc/passwd"), /bad chat id/);
   done();
 });
+
+test("a torn index is rebuilt from the chat files", () => {
+  const { root, done } = drive();
+  const first = createChat(root);
+  const second = createChat(root);
+  appendMessage(root, first.id, { role: "user", who: "user", content: "recover me first" });
+  appendMessage(root, second.id, { role: "user", who: "user", content: "recover me second" });
+  fs.writeFileSync(indexPath(root), "{ torn json");
+  const listed = listChats(root);
+  assert.equal(listed.length, 2);
+  assert.equal(listed.some((chat) => chat.id === first.id && chat.title === "recover me first"), true);
+  assert.equal(listed.some((chat) => chat.id === second.id && chat.title === "recover me second"), true);
+  assert.equal(fs.existsSync(`${indexPath(root)}.tmp`), false);
+  done();
+});

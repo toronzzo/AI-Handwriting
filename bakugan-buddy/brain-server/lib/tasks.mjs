@@ -97,7 +97,7 @@ export function listTasks(root, { active = false } = {}) {
 export function pauseInterrupted(root) {
   let changed = 0;
   for (const task of listTasks(root)) {
-    if (task.status !== "running" && task.status !== "planned") continue;
+    if (task.status !== "running") continue;
     for (const step of task.steps) {
       if (step.status === "running") step.status = "pending";
     }

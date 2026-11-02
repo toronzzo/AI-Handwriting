@@ -13,6 +13,7 @@ import {
   rankNotes,
   renderNotesMarkdown,
 } from "../../packages/alive/src/notes.ts";
+import { writeTextAtomic } from "./history.mjs";
 
 export const NOTE_MIN = 4;
 
@@ -61,7 +62,7 @@ export function exportNotes(root, now = Date.now()) {
   const dir = notesDir(root);
   fs.mkdirSync(dir, { recursive: true });
   const markdown = renderNotesMarkdown(loadNotes(root), now);
-  fs.writeFileSync(notesMarkdownPath(root), markdown);
+  writeTextAtomic(notesMarkdownPath(root), markdown);
   return markdown;
 }
 
@@ -69,9 +70,7 @@ export function saveNotes(root, notes) {
   const dir = notesDir(root);
   fs.mkdirSync(dir, { recursive: true });
   const body = notes.map((note) => JSON.stringify(note)).join("\n") + (notes.length ? "\n" : "");
-  const temp = `${notesPath(root)}.tmp`;
-  fs.writeFileSync(temp, body);
-  fs.renameSync(temp, notesPath(root));
+  writeTextAtomic(notesPath(root), body);
   exportNotes(root);
   return notes;
 }

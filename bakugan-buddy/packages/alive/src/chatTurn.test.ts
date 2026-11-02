@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   CHAT_MAX_TOKENS,
   HISTORY_TOKEN_BUDGET,
+  LOCAL_TIMEOUT_MS,
   chooseRoute,
   completionExtras,
   deepseekIsPeak,
@@ -32,6 +33,7 @@ test("history keeps the newest turns inside the 8B window", () => {
   assert.equal(trimmed[trimmed.length - 1]!.content.includes("reply 39"), true);
   assert.equal(trimmed[0]!.content.includes("turn 0"), false);
   assert.equal(CHAT_MAX_TOKENS, 512);
+  assert.equal(LOCAL_TIMEOUT_MS, 60_000);
 });
 
 test("routing stays local unless asked or the local brain failed", () => {

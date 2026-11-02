@@ -12,6 +12,13 @@ export function historyDir(root) {
   return path.join(root, "history");
 }
 
+/** Whole-file writes should not leave a torn mirror after a crash. */
+export function writeTextAtomic(file, text) {
+  const temp = `${file}.tmp`;
+  fs.writeFileSync(temp, text);
+  fs.renameSync(temp, file);
+}
+
 /** One stored turn, with every field the client may send. */
 export function normalizeEntry(entry) {
   return {
@@ -37,7 +44,7 @@ export function appendSummary(root, line) {
   const bit = `${line.who || line.role}: ${line.content.replace(/\s+/g, " ").slice(0, 180)}`;
   let next = prev ? `${prev}\n${bit}` : bit;
   if (next.length > SUMMARY_MAX) next = next.slice(next.length - SUMMARY_MAX);
-  fs.writeFileSync(summaryPath, next);
+  writeTextAtomic(summaryPath, next);
   return next;
 }
 

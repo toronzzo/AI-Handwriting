@@ -44,6 +44,46 @@ export function titleFrom(text, max = TITLE_MAX) {
   return `${clean.slice(0, max).trimEnd()}…`;
 }
 
+function recoveredChat(root, name) {
+  const id = name.slice(0, -".jsonl".length);
+  if (!ID_RE.test(id)) return null;
+  const file = chatFile(root, id);
+  let stat;
+  try {
+    stat = fs.statSync(file);
+  } catch {
+    return null;
+  }
+  let title = NEW_CHAT_TITLE;
+  try {
+    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+      if (!line) continue;
+      const row = JSON.parse(line);
+      if (row.role === "user" || row.who === "user") {
+        title = titleFrom(row.content);
+        break;
+      }
+    }
+  } catch {
+    /* a torn recovered chat still deserves its place in the list */
+  }
+  const created = Math.round(stat.birthtimeMs || stat.mtimeMs || Date.now());
+  const updated = Math.round(stat.mtimeMs || created);
+  return { id, title, created, updated };
+}
+
+/** Rebuild the list from the chat files after a torn or missing index. */
+export function recoverIndex(root) {
+  const dir = chatsDir(root);
+  if (!fs.existsSync(dir)) return { chats: [] };
+  const chats = fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith(".jsonl"))
+    .map((name) => recoveredChat(root, name))
+    .filter(Boolean);
+  return { chats: writeIndex(root, chats) };
+}
+
 export function readIndex(root) {
   const file = indexPath(root);
   if (!fs.existsSync(file)) return { chats: [] };
@@ -61,7 +101,8 @@ export function readIndex(root) {
         })),
     };
   } catch {
-    return { chats: [] };
+    // A torn index must never make every saved chat disappear.
+    return recoverIndex(root);
   }
 }
 
@@ -69,7 +110,10 @@ export function writeIndex(root, chats) {
   const dir = historyDir(root);
   fs.mkdirSync(dir, { recursive: true });
   const ordered = [...chats].sort((a, b) => b.updated - a.updated);
-  fs.writeFileSync(indexPath(root), JSON.stringify({ chats: ordered }, null, 2) + "\n");
+  const file = indexPath(root);
+  const temp = `${file}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify({ chats: ordered }, null, 2) + "\n");
+  fs.renameSync(temp, file);
   return ordered;
 }
 
