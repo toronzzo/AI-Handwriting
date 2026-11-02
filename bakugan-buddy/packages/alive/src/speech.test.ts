@@ -71,6 +71,11 @@ test("whisper fillers and repeated n-grams are dropped", () => {
   assert.equal(isWhisperHallucination("the the the"), true);
   assert.equal(isWhisperHallucination("thank you thank you thank you"), true);
   assert.equal(isWhisperHallucination("The window's mine."), false);
+  // Sound tags are not the partner talking.
+  assert.equal(isWhisperHallucination("[Music]"), true);
+  assert.equal(isWhisperHallucination("(noise)"), true);
+  assert.equal(isWhisperHallucination("[ Silence ] ♪"), true);
+  assert.equal(isWhisperHallucination("[Music] tell me a story"), false);
 });
 
 test("sentences split in English and Russian and keep a partial tail", () => {

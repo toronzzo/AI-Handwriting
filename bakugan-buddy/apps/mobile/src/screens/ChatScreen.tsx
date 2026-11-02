@@ -8,6 +8,9 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type ScrollViewInstance,
 } from "react-native";
 import {
   chooseRoute,
@@ -24,7 +27,7 @@ import {
 } from "../../../../packages/alive/src/chatTurn.ts";
 import type { MicPhase } from "../../../../packages/alive/src/speech.ts";
 import { readBrainHost } from "../room/brain/brainLink";
-import { resetSpeech } from "../../../../packages/alive/src/speech.ts";
+import { isWhisperHallucination, resetSpeech } from "../../../../packages/alive/src/speech.ts";
 import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "../room/voice/VoiceSession";
 import { PreyasHero } from "./PreyasHero";
 
@@ -85,6 +88,10 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [live, setLive] = useState<{ who: "preyas" | "paid"; text: string } | null>(null);
   const [openThink, setOpenThink] = useState<Record<number, boolean>>({});
   const [online, setOnline] = useState(false);
+  const logRef = useRef<ScrollViewInstance>(null);
+  /** True while the thread is parked at the newest message. */
+  const pinned = useRef(true);
+  const [jumpVisible, setJumpVisible] = useState(false);
   const [partner, setPartner] = useState<PartnerCard>(partnerFromTurns(0));
   const [pane, setPane] = useState<Pane>("companion");
   const [menu, setMenu] = useState(false);
@@ -144,6 +151,8 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       if (!bag.heard || busy.current) return;
       const text = bag.heard;
       bag.heard = "";
+      // "[Music]", "(noise)" and Whisper's silence loops are not the partner talking.
+      if (isWhisperHallucination(text)) return;
       void sendRef.current(text, false);
     }, 120);
     return () => {
@@ -171,6 +180,29 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       clearInterval(id);
     };
   }, [bag, via]);
+
+  // New turns follow the newest bubble only while the thread is parked at the bottom.
+  useEffect(() => {
+    if (pinned.current) logRef.current?.scrollToEnd({ animated: true });
+  }, [messages.length]);
+
+  const scrollToLatest = (animated = true) => {
+    logRef.current?.scrollToEnd({ animated });
+  };
+
+  const onLogScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    const atBottom = distanceFromBottom < 48;
+    pinned.current = atBottom;
+    setJumpVisible(!atBottom);
+  };
+
+  const jumpToLatest = () => {
+    pinned.current = true;
+    setJumpVisible(false);
+    scrollToLatest();
+  };
 
   async function remember(entry: ChatMessage) {
     if (!bag.brainUrl) return;
@@ -434,7 +466,17 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 <Text style={styles.online}>{online ? "Online" : "Offline"}</Text>
               </View>
             </View>
-            <ScrollView style={styles.log} contentContainerStyle={styles.logInner}>
+            <View style={styles.logWrap}>
+              <ScrollView
+                ref={logRef}
+                style={styles.log}
+                contentContainerStyle={styles.logInner}
+                onScroll={onLogScroll}
+                scrollEventThrottle={16}
+                onContentSizeChange={() => {
+                  if (pinned.current) scrollToLatest();
+                }}
+              >
               {messages.map((message, index) => {
                 const mine = message.who === "user";
                 const read = mine && messages.slice(index + 1).some((row) => row.who !== "user");
@@ -475,6 +517,14 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
               ) : null}
               {note ? <Text style={styles.note}>{note}</Text> : null}
             </ScrollView>
+              {jumpVisible ? (
+                <View style={styles.jumpWrap} pointerEvents="box-none">
+                  <Pressable style={styles.jump} onPress={jumpToLatest}>
+                    <Text style={styles.jumpText}>Jump to latest ↓</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
             <View style={styles.composer}>
               <TextInput
                 value={draft}
@@ -616,6 +666,17 @@ const styles = StyleSheet.create({
   online: { color: "#c5d4db", fontSize: 12 },
   miniBall: { width: 28, height: 28, borderRadius: 14, backgroundColor: "#1a3c4a", borderWidth: 1, borderColor: aqua },
   log: { flex: 1 },
+  logWrap: { flex: 1, position: "relative" },
+  jumpWrap: { position: "absolute", left: 0, right: 0, bottom: 6, alignItems: "center" },
+  jump: {
+    borderWidth: 1,
+    borderColor: "rgba(126,212,234,0.5)",
+    backgroundColor: "#0f222c",
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  jumpText: { color: aqua, fontSize: 12, fontWeight: "700" },
   logInner: { gap: 10, paddingVertical: 8 },
   bubbleWrap: { flexDirection: "row", alignItems: "flex-end", gap: 8, maxWidth: "92%" },
   bubbleLeft: { alignSelf: "flex-start" },
