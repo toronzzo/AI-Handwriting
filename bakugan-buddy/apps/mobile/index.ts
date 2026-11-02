@@ -1,3 +1,4 @@
+import "./src/room/brain/token";
 import { registerRootComponent } from 'expo';
 
 import App from './App';
