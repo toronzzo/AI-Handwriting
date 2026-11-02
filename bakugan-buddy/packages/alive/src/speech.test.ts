@@ -7,6 +7,7 @@ import {
   ECHO_TAIL_MS,
   earIsMuted,
   envelopeFromPcm16,
+  micPhase,
   freshVad,
   isWhisperHallucination,
   planSpeech,
@@ -53,6 +54,13 @@ test("the ear stays shut while he talks and for the tail after", () => {
   const quiet = stepVad(freshVad(), 0.05, 50, BARGE_VAD);
   assert.equal(quiet.bargeIn, false);
   assert.equal(stepVad(freshVad(), 0.2, 50, BARGE_VAD).bargeIn, true);
+});
+
+test("playback ending opens the mic after the tail, and a missed end cannot mute forever", () => {
+  assert.equal(micPhase(1_000, { thinking: false, playing: true, talkUntil: 5_000 }), "speaking");
+  assert.equal(micPhase(1_000, { thinking: true, playing: false, talkUntil: 0 }), "thinking");
+  assert.equal(micPhase(1_100, { thinking: false, playing: false, talkUntil: 1_000 }), "muted");
+  assert.equal(micPhase(1_500, { thinking: false, playing: false, talkUntil: 1_000 }), "listening");
 });
 
 test("whisper fillers and repeated n-grams are dropped", () => {

@@ -86,6 +86,11 @@ LLAMA_PID=$!
 cleanup() {
   if [[ -n "${DNS_PID:-}" ]]; then kill "$DNS_PID" 2>/dev/null || true; fi
   if [[ -n "${WHISPER_PID:-}" ]]; then kill "$WHISPER_PID" 2>/dev/null || true; fi
+  if [[ -n "${GATEWAY_PID:-}" ]]; then
+    kill "$GATEWAY_PID" 2>/dev/null || true
+    # gateway/start.sh is a shell; stop the litellm child too. Not a name match.
+    pkill -P "$GATEWAY_PID" 2>/dev/null || true
+  fi
   kill "$LLAMA_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -128,14 +133,29 @@ if command -v dns-sd >/dev/null 2>&1; then
   DNS_PID=$!
 fi
 
+GATEWAY_PID=""
+SECRETS="$BAKUGAN_DATA_DIR/secrets/.env"
+GW_DIR="$(cd "$ROOT/../../tools/agent-drive" && pwd)"
+if [[ -x "$BAKUGAN_DATA_DIR/venv/bin/litellm" && -f "$SECRETS" ]] && grep -Eq '^DEEPSEEK_API_KEY=.+' "$SECRETS" && ! grep -Eq '^DEEPSEEK_API_KEY=(changeme)?$' "$SECRETS"; then
+  AGENT_DRIVE_ROOT="$BAKUGAN_DATA_DIR" "$GW_DIR/gateway/start.sh" >>"$BAKUGAN_DATA_DIR/logs/gateway.out" 2>&1 &
+  GATEWAY_PID=$!
+  echo "Paid model: gateway on http://127.0.0.1:4000 (DeepSeek flash)."
+else
+  echo "Paid model: off. Local brain only. Add DEEPSEEK_API_KEY to $BAKUGAN_DATA_DIR/secrets/.env to turn it on."
+fi
+
 LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
 echo "Preyas brain: $MODEL_LABEL"
 echo "Context $MODEL_CTX, llama RAM $MODEL_RAM"
 echo "Phone URL: http://${LAN_IP:-<this-mac-ip>}:${BRAIN_PORT}"
 echo "This Mac:  http://127.0.0.1:${BRAIN_PORT}"
-echo "LiteLLM, if you run one: http://${LAN_IP:-<this-mac-ip>}:4000"
+echo "Chat page: open Bakugan Buddy and tap Chat."
+echo "On this Mac, in another window: cd bakugan-buddy/apps/mobile && npm run web"
+echo "Expo prints a local URL, usually http://localhost:8081. Use that page."
+echo "Point the page at this brain: http://127.0.0.1:${BRAIN_PORT}"
+echo "Phone on the same Wi-Fi: http://${LAN_IP:-<this-mac-ip>}:${BRAIN_PORT}"
 echo "Logs: $BAKUGAN_DATA_DIR/logs/llama.log"
-echo "Ctrl-C stops the server."
+echo "Ctrl-C stops the brain, the voice server, and the paid gateway."
 
 export LLAMA_URL="http://127.0.0.1:${LLAMA_PORT}"
 export BRAIN_PORT

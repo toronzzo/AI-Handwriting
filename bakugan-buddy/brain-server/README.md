@@ -34,6 +34,26 @@ That is the command you run each session. It prints a URL like `http://192.168.1
 
 `./start.sh` also starts `whisper-server` on port 8178 when the binary and `WHISPER_MODEL` are present. The proxy turns a finished utterance into text and streams a wav back one sentence at a time: Kokoro `am_puck` for English, Piper `ru_RU-dmitri-medium` for Russian.
 
+## Chat, in plain words
+
+Plug in the drive named Agent. Open the Terminal app. Paste this, then press Return:
+
+```bash
+cd bakugan-buddy/brain-server
+./start.sh
+```
+
+Leave that window open. It starts Preyas's local brain. If a DeepSeek key is saved in `/Volumes/Agent/agent/secrets/.env`, it also starts the paid gateway. Control-C in that window stops all of it.
+
+Open a second Terminal window and paste:
+
+```bash
+cd bakugan-buddy/apps/mobile
+npm run web
+```
+
+A browser page opens (the address is usually `http://localhost:8081`). Tap **Chat**. Type, or just talk. You will see the mic say listening, muted, thinking, or speaking. Preyas answers first, out loud. **Ask a paid model** sends that question to DeepSeek and shows the price when the gateway reports usage. If the key is missing, the button says why and nothing crashes. The whole conversation is saved on the Agent drive, not in this project.
+
 ## Voice
 
 `./setup-all.sh` is the one-shot installer for this Mac. It is safe to run twice.

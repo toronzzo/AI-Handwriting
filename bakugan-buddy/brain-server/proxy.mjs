@@ -6,11 +6,12 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { FACT_EXTRACT_PROMPT } from "../../packages/alive/src/longMemory.ts";
+import { FACT_EXTRACT_PROMPT } from "../packages/alive/src/longMemory.ts";
 import { openMemory, parseExtractedFacts, relevantFacts, rememberFacts } from "./lib/memory.mjs";
 import { synthesizeFile, transcribeFile } from "./lib/speech.mjs";
 import { withSampling } from "./lib/sampling.mjs";
-import { clipTooShort, isWhisperHallucination } from "../../packages/alive/src/speech.ts";
+import { appendHistory, paidAvailability, readHistory } from "./lib/history.mjs";
+import { clipTooShort, isWhisperHallucination } from "../packages/alive/src/speech.ts";
 import os from "node:os";
 
 const llamaUrl = (process.env.LLAMA_URL || "http://127.0.0.1:8790").replace(/\/$/, "");
@@ -198,13 +199,77 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/v1/history") {
+      const book = dataDir ? readHistory(dataDir, 40) : { summary: "", messages: [] };
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(book));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/history") {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      const entry = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const saved = appendHistory(dataDir, entry);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, summary: saved.summary }));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/paid") {
+      let envText = "";
+      if (dataDir) {
+        try {
+          envText = fs.readFileSync(path.join(dataDir, "secrets", ".env"), "utf8");
+        } catch {
+          envText = "";
+        }
+      }
+      const status = paidAvailability(envText);
+      let gateway = false;
+      try {
+        const probe = await fetch("http://127.0.0.1:4000/v1/models");
+        gateway = probe.ok;
+      } catch {
+        gateway = false;
+      }
+      if (status.available && !gateway) {
+        status.available = false;
+        status.reason = "DeepSeek key is set, but the gateway on port 4000 is not running";
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(status));
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
-      const body = withSampling(await readBody(req));
-      const upstream = await fetch(`${llamaUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body,
-      });
+      const raw = await readBody(req);
+      let model = "";
+      try {
+        model = JSON.parse(raw.toString("utf8")).model || "";
+      } catch {
+        model = "";
+      }
+      const body = withSampling(raw);
+      const target =
+        model === "paid"
+          ? "http://127.0.0.1:4000/v1/chat/completions"
+          : `${llamaUrl}/v1/chat/completions`;
+      let upstream;
+      try {
+        upstream = await fetch(target, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+        });
+      } catch {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: model === "paid" ? "paid gateway is down" : "llama is down" }));
+        return;
+      }
       res.writeHead(upstream.status, {
         "Content-Type": upstream.headers.get("content-type") || "text/event-stream",
         "Cache-Control": "no-cache",
