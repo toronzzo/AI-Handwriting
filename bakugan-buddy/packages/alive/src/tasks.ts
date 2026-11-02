@@ -49,17 +49,19 @@ export function looksLikeTask(raw: string): boolean {
   const text = String(raw ?? "").trim().toLowerCase();
   if (!text) return false;
   if (/^task\s*[:\-]/.test(text)) return true;
-  if (/\bstep by step\b/.test(text)) return true;
-  if (/\bfrom my notes\b/.test(text) && /\b(plan|summar|review|organi|prepare|list)\w*/.test(text)) {
-    return true;
-  }
   const starter = TASK_STARTERS.some(
     (word) => text === word || text.startsWith(`${word} `) || text.startsWith(`${word}:`),
   );
   if (!starter) return false;
   // A one-word "plan?" is a question about planning, not a request to plan.
   if (text.endsWith("?")) return false;
-  return text.length >= 12;
+  if (text.length < 12) return false;
+  // Chat questions often start with "summarize" or "explain step by step". Task
+  // mode is only worth its extra model calls when notes/files or an explicit
+  // multi-step request make several steps likely.
+  const usesDriveWork = /\b(?:my\s+)?notes?\b|\bfiles?\b|\bfolders?\b|\bdirectory\b|\bdrive\b|\/volumes\/agent\b/.test(text);
+  const explicitSteps = /\bstep by step\b|\bone step at a time\b|\binto steps\b|\band then\b/.test(text);
+  return usesDriveWork || explicitSteps;
 }
 
 /** "Working on it: step 2 of 4…" and friends. */

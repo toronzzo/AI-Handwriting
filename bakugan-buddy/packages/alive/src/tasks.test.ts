@@ -26,6 +26,8 @@ test("multi-step requests are recognised, questions are not", () => {
   assert.equal(looksLikeTask("review my notes step by step"), true);
   assert.equal(looksLikeTask("what's the plan?"), false);
   assert.equal(looksLikeTask("plan"), false);
+  assert.equal(looksLikeTask("summarize this paragraph for me"), false);
+  assert.equal(looksLikeTask("explain recursion step by step"), false);
   assert.equal(looksLikeTask("tell me a story"), false);
   assert.equal(looksLikeTask("what did I say about the dentist?"), false);
 });

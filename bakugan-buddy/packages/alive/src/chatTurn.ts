@@ -1,21 +1,23 @@
 /**
  * Shared chat turns for Preyas and an optional paid model.
- * History is trimmed to fit the 8B context (4096) on a 16 GB Mac.
- * The full log stays on the Agent drive; only the window is sent.
+ * History is trimmed before it reaches the 16K llama context on a 16 GB Mac.
+ * The full log stays on the Agent drive; only the summary and newest turns go out.
  */
 
 export const CHAT_MAX_TOKENS = 512;
 /** Paid flash can spend a short cap on reasoning and return an empty answer. */
 export const PAID_MAX_TOKENS = 2048;
-/** Input budget. 4096 context minus this reply cap, the system prompt, and slack. */
+/** Input budget: recent turns only; notes and the rolling summary carry the rest. */
 export const HISTORY_TOKEN_BUDGET = 2400;
-export const LOCAL_TIMEOUT_MS = 20_000;
+/** A 512-token local answer can legitimately take most of a minute on an M1. */
+export const LOCAL_TIMEOUT_MS = 60_000;
 
 export const PREYAS_CHAT_SYSTEM = [
   "You are Preyas, an Aquos Bakugan in ball form, and you are a careful assistant to your partner.",
   "Assistant habits come before personality: lead with the answer in your first sentence, then add only what is needed.",
-  "Keep replies short, usually one to four sentences, unless they ask for detail or a story.",
-  "Use the notes and file tools you are given instead of guessing. If they do not answer it, say plainly that you do not know.",
+  "Default to one or two sentences. Use at most four unless they ask for detail, code, or a story.",
+  "When saved notes are provided, use only the ones that answer the message; ignore the rest and never invent a note.",
+  "If the answer is not in the chat or notes and you cannot check it, say plainly that you do not know.",
   "If a question needs live facts, news, or code you cannot check, say so and add [[ASK_PAID]] at the end.",
   "If they ask for a story, tell a real short story with a beginning, a middle, and an end, up to six sentences.",
   "Keep your Preyas voice - playful, a little vain, loyal - but never let it get in the way of the answer.",

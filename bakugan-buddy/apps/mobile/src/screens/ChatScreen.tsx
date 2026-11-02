@@ -15,6 +15,7 @@ import {
 import {
   chooseRoute,
   deepseekIsPeak,
+  LOCAL_TIMEOUT_MS,
   estimatePaidCost,
   modelId,
   paidButton,
@@ -111,6 +112,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const messagesRef = useRef<Shown[]>([]);
   const summaryRef = useRef("");
   const busy = useRef(false);
+  const sendEpoch = useRef(0);
   const sendRef = useRef<(text: string, askPaid: boolean) => Promise<void>>(async () => {});
   const [messages, setMessages] = useState<Shown[]>([]);
   const [draft, setDraft] = useState("");
@@ -178,6 +180,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         const meta = body.chat;
         setChats((rows) => newestFirst(rows.map((row) => (row.id === meta.id ? meta : row))));
       }
+      sendEpoch.current += 1;
       setActiveChat(id);
       return true;
     } catch {
@@ -589,8 +592,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     scrollToLatest();
   };
 
-  async function remember(entry: ChatMessage) {
-    const chatId = activeIdRef.current;
+  async function remember(entry: ChatMessage, chatId = activeIdRef.current) {
     if (!bag.brainUrl || !chatId) return;
     try {
       const res = await fetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(chatId)}/messages`, {
@@ -614,9 +616,14 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     queueSpokenLine(bag, text, "happy", final);
   }
 
-  async function ask(route: "local" | "paid", prior: ChatMessage[], userText: string) {
+  async function ask(
+    route: "local" | "paid",
+    prior: ChatMessage[],
+    userText: string,
+    isCurrent: () => boolean = () => true,
+  ) {
     const endpoint = await resolveChatBase(bag.brainUrl);
-    setVia(endpoint.via);
+    if (isCurrent()) setVia(endpoint.via);
     const model = modelId(route, endpoint.via);
     const base = route === "paid" && endpoint.via === "proxy" ? bag.brainUrl : endpoint.base;
     let last = "";
@@ -626,11 +633,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       base,
       model,
       messages: toModelMessages(prior, summaryRef.current, userText),
-      timeoutMs: route === "paid" ? 45_000 : 20_000,
+      timeoutMs: route === "paid" ? 45_000 : LOCAL_TIMEOUT_MS,
       onDelta: (update) => {
         const shown = splitPaidHint(update.answer).text;
         last = shown;
         lastThink = update.thinking;
+        if (!isCurrent()) return;
         setLive(shown ? { who: route === "paid" ? "paid" : "preyas", text: shown } : null);
         if (route === "local" && shown) {
           void speakPreyas(shown, false, !spoke);
@@ -638,9 +646,9 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         }
       },
     });
-    setLive(null);
+    if (isCurrent()) setLive(null);
     const parsed = splitPaidHint(result.text || last);
-    if (route === "local" && parsed.text) void speakPreyas(parsed.text, true, !spoke);
+    if (isCurrent() && route === "local" && parsed.text) void speakPreyas(parsed.text, true, !spoke);
     return {
       ...result,
       text: parsed.text,
@@ -658,7 +666,11 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     if (!activeIdRef.current) {
       const chat = await startChat();
       if (chat) setActiveChat(chat.id);
+      else setNote("Preyas can answer, but this chat is not being saved while the brain is offline.");
     }
+    const chatId = activeIdRef.current;
+    const epoch = sendEpoch.current;
+    const isCurrent = () => activeIdRef.current === chatId && sendEpoch.current === epoch;
     const command = parseNoteCommand(trimmed);
     if (command?.kind === "remember") {
       await handleRemember(trimmed, command.text);
@@ -701,9 +713,9 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       messagesRef.current = [...existing, userMsg];
       setMessages(messagesRef.current);
       setPartner(partnerFromTurns(messagesRef.current.filter((row) => row.who === "user").length));
-      void remember(userMsg);
+      void remember(userMsg, chatId);
     }
-    setNote("");
+    if (isCurrent()) setNote("");
     try {
       let route = chooseRoute({
         askPaid,
@@ -711,13 +723,13 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         paidAvailable: paid.available && paidButton({ available: paid.available, offPeakOnly: paid.offPeakOnly, now: new Date(), downReason: paid.reason }).enabled,
         allowPaidOnFailure: escalate,
       });
-      if (askPaid && !route.reason.startsWith("you")) {
+      if (isCurrent() && askPaid && !route.reason.startsWith("you")) {
         setNote(paidButton({ available: paid.available, offPeakOnly: paid.offPeakOnly, now: new Date(), downReason: paid.reason }).reason);
       }
       if (!askPaid) {
-        const local = await ask("local", history, trimmed);
+        const local = await ask("local", history, trimmed, isCurrent);
         const cleaned = splitPaidHint(local.text);
-        if (cleaned.suggestPaid) setHintPaid(true);
+        if (isCurrent() && cleaned.suggestPaid) setHintPaid(true);
         if (local.ok) {
           const reply: Shown = {
             t: Date.now(),
@@ -727,13 +739,15 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             model: "preyas",
             thinking: local.thinking || undefined,
           };
-          messagesRef.current = [...messagesRef.current, reply];
-          setMessages(messagesRef.current);
-          void speakPreyas(cleaned.text, true);
-          void remember(reply);
+          void remember(reply, chatId);
+          if (isCurrent()) {
+            messagesRef.current = [...messagesRef.current, reply];
+            setMessages(messagesRef.current);
+          }
           scheduleNotesCheck();
           return;
         }
+        if (!isCurrent()) return;
         route = chooseRoute({
           askPaid: false,
           localFailed: true,
@@ -746,9 +760,9 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         }
       }
       if (route.route !== "paid") return;
-      const paidReply = await ask("paid", history, trimmed);
+      const paidReply = await ask("paid", history, trimmed, isCurrent);
       if (!paidReply.ok) {
-        setNote(paidReply.error || "The paid model didn't answer.");
+        if (isCurrent()) setNote(paidReply.error || "The paid model didn't answer.");
         return;
       }
       const cost = estimatePaidCost(paidReply.usage, deepseekIsPeak(new Date()));
@@ -761,14 +775,18 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         costUsd: cost,
         thinking: paidReply.thinking || undefined,
       };
-      messagesRef.current = [...messagesRef.current, paidMsg];
-      setMessages(messagesRef.current);
-      void remember(paidMsg);
+      void remember(paidMsg, chatId);
+      if (isCurrent()) {
+        messagesRef.current = [...messagesRef.current, paidMsg];
+        setMessages(messagesRef.current);
+      }
       scheduleNotesCheck();
+      const reactionHistory: ChatMessage[] = [...history, userMsg, paidMsg];
       const reaction = await ask(
         "local",
-        messagesRef.current,
+        reactionHistory,
         "In one or two sentences, react to what the paid model just said. Stay in your voice.",
+        isCurrent,
       );
       if (reaction.ok) {
         const line = splitPaidHint(reaction.text).text;
@@ -780,10 +798,11 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           model: "preyas",
           thinking: reaction.thinking || undefined,
         };
-        messagesRef.current = [...messagesRef.current, reply];
-        setMessages(messagesRef.current);
-        void speakPreyas(line, true);
-        void remember(reply);
+        void remember(reply, chatId);
+        if (isCurrent()) {
+          messagesRef.current = [...messagesRef.current, reply];
+          setMessages(messagesRef.current);
+        }
         scheduleNotesCheck();
       }
     } finally {
@@ -792,6 +811,13 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
   }
   sendRef.current = send;
+
+  const submitDraft = () => {
+    const text = draft;
+    if (!text.trim() || busy.current) return;
+    setDraft("");
+    void send(text, false);
+  };
 
   const button = paidButton({
     available: paid.available,
@@ -1032,6 +1058,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                   if (pinned.current) scrollToLatest();
                 }}
               >
+              {messages.length === 0 && !live ? (
+                <View style={styles.emptyChat}>
+                  <Text style={styles.emptyTitle}>Say hi to Preyas.</Text>
+                  <Text style={styles.emptyText}>Ask a question, use a quick chip below, or say “remember …” to save a note.</Text>
+                </View>
+              ) : null}
               {messages.map((message, index) => {
                 const mine = message.who === "user";
                 const read = mine && messages.slice(index + 1).some((row) => row.who !== "user");
@@ -1115,11 +1147,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 placeholder="Message Preyas..."
                 placeholderTextColor="#6d7c88"
                 style={styles.input}
-                onSubmitEditing={() => {
-                  const text = draft;
-                  setDraft("");
-                  void send(text, false);
-                }}
+                onSubmitEditing={submitDraft}
               />
               <Pressable onPress={() => setDraft((value) => `${value}💧 `)}><Text style={styles.emoji}>☺</Text></Pressable>
               <Pressable
@@ -1132,11 +1160,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
               </Pressable>
               <Pressable
                 style={styles.send}
-                onPress={() => {
-                  const text = draft;
-                  setDraft("");
-                  void send(text, false);
-                }}
+                onPress={submitDraft}
               >
                 <Text style={styles.sendText}>➤</Text>
               </Pressable>
@@ -1372,6 +1396,9 @@ const styles = StyleSheet.create({
   chatRowIcon: { paddingHorizontal: 3 },
   chatRowIconText: { color: "#9aa8b2", fontSize: 13 },
   chatEmpty: { color: "#7e909a", fontSize: 12 },
+  emptyChat: { alignItems: "center", paddingVertical: 36, paddingHorizontal: 20, gap: 6 },
+  emptyTitle: { color: "#e8f7fb", fontSize: 16, fontWeight: "800" },
+  emptyText: { color: "#8aa0ab", fontSize: 13, lineHeight: 19, textAlign: "center" },
   sidebarHeadRight: { flexDirection: "row", alignItems: "center", gap: 8 },
   notesBtn: { borderWidth: 1, borderColor: "rgba(126,212,234,0.4)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   notesBtnText: { color: aqua, fontSize: 11, fontWeight: "700" },
