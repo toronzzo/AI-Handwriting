@@ -100,7 +100,7 @@ jobs:
           bash -n bakugan-buddy/brain-server/transcribe.sh
           bash -n bakugan-buddy/brain-server/speak.sh
           node --check bakugan-buddy/brain-server/lib/speech.mjs
-          node --experimental-strip-types --disable-warning=ExperimentalWarning --test bakugan-buddy/brain-server/lib/memory.test.mjs bakugan-buddy/brain-server/lib/sampling.test.mjs
+          node --experimental-strip-types --disable-warning=ExperimentalWarning --test bakugan-buddy/brain-server/lib/memory.test.mjs bakugan-buddy/brain-server/lib/sampling.test.mjs bakugan-buddy/brain-server/lib/history.test.mjs bakugan-buddy/brain-server/lib/import-paths.test.mjs
 
       - name: Install studio (lockfile)
         run: npm ci

@@ -10,11 +10,12 @@ import { StatusBar } from "expo-status-bar";
 import { BodyWebView, BodyWebViewAPI, type BodyMetrics } from "./src/body/BodyWebView";
 import { BenchmarkScreen } from "./src/screens/BenchmarkScreen";
 import { RoomScreen } from "./src/room/RoomScreen";
+import { ChatScreen } from "./src/screens/ChatScreen";
 
-type Tab = "room" | "body" | "bench";
+type Tab = "chat" | "room" | "body" | "bench";
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("room");
+  const [tab, setTab] = useState<Tab>("chat");
   const [metrics, setMetrics] = useState<BodyMetrics | null>(null);
 
   return (
@@ -23,9 +24,19 @@ export default function App() {
       <View style={styles.top}>
         <Text style={styles.brand}>BAKUGAN BUDDY</Text>
         <Text style={styles.sub}>
-          {tab === "room" ? "Preyas · ball form · alive in his room" : "M1 · body @ 60fps · Aquos joker pack"}
+          {tab === "chat"
+            ? "Preyas · chat · local brain, paid model when you ask"
+            : tab === "room"
+              ? "Preyas · ball form · alive in his room"
+              : "M1 · body @ 60fps · Aquos joker pack"}
         </Text>
         <View style={styles.tabs}>
+          <Pressable
+            style={[styles.tab, tab === "chat" && styles.tabOn]}
+            onPress={() => setTab("chat")}
+          >
+            <Text style={styles.tabT}>Chat</Text>
+          </Pressable>
           <Pressable
             style={[styles.tab, tab === "room" && styles.tabOn]}
             onPress={() => setTab("room")}
@@ -48,6 +59,7 @@ export default function App() {
       </View>
 
       <View style={styles.stage}>
+        {tab === "chat" && <ChatScreen />}
         {tab === "room" && <RoomScreen />}
         {/* Keep WebView mounted while benchmarking so it can drive the body */}
         {(tab === "body" || tab === "bench") && (

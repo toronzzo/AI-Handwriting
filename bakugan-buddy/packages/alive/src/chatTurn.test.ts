@@ -1,0 +1,81 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import {
+  CHAT_MAX_TOKENS,
+  HISTORY_TOKEN_BUDGET,
+  chooseRoute,
+  deepseekIsPeak,
+  estimatePaidCost,
+  estimateTokens,
+  paidButton,
+  parseSseBlock,
+  resolveChatBase,
+  trimHistory,
+  type ChatMessage,
+} from "./chatTurn.ts";
+
+test("history keeps the newest turns inside the 8B window", () => {
+  const messages: ChatMessage[] = [];
+  for (let i = 0; i < 40; i++) {
+    messages.push({ role: "user", content: `turn ${i} `.repeat(80) });
+    messages.push({ role: "assistant", content: `reply ${i} `.repeat(80), who: "preyas" });
+  }
+  const trimmed = trimHistory(messages, HISTORY_TOKEN_BUDGET);
+  let tokens = 0;
+  for (let i = 0; i < trimmed.length; i++) tokens += estimateTokens(trimmed[i]!.content) + 4;
+  assert.ok(tokens <= HISTORY_TOKEN_BUDGET);
+  assert.ok(trimmed.length < messages.length);
+  assert.equal(trimmed[trimmed.length - 1]!.content.includes("reply 39"), true);
+  assert.equal(trimmed[0]!.content.includes("turn 0"), false);
+  assert.equal(CHAT_MAX_TOKENS, 512);
+});
+
+test("routing stays local unless asked or the local brain failed", () => {
+  const base = { askPaid: false, localFailed: false, paidAvailable: true, allowPaidOnFailure: false };
+  assert.equal(chooseRoute(base).route, "local");
+  assert.equal(chooseRoute({ ...base, askPaid: true }).route, "paid");
+  assert.equal(chooseRoute({ ...base, askPaid: true, paidAvailable: false }).route, "local");
+  assert.equal(chooseRoute({ ...base, localFailed: true, allowPaidOnFailure: false }).route, "local");
+  assert.equal(chooseRoute({ ...base, localFailed: true, allowPaidOnFailure: true }).route, "paid");
+  assert.equal(chooseRoute({ ...base, localFailed: true, allowPaidOnFailure: true, paidAvailable: false }).route, "local");
+});
+
+test("paid cost uses flash cache-miss rates and peak is double", () => {
+  const off = estimatePaidCost({ prompt_tokens: 1_000_000, completion_tokens: 1_000_000 }, false);
+  const peak = estimatePaidCost({ prompt_tokens: 1_000_000, completion_tokens: 1_000_000 }, true);
+  assert.equal(off, 0.75);
+  assert.equal(peak, 1.5);
+  assert.equal(estimatePaidCost(null), null);
+});
+
+test("the paid button stays off without a key and during off-peak-only peak hours", () => {
+  const weekdayPeak = new Date("2026-11-02T02:30:00Z");
+  const weekend = new Date("2026-11-01T02:30:00Z");
+  assert.equal(deepseekIsPeak(weekdayPeak), true);
+  assert.equal(deepseekIsPeak(weekend), false);
+  assert.equal(paidButton({ available: false, offPeakOnly: false, now: weekend }).enabled, false);
+  assert.match(paidButton({ available: false, offPeakOnly: false, now: weekend }).reason, /key/i);
+  const held = paidButton({ available: true, offPeakOnly: true, now: weekdayPeak });
+  assert.equal(held.enabled, false);
+  assert.match(held.reason, /peak/i);
+  assert.equal(paidButton({ available: true, offPeakOnly: true, now: weekend }).enabled, true);
+});
+
+test("the chat base falls back to the proxy when the gateway is down", async () => {
+  const found = await resolveChatBase("http://127.0.0.1:8788", async () => {
+    throw new Error("down");
+  });
+  assert.equal(found.via, "proxy");
+  assert.equal(found.base, "http://127.0.0.1:8788");
+});
+
+test("sse usage is kept and text deltas join", () => {
+  const block = [
+    'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+    'data: {"choices":[{"delta":{"content":" there"}}],"usage":{"prompt_tokens":10,"completion_tokens":2}}',
+    "data: [DONE]",
+  ].join("\n");
+  const piece = parseSseBlock(block);
+  assert.equal(piece.text, "Hi there");
+  assert.equal(piece.usage?.completion_tokens, 2);
+});

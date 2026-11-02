@@ -39,6 +39,19 @@ export function earIsMuted(now: number, talkUntil: number, tailMs = ECHO_TAIL_MS
   return talkUntil > 0 && now < talkUntil + tailMs;
 }
 
+export type MicPhase = "listening" | "muted" | "thinking" | "speaking";
+
+/** What the mic button should say. Speaking wins, then a request in flight, then the echo tail. */
+export function micPhase(
+  now: number,
+  state: { thinking: boolean; playing: boolean; talkUntil: number },
+): MicPhase {
+  if (state.playing) return "speaking";
+  if (state.thinking) return "thinking";
+  if (earIsMuted(now, state.talkUntil)) return "muted";
+  return "listening";
+}
+
 export type VadState = {
   speaking: boolean;
   speechMs: number;
@@ -151,6 +164,13 @@ export function takeNewSentences(key: object, line: string, final: boolean): str
 
 export function recentLines(key: object): readonly string[] {
   return mouths.get(key)?.said ?? [];
+}
+
+/** Start a new spoken reply. Echo memory stays; the sentence cursor does not. */
+export function resetSpeech(key: object): void {
+  const row = mouths.get(key);
+  if (!row) return;
+  row.cursor = { count: 0, line: "" };
 }
 
 /** Collapse "mine mine mine" and a line that is the same phrase twice. */

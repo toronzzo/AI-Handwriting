@@ -115,6 +115,9 @@ type Sinks = {
   talkAmp: number;
   spokenCount: number;
   stopTalk: (() => void) | null;
+  playing: boolean;
+  thinking: boolean;
+  phase: "listening" | "muted" | "thinking" | "speaking";
 };
 
 const MOODS: readonly Mood[] = ["neutral", "happy", "excited", "sad", "angry"];
@@ -321,6 +324,9 @@ function makeSinks(): Sinks {
     talkAmp: 0,
     spokenCount: 0,
     stopTalk: null,
+    playing: false,
+    thinking: false,
+    phase: "listening",
   };
 }
 
@@ -622,6 +628,7 @@ export function RoomScreen() {
   void tick;
   const [brainHost, setBrainHost] = useState("");
   const [brainStatus, setBrainStatus] = useState("barks");
+  const [micPhaseLabel, setMicPhaseLabel] = useState("listening");
   bag.brainUrl = normalizeBrainUrl(brainHost);
 
   useEffect(() => {
@@ -730,6 +737,7 @@ export function RoomScreen() {
   useEffect(() => {
     let seen = bag.bark.gen;
     let seenStream = bag.streamGen;
+    let seenPhase = bag.phase;
     const interval = setInterval(() => {
       const now = Date.now();
       if (bag.booted && now - bag.adviseAt > BRAIN_MIN_INTERVAL_MS && !bag.adviseBusy) {
@@ -775,6 +783,10 @@ export function RoomScreen() {
         } else {
           adviseWith([]);
         }
+      }
+      if (bag.phase !== seenPhase) {
+        seenPhase = bag.phase;
+        setMicPhaseLabel(bag.phase);
       }
       if (bag.streamGen !== seenStream) {
         seenStream = bag.streamGen;
@@ -937,6 +949,7 @@ export function RoomScreen() {
         >
           <Text style={styles.padText}>find</Text>
         </Pressable>
+        <Text style={styles.brainStatus}>{micPhaseLabel}</Text>
         <Text style={styles.brainStatus}>{brainStatus}</Text>
       </View>
       {debug && (

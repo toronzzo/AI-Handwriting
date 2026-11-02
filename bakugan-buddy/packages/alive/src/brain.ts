@@ -224,7 +224,7 @@ export function createBrainAdvisor(options: BrainAdvisorOptions): MindAdvisor {
             repeat_penalty: 1.1,
             presence_penalty: 0.3,
             frequency_penalty: 0.3,
-            max_tokens: 160,
+            max_tokens: 512,
             cache_prompt: true,
             id_slot: 0,
             chat_template_kwargs: { enable_thinking: false },

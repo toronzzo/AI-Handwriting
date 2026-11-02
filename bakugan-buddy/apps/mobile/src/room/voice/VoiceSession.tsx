@@ -7,18 +7,21 @@ import {
   freshVad,
   hearsOwnVoice,
   isWhisperHallucination,
+  micPhase,
   pcm16FromWav,
   recentLines,
   stepVad,
   synthesizeLine,
   takeNewSentences,
   transcribeClip,
+  wavDurationMs,
+  type MicPhase,
   type VadState,
 } from "../../../../../packages/alive/src/speech.ts";
 import { createEar, type Ear } from "./ear";
 import { playWav } from "./playWav";
 
-type TalkSinks = {
+export type TalkSinks = {
   brainUrl: string;
   heard: string;
   hearLang: string;
@@ -29,10 +32,14 @@ type TalkSinks = {
   talkUntil: number;
   spokenCount: number;
   stopTalk: (() => void) | null;
+  playing?: boolean;
+  thinking?: boolean;
+  phase?: MicPhase;
 };
 
 export function interruptTalk(sinks: TalkSinks): void {
   sinks.talkGen += 1;
+  sinks.playing = false;
   sinks.talkUntil = 0;
   sinks.talkEnv = [];
   const stop = sinks.stopTalk;
@@ -46,18 +53,28 @@ export async function speakSentence(sinks: TalkSinks, sentence: string, mood: st
   const wav = await synthesizeLine(sinks.brainUrl, sentence, mood, sinks.hearLang || "en");
   if (!wav || gen !== sinks.talkGen) return;
   const pcm = pcm16FromWav(wav);
+  const durationMs = wavDurationMs(wav) ?? (pcm && pcm.length > 0 ? (pcm.length / 16000) * 1000 : 4000);
   if (pcm && pcm.length > 0) {
     sinks.talkEnv = envelopeFromPcm16(pcm, 320);
     sinks.talkStart = Date.now();
-    sinks.talkUntil = sinks.talkStart + (pcm.length / 16000) * 1000;
   }
-  const handle = await playWav(wav);
+  // Mute while the clip should be playing, but not forever if ended never fires.
+  sinks.playing = true;
+  sinks.talkUntil = Date.now() + durationMs + 1500;
+  const handle = await playWav(wav, () => {
+    if (gen !== sinks.talkGen) return;
+    sinks.playing = false;
+    sinks.talkUntil = Date.now();
+  });
   if (gen !== sinks.talkGen) {
     handle.stop();
+    sinks.playing = false;
+    sinks.talkUntil = 0;
     return;
   }
   sinks.stopTalk = () => {
     handle.stop();
+    sinks.playing = false;
     sinks.talkUntil = 0;
   };
 }
@@ -92,6 +109,15 @@ export function VoiceSession({ sinks }: { sinks: TalkSinks }) {
       const current = ear.current;
       if (!current || !sinks.brainUrl) return;
       const now = Date.now();
+      if (sinks.playing && sinks.talkUntil > 0 && now > sinks.talkUntil) {
+        sinks.playing = false;
+        sinks.talkUntil = now;
+      }
+      sinks.phase = micPhase(now, {
+        thinking: Boolean(sinks.thinking),
+        playing: Boolean(sinks.playing),
+        talkUntil: sinks.talkUntil,
+      });
       if (earIsMuted(now, sinks.talkUntil)) {
         if (!muted) {
           muted = true;
