@@ -34,6 +34,33 @@ import { PreyasHero } from "./PreyasHero";
 type Shown = ChatMessage & { t: number; thinking?: string };
 type PartnerCard = { turns: number; level: number; bond: number; caption: string };
 type Pane = "companion" | "activity" | "collection";
+type ChatMeta = { id: string; title: string; created: number; updated: number };
+type ChatDialog = { kind: "rename"; id: string; value: string } | { kind: "delete"; id: string; title: string };
+type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string };
+
+function toShown(rows: StoredRow[]): Shown[] {
+  return rows.map((row) => ({
+    t: typeof row.t === "number" ? row.t : Date.now(),
+    role: row.role === "assistant" || row.role === "system" ? row.role : "user",
+    content: row.content || "",
+    who: row.who === "paid" || row.who === "preyas" || row.who === "user" ? row.who : undefined,
+    model: row.model || undefined,
+    costUsd: row.costUsd,
+    thinking: typeof row.thinking === "string" ? row.thinking : undefined,
+  }));
+}
+
+function dayLabel(t: number): string {
+  try {
+    return new Date(t).toLocaleDateString([], { month: "short", day: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
+function newestFirst(list: ChatMeta[]): ChatMeta[] {
+  return [...list].sort((a, b) => b.updated - a.updated);
+}
 
 const QUICK: { label: string; prompt: string }[] = [
   { label: "Battle Ready!", prompt: "I'm ready. What's our strategy?" },
@@ -93,11 +120,113 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const pinned = useRef(true);
   const [jumpVisible, setJumpVisible] = useState(false);
   const [partner, setPartner] = useState<PartnerCard>(partnerFromTurns(0));
+  const [chats, setChats] = useState<ChatMeta[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const activeIdRef = useRef<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [dialog, setDialog] = useState<ChatDialog | null>(null);
   const [pane, setPane] = useState<Pane>("companion");
   const [menu, setMenu] = useState(false);
   const [profile, setProfile] = useState(false);
   const { width } = useWindowDimensions();
   const wide = width >= 900;
+
+  const setActiveChat = (id: string | null) => {
+    activeIdRef.current = id;
+    setActiveChatId(id);
+  };
+
+  async function loadChat(id: string, cancelled?: () => boolean): Promise<boolean> {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`);
+      if (!res.ok) return false;
+      const body = (await res.json()) as {
+        chat?: ChatMeta;
+        summary?: string;
+        partner?: PartnerCard;
+        messages?: StoredRow[];
+      };
+      if (cancelled?.()) return false;
+      summaryRef.current = body.summary || "";
+      if (body.partner) setPartner(body.partner);
+      const restored = toShown(body.messages || []);
+      messagesRef.current = restored;
+      setMessages(restored);
+      setLive(null);
+      setNote("");
+      setOpenThink({});
+      pinned.current = true;
+      setJumpVisible(false);
+      if (body.chat) {
+        const meta = body.chat;
+        setChats((rows) => newestFirst(rows.map((row) => (row.id === meta.id ? meta : row))));
+      }
+      setActiveChat(id);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function startChat(): Promise<ChatMeta | null> {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/chats`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as { chat?: ChatMeta };
+      if (!body.chat) return null;
+      const chat = body.chat;
+      setChats((rows) => newestFirst([chat, ...rows.filter((row) => row.id !== chat.id)]));
+      return chat;
+    } catch {
+      return null;
+    }
+  }
+
+  async function newChat() {
+    const chat = await startChat();
+    if (!chat) return;
+    await loadChat(chat.id);
+    setDrawerOpen(false);
+  }
+
+  async function saveRename(id: string, title: string) {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      if (res.ok) {
+        const body = (await res.json()) as { chat?: ChatMeta };
+        if (body.chat) {
+          const meta = body.chat;
+          setChats((rows) => newestFirst(rows.map((row) => (row.id === meta.id ? meta : row))));
+        }
+      }
+    } catch {
+      /* keep the old title */
+    }
+    setDialog(null);
+  }
+
+  async function removeChat(id: string) {
+    try {
+      await fetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
+    } catch {
+      /* the row goes away locally either way */
+    }
+    const left = chats.filter((row) => row.id !== id);
+    setChats(left);
+    setDialog(null);
+    if (activeIdRef.current === id) {
+      if (left.length > 0) await loadChat(newestFirst(left)[0]!.id);
+      else await newChat();
+    }
+  }
 
   useEffect(() => {
     let cancel = false;
@@ -109,28 +238,18 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       if (cancel) return;
       setVia(endpoint.via);
       try {
-        const res = await fetch(`${bag.brainUrl}/v1/history`);
+        const res = await fetch(`${bag.brainUrl}/v1/chats`);
         if (res.ok) {
-          const body = (await res.json()) as {
-            summary?: string;
-            partner?: PartnerCard;
-            messages?: { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string }[];
-          };
-          summaryRef.current = body.summary || "";
-          if (body.partner) setPartner(body.partner);
-          const restored: Shown[] = (body.messages || []).map((row) => ({
-            t: typeof row.t === "number" ? row.t : Date.now(),
-            role: row.role === "assistant" || row.role === "system" ? row.role : "user",
-            content: row.content || "",
-            who: row.who === "paid" || row.who === "preyas" || row.who === "user" ? row.who : undefined,
-            model: row.model || undefined,
-            costUsd: row.costUsd,
-            thinking: typeof row.thinking === "string" ? row.thinking : undefined,
-          }));
-          messagesRef.current = restored;
-          setMessages(restored);
-          if (!body.partner) {
-            setPartner(partnerFromTurns(restored.filter((row) => row.who === "user" || row.role === "user").length));
+          const body = (await res.json()) as { chats?: ChatMeta[] };
+          let list = Array.isArray(body.chats) ? body.chats : [];
+          if (list.length === 0) {
+            const made = await startChat();
+            if (made) list = [made];
+          }
+          if (cancel) return;
+          if (list.length > 0) {
+            setChats(newestFirst(list));
+            await loadChat(list[0]!.id, () => cancel);
           }
         }
       } catch {
@@ -205,13 +324,20 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   };
 
   async function remember(entry: ChatMessage) {
-    if (!bag.brainUrl) return;
+    const chatId = activeIdRef.current;
+    if (!bag.brainUrl || !chatId) return;
     try {
-      await fetch(`${bag.brainUrl}/v1/history`, {
+      const res = await fetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(chatId)}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(entry),
       });
+      if (!res.ok) return;
+      const body = (await res.json()) as { chat?: ChatMeta };
+      if (body.chat) {
+        const meta = body.chat;
+        setChats((rows) => newestFirst(rows.map((row) => (row.id === meta.id ? meta : row))));
+      }
     } catch {
       /* the line is still on screen */
     }
@@ -262,6 +388,11 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   async function send(text: string, askPaid: boolean) {
     const trimmed = text.trim();
     if (!trimmed || busy.current || !bag.brainUrl) return;
+    // A chat is saved before its first message, so history never goes to a stray file.
+    if (!activeIdRef.current) {
+      const chat = await startChat();
+      if (chat) setActiveChat(chat.id);
+    }
     busy.current = true;
     bag.thinking = true;
     const userMsg: Shown = { t: Date.now(), role: "user", content: trimmed, who: "user" };
@@ -373,6 +504,72 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     onNavigate?.(tab);
   };
 
+  async function openChat(id: string) {
+    await loadChat(id);
+    setDrawerOpen(false);
+  }
+
+  const confirmDialog = dialog
+    ? dialog.kind === "rename"
+      ? {
+          title: "Rename chat",
+          body: null as string | null,
+          confirm: "Save",
+          danger: false,
+          run: () => void saveRename(dialog.id, dialog.value),
+        }
+      : {
+          title: "Are you sure?",
+          body: `Delete "${dialog.title}"? This cannot be undone.`,
+          confirm: "Delete",
+          danger: true,
+          run: () => void removeChat(dialog.id),
+        }
+    : null;
+
+  const chatList = (withClose: boolean) => (
+    <View style={styles.sidebarInner}>
+      <View style={styles.sidebarHead}>
+        <Text style={styles.sidebarTitle}>CHATS</Text>
+        {withClose ? (
+          <Pressable onPress={() => setDrawerOpen(false)} hitSlop={8}>
+            <Text style={styles.sidebarClose}>✕</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <Pressable style={styles.newChat} onPress={() => void newChat()}>
+        <Text style={styles.newChatText}>+ New chat</Text>
+      </Pressable>
+      <ScrollView style={styles.chatList} contentContainerStyle={styles.chatListInner}>
+        {chats.map((chat) => (
+          <View key={chat.id} style={[styles.chatRow, chat.id === activeChatId && styles.chatRowOn]}>
+            <Pressable style={styles.chatRowMain} onPress={() => void openChat(chat.id)}>
+              <Text style={styles.chatRowTitle} numberOfLines={1}>
+                {chat.title}
+              </Text>
+              <Text style={styles.chatRowDate}>{dayLabel(chat.updated)}</Text>
+            </Pressable>
+            <Pressable
+              style={styles.chatRowIcon}
+              hitSlop={6}
+              onPress={() => setDialog({ kind: "rename", id: chat.id, value: chat.title })}
+            >
+              <Text style={styles.chatRowIconText}>✎</Text>
+            </Pressable>
+            <Pressable
+              style={styles.chatRowIcon}
+              hitSlop={6}
+              onPress={() => setDialog({ kind: "delete", id: chat.id, title: chat.title })}
+            >
+              <Text style={styles.chatRowIconText}>🗑</Text>
+            </Pressable>
+          </View>
+        ))}
+        {chats.length === 0 ? <Text style={styles.chatEmpty}>No chats yet.</Text> : null}
+      </ScrollView>
+    </View>
+  );
+
   return (
     <View style={styles.root}>
       <VoiceSession sinks={bag} />
@@ -455,7 +652,14 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           </View>
 
           <View style={styles.chatCard}>
+            {wide ? <View style={styles.sidebar}>{chatList(false)}</View> : null}
+            <View style={styles.thread}>
             <View style={styles.chatHead}>
+              {!wide ? (
+                <Pressable style={styles.drawerBtn} onPress={() => setDrawerOpen(true)} hitSlop={8}>
+                  <Text style={styles.drawerBtnText}>☰</Text>
+                </Pressable>
+              ) : null}
               <View style={styles.miniBall} />
               <View style={styles.chatHeadText}>
                 <Text style={styles.chatName}>Preyas  ◆</Text>
@@ -581,9 +785,46 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 <Switch value={escalate} onValueChange={setEscalate} />
               </View>
             </View>
+            </View>
           </View>
         </View>
       )}
+
+      {!wide && drawerOpen ? (
+        <View style={styles.drawerWrap}>
+          <Pressable style={styles.scrim} onPress={() => setDrawerOpen(false)} />
+          <View style={styles.drawer}>{chatList(true)}</View>
+        </View>
+      ) : null}
+
+      {confirmDialog ? (
+        <View style={styles.modalWrap}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>{confirmDialog.title}</Text>
+            {dialog?.kind === "rename" ? (
+              <TextInput
+                value={dialog.value}
+                onChangeText={(value) => setDialog({ kind: "rename", id: dialog.id, value })}
+                style={styles.modalInput}
+                autoFocus
+                onSubmitEditing={() => confirmDialog.run()}
+              />
+            ) : (
+              <Text style={styles.modalBody}>{confirmDialog.body}</Text>
+            )}
+            <View style={styles.modalRow}>
+              <Pressable onPress={() => setDialog(null)}>
+                <Text style={styles.modalCancel}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={confirmDialog.run}>
+                <Text style={[styles.modalOk, confirmDialog.danger && styles.modalDanger]}>
+                  {confirmDialog.confirm}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       {profile ? (
         <View style={styles.sheet}>
@@ -654,7 +895,39 @@ const styles = StyleSheet.create({
   caption: { color: "#8aa0ab", fontSize: 12, marginTop: 6 },
   profileBtn: { marginTop: 8, alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(126,212,234,0.4)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   profileText: { color: aqua, fontWeight: "700" },
-  chatCard: { flex: 1.2, borderWidth: 1, borderColor: "rgba(126,212,234,0.22)", borderRadius: 18, backgroundColor: "#0b1218", padding: 12, minHeight: 320 },
+  chatCard: { flex: 1.2, flexDirection: "row", gap: 12, borderWidth: 1, borderColor: "rgba(126,212,234,0.22)", borderRadius: 18, backgroundColor: "#0b1218", padding: 12, minHeight: 320 },
+  thread: { flex: 1, minWidth: 0 },
+  sidebar: { width: 210, borderRightWidth: 1, borderRightColor: "rgba(126,212,234,0.16)", paddingRight: 10 },
+  sidebarInner: { flex: 1, gap: 8 },
+  sidebarHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  sidebarTitle: { color: "#8aa0ab", fontSize: 11, letterSpacing: 1.6 },
+  sidebarClose: { color: "#9aa8b2", fontSize: 16, paddingHorizontal: 4 },
+  newChat: { borderWidth: 1, borderColor: "rgba(126,212,234,0.45)", borderRadius: 12, paddingVertical: 8, alignItems: "center" },
+  newChatText: { color: aqua, fontSize: 13, fontWeight: "700" },
+  chatList: { flex: 1 },
+  chatListInner: { gap: 4, paddingBottom: 8 },
+  chatRow: { flexDirection: "row", alignItems: "center", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 6, gap: 2 },
+  chatRowOn: { backgroundColor: "rgba(126,212,234,0.12)" },
+  chatRowMain: { flex: 1, minWidth: 0 },
+  chatRowTitle: { color: "#e7f3f7", fontSize: 13, fontWeight: "600" },
+  chatRowDate: { color: "#7e909a", fontSize: 11, marginTop: 1 },
+  chatRowIcon: { paddingHorizontal: 3 },
+  chatRowIconText: { color: "#9aa8b2", fontSize: 13 },
+  chatEmpty: { color: "#7e909a", fontSize: 12 },
+  drawerBtn: { paddingHorizontal: 4, paddingVertical: 2 },
+  drawerBtnText: { color: aqua, fontSize: 20 },
+  drawerWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 20, flexDirection: "row" },
+  scrim: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.55)" },
+  drawer: { width: 260, maxWidth: "82%", backgroundColor: "#0b1218", borderRightWidth: 1, borderRightColor: "rgba(126,212,234,0.3)", padding: 12, zIndex: 21 },
+  modalWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 30, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center", padding: 20 },
+  modal: { width: "100%", maxWidth: 360, backgroundColor: "#101820", borderWidth: 1, borderColor: "rgba(126,212,234,0.4)", borderRadius: 16, padding: 16, gap: 10 },
+  modalTitle: { color: "#f4fbfe", fontSize: 16, fontWeight: "800" },
+  modalBody: { color: "#b7c6ce", fontSize: 13, lineHeight: 19 },
+  modalInput: { borderWidth: 1, borderColor: "rgba(126,212,234,0.35)", borderRadius: 10, color: "#f4fbfe", paddingHorizontal: 10, paddingVertical: 8 },
+  modalRow: { flexDirection: "row", justifyContent: "flex-end", gap: 16, marginTop: 4 },
+  modalCancel: { color: "#9aa8b2", fontWeight: "700" },
+  modalOk: { color: aqua, fontWeight: "800" },
+  modalDanger: { color: "#ff8a8a" },
   chatHead: { flexDirection: "row", alignItems: "center", gap: 10, paddingBottom: 8 },
   chatHeadText: { flex: 1 },
   chatName: { color: "#f4fbfe", fontWeight: "800", fontSize: 16 },

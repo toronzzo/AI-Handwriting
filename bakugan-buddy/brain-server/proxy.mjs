@@ -10,7 +10,8 @@ import { FACT_EXTRACT_PROMPT } from "../packages/alive/src/longMemory.ts";
 import { openMemory, parseExtractedFacts, relevantFacts, rememberFacts } from "./lib/memory.mjs";
 import { synthesizeFile, transcribeFile } from "./lib/speech.mjs";
 import { withSampling } from "./lib/sampling.mjs";
-import { appendHistory, mergeHistoryFiles, paidAvailability, readHistory } from "./lib/history.mjs";
+import { mergeHistoryFiles, paidAvailability } from "./lib/history.mjs";
+import { appendMessage, createChat, deleteChat, listChats, newestChat, readChat, renameChat } from "./lib/chats.mjs";
 import { clipTooShort, isWhisperHallucination } from "../packages/alive/src/speech.ts";
 import os from "node:os";
 
@@ -207,11 +208,98 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/v1/chats") {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      if (req.method === "GET") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ chats: listChats(dataDir) }));
+        return;
+      }
+      if (req.method === "POST") {
+        const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        const chat = createChat(dataDir, typeof body.title === "string" ? body.title : undefined);
+        res.writeHead(201, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ chat }));
+        return;
+      }
+    }
+
+    const chatRoute = url.pathname.match(/^\/v1\/chats\/([^/]+)(\/messages)?$/);
+    if (chatRoute) {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      const id = decodeURIComponent(chatRoute[1]);
+      const onMessages = Boolean(chatRoute[2]);
+      try {
+        if (onMessages && req.method === "POST") {
+          const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+          const saved = appendMessage(dataDir, id, body);
+          if (!saved) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "chat not found" }));
+            return;
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, chat: saved.chat, summary: saved.summary }));
+          return;
+        }
+        if (!onMessages && req.method === "GET") {
+          const asked = Number(url.searchParams.get("limit") || 40);
+          const limit = Number.isFinite(asked) && asked > 0 ? Math.min(asked, 200) : 40;
+          const book = readChat(dataDir, id, limit);
+          if (!book) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "chat not found" }));
+            return;
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(book));
+          return;
+        }
+        if (!onMessages && (req.method === "PATCH" || req.method === "PUT")) {
+          const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+          const chat = renameChat(dataDir, id, body.title);
+          if (!chat) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "chat not found" }));
+            return;
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ chat }));
+          return;
+        }
+        if (!onMessages && req.method === "DELETE") {
+          const ok = deleteChat(dataDir, id);
+          res.writeHead(ok ? 200 : 404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok }));
+          return;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: message }));
+        return;
+      }
+    }
+
     if (req.method === "GET" && url.pathname === "/v1/history") {
       syncHistory();
-      const book = dataDir ? readHistory(dataDir, 40) : { summary: "", messages: [] };
+      if (!dataDir) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ summary: "", messages: [] }));
+        return;
+      }
+      const newest = newestChat(dataDir);
+      const book = newest ? readChat(dataDir, newest.id, 40) : { summary: "", messages: [], partner: undefined };
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(book));
+      res.end(JSON.stringify({ summary: book.summary, messages: book.messages, partner: book.partner }));
       return;
     }
 
@@ -222,9 +310,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const entry = JSON.parse((await readBody(req)).toString("utf8") || "{}");
-      const saved = appendHistory(dataDir, entry);
+      const chat = newestChat(dataDir) || createChat(dataDir);
+      const saved = appendMessage(dataDir, chat.id, entry);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, summary: saved.summary }));
+      res.end(JSON.stringify({ ok: true, summary: saved ? saved.summary : "" }));
       return;
     }
 

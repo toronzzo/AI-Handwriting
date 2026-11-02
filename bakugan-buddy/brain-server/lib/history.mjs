@@ -12,10 +12,9 @@ export function historyDir(root) {
   return path.join(root, "history");
 }
 
-export function appendHistory(root, entry) {
-  const dir = historyDir(root);
-  fs.mkdirSync(dir, { recursive: true });
-  const line = {
+/** One stored turn, with every field the client may send. */
+export function normalizeEntry(entry) {
+  return {
     t: entry.t || Date.now(),
     role: entry.role || "user",
     content: String(entry.content || ""),
@@ -24,14 +23,30 @@ export function appendHistory(root, entry) {
     costUsd: typeof entry.costUsd === "number" ? entry.costUsd : null,
     thinking: entry.thinking ? String(entry.thinking) : "",
   };
-  fs.appendFileSync(path.join(dir, "chat.jsonl"), JSON.stringify(line) + "\n");
+}
+
+/**
+ * Append one line to the rolling summary. The summary is long-term memory and
+ * is shared by every saved chat, so a new chat still knows the old context.
+ */
+export function appendSummary(root, line) {
+  const dir = historyDir(root);
+  fs.mkdirSync(dir, { recursive: true });
   const summaryPath = path.join(dir, "summary.txt");
   const prev = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, "utf8") : "";
   const bit = `${line.who || line.role}: ${line.content.replace(/\s+/g, " ").slice(0, 180)}`;
   let next = prev ? `${prev}\n${bit}` : bit;
   if (next.length > SUMMARY_MAX) next = next.slice(next.length - SUMMARY_MAX);
   fs.writeFileSync(summaryPath, next);
-  return { summary: next };
+  return next;
+}
+
+export function appendHistory(root, entry) {
+  const dir = historyDir(root);
+  fs.mkdirSync(dir, { recursive: true });
+  const line = normalizeEntry(entry);
+  fs.appendFileSync(path.join(dir, "chat.jsonl"), JSON.stringify(line) + "\n");
+  return { summary: appendSummary(root, line) };
 }
 
 /**
