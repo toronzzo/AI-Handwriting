@@ -37,7 +37,11 @@ export function isUnauthorized(status: number): boolean {
  * A fetch that carries the pairing token. Anything else (icons, Expo assets,
  * the model gateway) is passed through untouched.
  */
+const nativeFetch: typeof fetch =
+  typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : (fetch as typeof fetch);
+
 export function brainFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const fetch = nativeFetch;
   const token = readToken();
   if (!token) return fetch(input, init);
   const raw = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -73,3 +77,22 @@ export async function pairWithCode(
     return { ok: false, error: "the Mac did not answer" };
   }
 }
+
+/**
+ * Every brain call must carry the token on a paired phone, including the ones
+ * made from shared packages (advisor /v1/chat, facts, memory, tts) that use the
+ * global fetch. Wrap it once; requests without "/v1/" or without a stored
+ * token are untouched, and an explicit header is never overwritten.
+ */
+export function installBrainFetch(): void {
+  const g = globalThis as { fetch?: typeof fetch; __preyasFetch?: boolean };
+  if (g.__preyasFetch || typeof g.fetch !== "function") return;
+  g.__preyasFetch = true;
+  g.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
+    if (headers.has("X-Preyas-Token")) return nativeFetch(input, init);
+    return brainFetch(input, init);
+  }) as typeof fetch;
+}
+
+installBrainFetch();
