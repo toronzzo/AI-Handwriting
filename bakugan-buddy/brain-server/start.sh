@@ -54,6 +54,13 @@ fi
 
 LLAMA_PORT=8790
 BRAIN_PORT="${BRAIN_PORT:-8788}"
+# Context window. 16384 fits this 16 GB Mac; 24576 also works but uses more swap.
+LLAMA_CTX="${LLAMA_CTX:-16384}"
+if [[ ! "$LLAMA_CTX" =~ ^[0-9]+$ ]]; then
+  echo "LLAMA_CTX must be a number, got: $LLAMA_CTX" >&2
+  exit 1
+fi
+TEMPLATE="$ROOT/templates/qwen3.jinja"
 mkdir -p "$BAKUGAN_DATA_DIR/logs" "$BAKUGAN_DATA_DIR/memory" "$BAKUGAN_DATA_DIR/cache"
 
 CACHE_ARGS=()
@@ -65,26 +72,41 @@ if grep -q -- '--slot-save-path' <<<"$HELP"; then
   CACHE_ARGS+=(--slot-save-path "$BAKUGAN_DATA_DIR/cache/llama-slots")
 fi
 if grep -q -- '--parallel' <<<"$HELP"; then
-  CACHE_ARGS+=(--parallel 2)
+  CACHE_ARGS+=(--parallel 1)
 fi
 if grep -q -- '--slots' <<<"$HELP"; then
   CACHE_ARGS+=(--slots)
 fi
+if grep -q -- '--flash-attn' <<<"$HELP"; then
+  CACHE_ARGS+=(--flash-attn on)
+fi
+# This GGUF carries no chat template, so tool calls need the Qwen3 template.
+if [[ -f "$TEMPLATE" ]]; then
+  CACHE_ARGS+=(--chat-template-file "$TEMPLATE")
+fi
 
-"$LLAMA_BIN" \
-  -m "$GGUF" \
-  --host 127.0.0.1 \
-  --port "$LLAMA_PORT" \
-  -c "$MODEL_CTX" \
-  -ngl 99 \
-  -t 6 \
-  --jinja \
-  --cache-type-k q8_0 \
-  --cache-type-v q8_0 \
-  "${CACHE_ARGS[@]}" \
-  --log-file "$BAKUGAN_DATA_DIR/logs/llama.log" \
-  >/dev/null 2>&1 &
-LLAMA_PID=$!
+LLAMA_URL_BASE="http://127.0.0.1:${LLAMA_PORT}"
+LLAMA_PID=""
+
+# Reuse a server that is already answering instead of starting a second one.
+if curl -sf "${LLAMA_URL_BASE}/health" >/dev/null 2>&1; then
+  echo "Reusing the llama-server already healthy on ${LLAMA_URL_BASE}; LLAMA_CTX=$LLAMA_CTX does not apply to it."
+else
+  "$LLAMA_BIN" \
+    -m "$GGUF" \
+    --host 127.0.0.1 \
+    --port "$LLAMA_PORT" \
+    -c "$LLAMA_CTX" \
+    -ngl 99 \
+    -t 8 \
+    --jinja \
+    --cache-type-k q8_0 \
+    --cache-type-v q8_0 \
+    "${CACHE_ARGS[@]}" \
+    --log-file "$BAKUGAN_DATA_DIR/logs/llama.log" \
+    >/dev/null 2>&1 &
+  LLAMA_PID=$!
+fi
 
 cleanup() {
   if [[ -n "${DNS_PID:-}" ]]; then kill "$DNS_PID" 2>/dev/null || true; fi
@@ -94,25 +116,28 @@ cleanup() {
     # gateway/start.sh is a shell; stop the litellm child too. Not a name match.
     pkill -P "$GATEWAY_PID" 2>/dev/null || true
   fi
-  kill "$LLAMA_PID" 2>/dev/null || true
+  # A reused server belongs to someone else; never stop it.
+  if [[ -n "$LLAMA_PID" ]]; then kill "$LLAMA_PID" 2>/dev/null || true; fi
 }
 trap cleanup EXIT INT TERM
 
-ready=0
-for _ in $(seq 1 60); do
-  if curl -sf "http://127.0.0.1:${LLAMA_PORT}/health" >/dev/null 2>&1; then
-    ready=1
-    break
-  fi
-  if ! kill -0 "$LLAMA_PID" 2>/dev/null; then
-    echo "llama-server exited. See $BAKUGAN_DATA_DIR/logs/llama.log" >&2
+if [[ -n "$LLAMA_PID" ]]; then
+  ready=0
+  for _ in $(seq 1 60); do
+    if curl -sf "http://127.0.0.1:${LLAMA_PORT}/health" >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "$LLAMA_PID" 2>/dev/null; then
+      echo "llama-server exited. See $BAKUGAN_DATA_DIR/logs/llama.log" >&2
+      exit 1
+    fi
+    sleep 0.5
+  done
+  if [[ "$ready" != "1" ]]; then
+    echo "llama-server did not become healthy. See $BAKUGAN_DATA_DIR/logs/llama.log" >&2
     exit 1
   fi
-  sleep 0.5
-done
-if [[ "$ready" != "1" ]]; then
-  echo "llama-server did not become healthy. See $BAKUGAN_DATA_DIR/logs/llama.log" >&2
-  exit 1
 fi
 
 if [[ -z "${WHISPER_SERVER:-}" ]]; then
@@ -158,7 +183,7 @@ fi
 
 LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
 echo "Preyas brain: $MODEL_LABEL"
-echo "Context $MODEL_CTX, llama RAM $MODEL_RAM"
+echo "Context $LLAMA_CTX, llama RAM $MODEL_RAM"
 echo "Phone URL: http://${LAN_IP:-<this-mac-ip>}:${BRAIN_PORT}"
 echo "This Mac:  http://127.0.0.1:${BRAIN_PORT}"
 echo "Chat page: open Bakugan Buddy and tap Chat."
