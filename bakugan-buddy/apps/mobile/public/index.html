@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <title>Preyas</title>
+    <meta name="description" content="Your Bakugan companion, running on your own Mac." />
+
+    <!-- Home Screen web app on iOS -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Preyas" />
+    <meta name="theme-color" content="#7ed4ea" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #070b12;
+        color: #e7f3f7;
+        -webkit-text-size-adjust: 100%;
+      }
+      /* The notch and the home bar are safe areas, not merely padding. */
+      body {
+        min-height: 100vh;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+          env(safe-area-inset-left);
+        box-sizing: border-box;
+      }
+      /* iOS zooms the page when an input has a font smaller than 16px. */
+      input,
+      textarea,
+      select {
+        font-size: 16px !important;
+      }
+      #root {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker.register("/sw.js").catch(function () {
+            /* offline shell is optional; the app still works online */
+          });
+        });
+      }
+    </script>
+    <script type="module" src="/index.js"></script>
+  </body>
+</html>

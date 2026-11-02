@@ -141,7 +141,7 @@ elif [[ -d "$MOBILE/node_modules" ]]; then
   say "Starting the web app (first start can take a minute)…"
   (
     cd "$MOBILE"
-    nohup npx expo start --web --non-interactive >>"$LOGS/expo.log" 2>&1 &
+    EXPO_PACKAGER_PROXY_URL="" nohup npx expo start --web --non-interactive --host lan >>"$LOGS/expo.log" 2>&1 &
     echo $! > "$LOGS/preyas-web.pid"
   )
   STARTED+=("web"); started_count=$((started_count + 1))
@@ -161,6 +161,13 @@ fi
 
 URL="http://localhost:$WEB_PORT"
 say "Preyas is at $URL"
+LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
+if [[ -n "$LAN_IP" ]]; then
+  say "On your iPhone (same Wi-Fi): http://$LAN_IP:8081"
+  say "The first visit asks for the pairing code shown on the Mac, under Status."
+else
+  say "No Wi-Fi address yet; the iPhone cannot reach this Mac."
+fi
 if (( OPEN_BROWSER )); then
   open "$URL" >/dev/null 2>&1 || true
 fi

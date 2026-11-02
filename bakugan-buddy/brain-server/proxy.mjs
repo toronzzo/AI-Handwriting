@@ -20,6 +20,17 @@ import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
 import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
 import { collectStatus, restartArgs } from "./lib/status.mjs";
 import {
+  addDevice,
+  attemptPair,
+  authorizeRequest,
+  createPairingState,
+  currentCode,
+  readDevices,
+  removeDevice,
+  touchDevice,
+  writeDevices,
+} from "./lib/pairing.mjs";
+import {
   BRIEFING_CHAT_TITLE,
   dayKey,
   gatherFacts,
@@ -65,7 +76,7 @@ const warn = process.env.BRAIN_WARN === "1";
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Preyas-Token");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
 }
 
@@ -271,6 +282,19 @@ function docJobKey(name) {
   return String(name).toLowerCase();
 }
 
+const pairing = createPairingState();
+
+/** The Mac's Wi-Fi address, for the iPhone URL. */
+function lanAddress() {
+  for (const name of ["en0", "en1"]) {
+    const found = Object.values(os.networkInterfaces()[name] || []).find(
+      (row) => row && row.family === "IPv4" && !row.internal,
+    );
+    if (found) return found.address;
+  }
+  return "";
+}
+
 /** One long-lived "Daily briefing" chat, reused every day. */
 function briefingChatId() {
   const existing = listChats(dataDir).find((chat) => chat.title === BRIEFING_CHAT_TITLE);
@@ -324,6 +348,28 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   const url = new URL(req.url || "/", `http://${host}`);
+
+  // The phone must pair once; this machine never does.
+  const gate = authorizeRequest({
+    path: url.pathname,
+    method: req.method,
+    remoteAddress: req.socket?.remoteAddress || "",
+    token: req.headers["x-preyas-token"] || "",
+    book: dataDir ? readDevices(dataDir) : { devices: [] },
+    pairing,
+  });
+  if (!gate.allow) {
+    res.writeHead(gate.status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: gate.error, pair: gate.status === 401 }));
+    return;
+  }
+  if (gate.device && dataDir) {
+    try {
+      touchDevice(readDevices(dataDir), req.headers["x-preyas-token"] || "");
+    } catch {
+      /* last-seen is a nicety */
+    }
+  }
 
   try {
     if (req.method === "GET" && url.pathname === "/v1/health") {
@@ -426,6 +472,41 @@ const server = http.createServer(async (req, res) => {
       fs.appendFileSync(path.join(dir, "room.jsonl"), body.toString("utf8").trim() + "\n");
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    if (url.pathname === "/v1/pair" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const result = attemptPair({
+        code: String(body.code || ""),
+        pairing,
+        name: String(body.name || "iPhone"),
+      });
+      if (!result.ok) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: result.error }));
+        return;
+      }
+      if (dataDir) {
+        writeDevices(dataDir, addDevice(readDevices(dataDir), result.token, result.name));
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, token: result.token, name: result.name }));
+      return;
+    }
+
+    if (url.pathname === "/v1/phone" && req.method === "GET") {
+      const ip = lanAddress();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          lanIp: ip,
+          phoneUrl: ip ? `http://${ip}:8081` : "",
+          brainUrl: ip ? `http://${ip}:8788` : "",
+          pairingCode: currentCode(pairing),
+          devices: dataDir ? readDevices(dataDir).devices.length : 0,
+        }),
+      );
       return;
     }
 
