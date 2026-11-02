@@ -69,7 +69,8 @@ type ChatDialog =
   | { kind: "remind"; pending: PendingReminder }
   | { kind: "restart" }
   | { kind: "briefingTime"; time: string }
-  | { kind: "briefingOff" };
+  | { kind: "briefingOff" }
+  | { kind: "deleteDeck"; id: string; title: string };
 type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string };
 
 function toShown(rows: StoredRow[]): Shown[] {
@@ -181,6 +182,10 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [pairCode, setPairCode] = useState("");
   const [pairError, setPairError] = useState("");
   const [phoneInfo, setPhoneInfo] = useState<{ lanIp: string; phoneUrl: string; pairingCode: string; devices: number } | null>(null);
+  const [decks, setDecks] = useState<{ id: string; title: string; cards: number; due: number; language: string }[]>([]);
+  const [studyOpen, setStudyOpen] = useState(false);
+  const [review, setReview] = useState<{ deck: string; title: string; cards: { id: string; question: string; answer: string }[]; index: number; flipped: boolean } | null>(null);
+  const [quiz, setQuiz] = useState<{ deck: string; questions: { question: string; answer: string; options: string[] }[]; index: number; results: boolean[]; typed: string; feedback: string } | null>(null);
   const [remindersOpen, setRemindersOpen] = useState(false);
   const [pendingReminder, setPendingReminder] = useState<PendingReminder | null>(null);
   const [searchNote, setSearchNote] = useState("");
@@ -526,6 +531,145 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
   }
 
+  function normalizeCompare(value: string): string {
+    return String(value || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, "");
+  }
+
+  async function refreshDecks() {
+    try {
+      const res = await brainFetch(`${bag.brainUrl}/v1/study/decks`);
+      if (!res.ok) return [];
+      const body = (await res.json()) as { decks?: { id: string; title: string; cards: number; due: number; language: string }[] };
+      const rows = Array.isArray(body.decks) ? body.decks : [];
+      setDecks(rows);
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+
+  async function makeDeck(name: string) {
+    setChip(`Making flashcards from ${name}…`);
+    try {
+      const res = await brainFetch(`${bag.brainUrl}/v1/study/decks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ document: name }),
+      });
+      const body = (await res.json()) as { ok?: boolean; deck?: { id: string; title: string; cards: number }; error?: string };
+      if (!body.ok || !body.deck) throw new Error(body.error || "no deck");
+      setChip(`${body.deck.cards} cards ready`);
+      void refreshDecks();
+      return body.deck;
+    } catch (error) {
+      setChip(`Could not make cards: ${error instanceof Error ? error.message : "unknown"}`);
+      return null;
+    }
+  }
+
+  async function startReview(deckId: string, title: string) {
+    try {
+      const res = await brainFetch(`${bag.brainUrl}/v1/study/decks/${encodeURIComponent(deckId)}/due`);
+      if (!res.ok) return;
+      const body = (await res.json()) as { cards?: { id: string; question: string; answer: string }[] };
+      const cards = body.cards || [];
+      if (!cards.length) {
+        setChip("Nothing due in this deck");
+        return;
+      }
+      setReview({ deck: deckId, title, cards: cards.slice(0, 20), index: 0, flipped: false });
+      setStudyOpen(false);
+    } catch {
+      setChip("Could not open the deck");
+    }
+  }
+
+  async function gradeReview(grade: "again" | "hard" | "good" | "easy") {
+    if (!review) return;
+    const card = review.cards[review.index];
+    if (!card) return;
+    try {
+      await brainFetch(`${bag.brainUrl}/v1/study/decks/${encodeURIComponent(review.deck)}/review`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cardId: card.id, grade }),
+      });
+    } catch {
+      /* keep going; the schedule will be retried next time */
+    }
+    const next = review.index + 1;
+    if (next >= review.cards.length) {
+      setReview(null);
+      setChip("Review done");
+      void refreshDecks();
+      return;
+    }
+    setReview({ ...review, index: next, flipped: false });
+  }
+
+  async function startQuiz(deckId: string, title: string) {
+    setChip("Building a quiz…");
+    try {
+      const res = await brainFetch(`${bag.brainUrl}/v1/study/decks/${encodeURIComponent(deckId)}/quiz`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const body = (await res.json()) as { ok?: boolean; questions?: { question: string; answer: string; options: string[] }[] };
+      if (!body.ok || !body.questions?.length) throw new Error("no quiz");
+      setQuiz({ deck: deckId, questions: body.questions, index: 0, results: [], typed: "", feedback: "" });
+      setChip("");
+      setStudyOpen(false);
+    } catch {
+      setChip("Could not build a quiz");
+    }
+  }
+
+  async function answerQuiz(given: string) {
+    if (!quiz) return;
+    const question = quiz.questions[quiz.index];
+    if (!question) return;
+    const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9Ѐ-ӿ\s]+/g, " ").replace(/\s+/g, " ").trim();
+    const expected = norm(question.answer);
+    const actual = norm(given);
+    const correct = actual.length > 0 && (actual === expected || expected.includes(actual) || actual.includes(expected));
+    const results = [...quiz.results, correct];
+    setQuiz({
+      ...quiz,
+      results,
+      feedback: correct ? "Correct." : `Not quite. ${question.answer}`,
+      typed: "",
+    });
+  }
+
+  async function nextQuizQuestion() {
+    if (!quiz) return;
+    const next = quiz.index + 1;
+    if (next >= quiz.questions.length) {
+      const score = quiz.results.filter(Boolean).length;
+      setChip(`Quiz: ${score} of ${quiz.results.length}`);
+      try {
+        await brainFetch(`${bag.brainUrl}/v1/study/decks/${encodeURIComponent(quiz.deck)}/quiz`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            result: {
+              score,
+              total: quiz.questions.length,
+              results: quiz.questions.map((row, index) => ({ question: row.question, correct: Boolean(quiz.results[index]) })),
+            },
+          }),
+        });
+      } catch {
+        /* the score is still shown */
+      }
+      setQuiz(null);
+      void refreshDecks();
+      return;
+    }
+    setQuiz({ ...quiz, index: next, feedback: "", typed: "" });
+  }
+
   async function refreshPhone() {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/phone`);
@@ -599,6 +743,104 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     } catch {
       setChip("Could not update the reminder");
     }
+  }
+
+  /** "make flashcards from X", "study", "quiz me on X", "explain X simply". */
+  async function handleStudyCommand(text: string, chatId: string | null): Promise<boolean> {
+    const lower = text.trim().toLowerCase();
+    const make = lower.match(/^(?:please\s+)?make\s+flashcards?\s+(?:from|for|on)\s+(.+)$/i);
+    if (make) {
+      await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+      const deck = await makeDeck((make[1] || "").trim());
+      await addLocal({
+        t: Date.now(),
+        role: "assistant",
+        content: deck ? `Made a deck with ${deck.cards} cards from ${deck.title}. Say "study" to begin.` : "I could not make cards from that document.",
+        who: "preyas",
+        model: "preyas",
+      });
+      return true;
+    }
+    if (/^\/study\b|^study\b|^start studying\b/.test(lower)) {
+      const rows = await refreshDecks();
+      const withDue = rows.filter((row) => row.due > 0);
+      if (!withDue.length) {
+        await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+        await addLocal({
+          t: Date.now(),
+          role: "assistant",
+          content: rows.length ? "Nothing is due right now. Good work." : "No decks yet. Say \"make flashcards from <file>\".",
+          who: "preyas",
+          model: "preyas",
+        });
+        return true;
+      }
+      setStudyOpen(true);
+      setStudyOpen(true);
+      return true;
+    }
+    const quizMe = lower.match(/^quiz\s+me\s+(?:on|about)\s+(.+)$/i);
+    if (quizMe) {
+      const topic = (quizMe[1] || "").trim();
+      const rows = await refreshDecks();
+      const hit = rows.find((row) => row.title.toLowerCase().includes(topic.toLowerCase())) || rows[0];
+      if (!hit) {
+        await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+        await addLocal({
+          t: Date.now(),
+          role: "assistant",
+          content: "I need a deck first. Say \"make flashcards from <file>\".",
+          who: "preyas",
+          model: "preyas",
+        });
+        return true;
+      }
+      await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+      await startQuiz(hit.id, hit.title);
+      return true;
+    }
+    const explain = lower.match(/^explain\s+(.+?)\s+simply$/i);
+    if (explain) {
+      const topic = (explain[1] || "").trim();
+      await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+      // Prefer the documents: find the file that mentions the topic, ask it.
+      try {
+        const files = inbox.length ? inbox : await refreshInbox();
+        const hit = files.find((file) => normalizeCompare(file.name).startsWith(normalizeCompare(topic)));
+        if (hit) {
+          const res = await brainFetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(hit.name)}/ask`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ question: `Explain ${topic} simply, with one everyday example.` }),
+          });
+          const body = (await res.json()) as { ok?: boolean; answer?: string };
+          if (body.ok && body.answer) {
+            const reply: Shown = { t: Date.now(), role: "assistant", content: body.answer, who: "preyas", model: "preyas" };
+            messagesRef.current = [...messagesRef.current, reply];
+            setMessages(messagesRef.current);
+            void remember(reply, chatId);
+            return true;
+          }
+        }
+      } catch {
+        /* fall through to notes */
+      }
+      const rows = await fetchNotes(topic, 3);
+      const reply: Shown = {
+        t: Date.now(),
+        role: "assistant",
+        content: rows.length
+          ? `In plain words: ${rows[0]!.text}\n\nExample: picture the simplest everyday version of the same idea.`
+          : `I do not have anything on "${topic}" yet. Add a document or a note and ask again.`,
+        who: "preyas",
+        model: "preyas",
+      };
+      messagesRef.current = [...messagesRef.current, reply];
+      setMessages(messagesRef.current);
+      void remember(reply, chatId);
+      return true;
+    }
+    return false;
   }
 
   /** "/briefing", "what's my day", "briefing at 9", "turn off briefing". */
@@ -1153,6 +1395,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       const handled = await handleDocumentRequest(docRequest, trimmed, chatId);
       if (handled) return;
     }
+    if (!askPaid && (await handleStudyCommand(trimmed, chatId))) return;
     if (!askPaid && (await handleBriefingCommand(trimmed, chatId))) return;
     if (!askPaid && (await handleReminderCommand(trimmed, chatId))) return;
     const command = parseNoteCommand(trimmed);
@@ -1352,7 +1595,27 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             });
           },
         }
-      : dialog.kind === "briefingTime"
+      : dialog.kind === "deleteDeck"
+        ? {
+            title: `Delete "${dialog.title}"?`,
+            body: "The cards and your review history for this deck are removed. This cannot be undone.",
+            confirm: "Yes",
+            no: "No",
+            danger: true,
+            run: () => {
+              const id = dialog.id;
+              setDialog(null);
+              void (async () => {
+                try {
+                  await brainFetch(`${bag.brainUrl}/v1/study/decks/${encodeURIComponent(id)}`, { method: "DELETE" });
+                } catch {
+                  /* the row goes away locally either way */
+                }
+                void refreshDecks();
+              })();
+            },
+          }
+        : dialog.kind === "briefingTime"
         ? {
             title: `Briefing at ${dialog.time}?`,
             body: "I will send your day each morning at this time.",
@@ -1492,6 +1755,16 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             }}
           >
             <Text style={styles.notesBtnText}>Reminders</Text>
+          </Pressable>
+          <Pressable
+            style={styles.notesBtn}
+            onPress={() => {
+              setStudyOpen(true);
+              setDrawerOpen(false);
+              void refreshDecks();
+            }}
+          >
+            <Text style={styles.notesBtnText}>Study</Text>
           </Pressable>
           {withClose ? (
             <Pressable onPress={() => setDrawerOpen(false)} hitSlop={8}>
@@ -1905,6 +2178,131 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         <View style={styles.drawerWrap}>
           <Pressable style={styles.scrim} onPress={() => setDrawerOpen(false)} />
           <View style={styles.drawer}>{chatList(true)}</View>
+        </View>
+      ) : null}
+
+      {studyOpen ? (
+        <View style={styles.notesWrap}>
+          <Pressable style={styles.scrim} onPress={() => setStudyOpen(false)} />
+          <View style={styles.notesPanel}>
+            <View style={styles.notesHead}>
+              <Text style={styles.sidebarTitle}>STUDY</Text>
+              <Pressable onPress={() => setStudyOpen(false)} hitSlop={8}>
+                <Text style={styles.sidebarClose}>✕</Text>
+              </Pressable>
+            </View>
+            <ScrollView style={styles.notesScroll} contentContainerStyle={styles.notesList}>
+              {decks.map((deck) => (
+                <View key={deck.id} style={styles.noteRow}>
+                  <View style={styles.noteMain}>
+                    <Text style={styles.noteKind}>
+                      {deck.cards} cards{deck.due > 0 ? ` · ${deck.due} due` : " · none due"}
+                    </Text>
+                    <Text style={styles.noteText}>{deck.title}</Text>
+                  </View>
+                  <Pressable style={styles.docBtn} onPress={() => void startReview(deck.id, deck.title)}>
+                    <Text style={styles.docBtnText}>Review</Text>
+                  </Pressable>
+                  <Pressable style={styles.docBtn} onPress={() => void startQuiz(deck.id, deck.title)}>
+                    <Text style={styles.docBtnText}>Quiz</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.chatRowIcon}
+                    onPress={() => setDialog({ kind: "deleteDeck", id: deck.id, title: deck.title })}
+                  >
+                    <Text style={styles.chatRowIconText}>🗑</Text>
+                  </Pressable>
+                </View>
+              ))}
+              {decks.length === 0 ? (
+                <Text style={styles.chatEmpty}>
+                  No decks yet. Make one with "make flashcards from {inbox[0]?.name || "<file>"}" or from the Docs panel.
+                </Text>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      ) : null}
+
+      {review ? (
+        <View style={styles.modalWrap}>
+          <View style={styles.modal}>
+            <Text style={styles.sidebarTitle}>
+              {review.title} · {review.index + 1} of {review.cards.length}
+            </Text>
+            <Text style={styles.reviewQuestion}>{review.cards[review.index]?.question}</Text>
+            {review.flipped ? (
+              <Text style={styles.reviewAnswer}>{review.cards[review.index]?.answer}</Text>
+            ) : null}
+            {!review.flipped ? (
+              <Pressable
+                style={styles.newChat}
+                onPress={() => setReview({ ...review, flipped: true })}
+              >
+                <Text style={styles.newChatText}>Show answer</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.gradeRow}>
+                <Pressable style={[styles.docBtn, styles.gradeAgain]} onPress={() => void gradeReview("again")}>
+                  <Text style={styles.docBtnText}>Again</Text>
+                </Pressable>
+                <Pressable style={styles.docBtn} onPress={() => void gradeReview("hard")}>
+                  <Text style={styles.docBtnText}>Hard</Text>
+                </Pressable>
+                <Pressable style={styles.docBtn} onPress={() => void gradeReview("good")}>
+                  <Text style={styles.docBtnText}>Good</Text>
+                </Pressable>
+                <Pressable style={styles.docBtn} onPress={() => void gradeReview("easy")}>
+                  <Text style={styles.docBtnText}>Easy</Text>
+                </Pressable>
+              </View>
+            )}
+            <View style={styles.modalRow}>
+              <Pressable onPress={() => setReview(null)}>
+                <Text style={styles.modalCancel}>Stop</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
+      {quiz ? (
+        <View style={styles.modalWrap}>
+          <View style={styles.modal}>
+            <Text style={styles.sidebarTitle}>
+              Quiz · {quiz.index + 1} of {quiz.questions.length}
+            </Text>
+            <Text style={styles.reviewQuestion}>{quiz.questions[quiz.index]?.question}</Text>
+            {quiz.feedback ? <Text style={styles.note}>{quiz.feedback}</Text> : null}
+            {quiz.questions[quiz.index]?.options.length ? (
+              <View style={styles.quizOptions}>
+                {quiz.questions[quiz.index]!.options.map((option) => (
+                  <Pressable key={option} style={styles.docChoice} onPress={() => void answerQuiz(option)}>
+                    <Text style={styles.noteText}>{option}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : (
+              <TextInput
+                value={quiz.typed}
+                onChangeText={(value) => setQuiz({ ...quiz, typed: value })}
+                placeholder="Your answer"
+                placeholderTextColor="#6d7c88"
+                style={styles.modalInput}
+                onSubmitEditing={() => void answerQuiz(quiz.typed)}
+              />
+            )}
+            <View style={styles.modalRow}>
+              <Pressable onPress={() => setQuiz(null)}>
+                <Text style={styles.modalCancel}>Stop</Text>
+              </Pressable>
+              {quiz.feedback ? (
+                <Pressable onPress={() => void nextQuizQuestion()}>
+                  <Text style={styles.modalOk}>Next</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
         </View>
       ) : null}
 
@@ -2351,6 +2749,11 @@ const styles = StyleSheet.create({
   restartBtn: { borderColor: "rgba(255,138,138,0.5)", marginTop: 8 },
   phoneCard: { marginVertical: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: "rgba(126,212,234,0.3)", backgroundColor: "#0c141c", gap: 6 },
   phoneUrl: { color: aqua, fontSize: 16, fontWeight: "700" },
+  reviewQuestion: { color: "#f4fbfe", fontSize: 16, fontWeight: "700", lineHeight: 22 },
+  reviewAnswer: { color: "#b7c6ce", fontSize: 14, lineHeight: 20 },
+  gradeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  gradeAgain: { borderColor: "rgba(255,138,138,0.6)" },
+  quizOptions: { gap: 6 },
   reminderBanner: { position: "absolute", top: 56, left: 12, right: 12, zIndex: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderWidth: 1, borderColor: "rgba(126,212,234,0.5)", backgroundColor: "#0f222c", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
   reminderBannerText: { color: "#d5eef5", fontSize: 13, flex: 1 },
   docBtn: { borderWidth: 1, borderColor: "rgba(126,212,234,0.45)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },

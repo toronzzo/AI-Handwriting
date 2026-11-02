@@ -114,6 +114,8 @@ export function gatherFacts(root, options = {}) {
     .filter((note) => (note.created || 0) >= recentEdge.getTime())
     .sort((left, right) => (right.created || 0) - (left.created || 0));
 
+  const studyDue = totalStudyDue(root, now);
+
   const tasks = listTasks(root, { active: true }).filter(
     (task) => task.status === "paused" || task.status === "running" || task.status === "planned" || task.status === "error",
   );
@@ -134,7 +136,29 @@ export function gatherFacts(root, options = {}) {
     recent,
     tasks,
     documents,
+    studyDue,
   };
+}
+
+/** Flashcards due today, without importing the whole study module twice. */
+function totalStudyDue(root, now) {
+  try {
+    const dir = path.join(root, "memory", "study", "decks");
+    if (!fs.existsSync(dir)) return 0;
+    let total = 0;
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.endsWith(".json")) continue;
+      try {
+        const deck = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+        for (const card of deck.cards || []) if ((Number(card.due) || 0) <= now.getTime()) total += 1;
+      } catch {
+        /* one bad deck must not break the briefing */
+      }
+    }
+    return total;
+  } catch {
+    return 0;
+  }
 }
 
 /** A date written inside a deadline note, or null when it names none. */
@@ -166,6 +190,9 @@ export function factLines(facts) {
   for (const note of facts.recent.slice(0, 3)) lines.push(`${note.kind === "idea" ? "Idea" : "Decision"}: ${note.text}`);
   for (const task of facts.tasks) lines.push(`Unfinished task: ${task.title}`);
   for (const file of facts.documents) lines.push(`New document: ${file.name}`);
+  if (facts.studyDue) {
+    lines.push(`${facts.studyDue} flashcard${facts.studyDue === 1 ? "" : "s"} due today`);
+  }
   return lines;
 }
 
