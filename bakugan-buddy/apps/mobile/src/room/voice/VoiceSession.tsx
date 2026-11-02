@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { stripThinking } from "../../../../../packages/alive/src/chatTurn.ts";
 import {
   BARGE_VAD,
   clipTooShort,
@@ -83,7 +84,9 @@ const speakChain = new WeakMap<object, Promise<void>>();
 
 /** Speak finished sentences once. A second final of the same line does not replay them. */
 export function queueSpokenLine(sinks: TalkSinks, line: string, mood: string, final: boolean): void {
-  const fresh = takeNewSentences(sinks, line, final);
+  const answer = stripThinking(line).answer;
+  if (!answer) return;
+  const fresh = takeNewSentences(sinks, answer, final);
   sinks.spokenCount += fresh.length;
   let chain = speakChain.get(sinks) ?? Promise.resolve();
   for (let i = 0; i < fresh.length; i++) {

@@ -22,6 +22,7 @@ export function appendHistory(root, entry) {
     who: entry.who || "",
     model: entry.model || "",
     costUsd: typeof entry.costUsd === "number" ? entry.costUsd : null,
+    thinking: entry.thinking ? String(entry.thinking) : "",
   };
   fs.appendFileSync(path.join(dir, "chat.jsonl"), JSON.stringify(line) + "\n");
   const summaryPath = path.join(dir, "summary.txt");

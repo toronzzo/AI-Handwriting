@@ -28,7 +28,7 @@ import { resetSpeech } from "../../../../packages/alive/src/speech.ts";
 import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "../room/voice/VoiceSession";
 import { PreyasHero } from "./PreyasHero";
 
-type Shown = ChatMessage & { t: number };
+type Shown = ChatMessage & { t: number; thinking?: string };
 type PartnerCard = { turns: number; level: number; bond: number; caption: string };
 type Pane = "companion" | "activity" | "collection";
 
@@ -83,6 +83,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [hintPaid, setHintPaid] = useState(false);
   const [note, setNote] = useState("");
   const [live, setLive] = useState<{ who: "preyas" | "paid"; text: string } | null>(null);
+  const [openThink, setOpenThink] = useState<Record<number, boolean>>({});
   const [online, setOnline] = useState(false);
   const [partner, setPartner] = useState<PartnerCard>(partnerFromTurns(0));
   const [pane, setPane] = useState<Pane>("companion");
@@ -106,7 +107,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           const body = (await res.json()) as {
             summary?: string;
             partner?: PartnerCard;
-            messages?: { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null }[];
+            messages?: { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string }[];
           };
           summaryRef.current = body.summary || "";
           if (body.partner) setPartner(body.partner);
@@ -117,6 +118,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             who: row.who === "paid" || row.who === "preyas" || row.who === "user" ? row.who : undefined,
             model: row.model || undefined,
             costUsd: row.costUsd,
+            thinking: typeof row.thinking === "string" ? row.thinking : undefined,
           }));
           messagesRef.current = restored;
           setMessages(restored);
@@ -194,16 +196,18 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     const model = modelId(route, endpoint.via);
     const base = route === "paid" && endpoint.via === "proxy" ? bag.brainUrl : endpoint.base;
     let last = "";
+    let lastThink = "";
     let spoke = false;
     const result = await streamReply({
       base,
       model,
       messages: toModelMessages(prior, summaryRef.current, userText),
       timeoutMs: route === "paid" ? 45_000 : 20_000,
-      onDelta: (text) => {
-        const shown = splitPaidHint(text).text;
+      onDelta: (update) => {
+        const shown = splitPaidHint(update.answer).text;
         last = shown;
-        setLive({ who: route === "paid" ? "paid" : "preyas", text: shown });
+        lastThink = update.thinking;
+        setLive(shown ? { who: route === "paid" ? "paid" : "preyas", text: shown } : null);
         if (route === "local" && shown) {
           void speakPreyas(shown, false, !spoke);
           spoke = true;
@@ -213,7 +217,14 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     setLive(null);
     const parsed = splitPaidHint(result.text || last);
     if (route === "local" && parsed.text) void speakPreyas(parsed.text, true, !spoke);
-    return { ...result, text: parsed.text, suggestPaid: parsed.suggestPaid, model, endpoint };
+    return {
+      ...result,
+      text: parsed.text,
+      thinking: result.thinking || lastThink,
+      suggestPaid: parsed.suggestPaid,
+      model,
+      endpoint,
+    };
   }
 
   async function send(text: string, askPaid: boolean) {
@@ -247,7 +258,14 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         const cleaned = splitPaidHint(local.text);
         if (cleaned.suggestPaid) setHintPaid(true);
         if (local.ok) {
-          const reply: Shown = { t: Date.now(), role: "assistant", content: cleaned.text, who: "preyas", model: "preyas" };
+          const reply: Shown = {
+            t: Date.now(),
+            role: "assistant",
+            content: cleaned.text,
+            who: "preyas",
+            model: "preyas",
+            thinking: local.thinking || undefined,
+          };
           messagesRef.current = [...messagesRef.current, reply];
           setMessages(messagesRef.current);
           void speakPreyas(cleaned.text, true);
@@ -279,6 +297,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         who: "paid",
         model: "deepseek-flash",
         costUsd: cost,
+        thinking: paidReply.thinking || undefined,
       };
       messagesRef.current = [...messagesRef.current, paidMsg];
       setMessages(messagesRef.current);
@@ -290,7 +309,14 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       );
       if (reaction.ok) {
         const line = splitPaidHint(reaction.text).text;
-        const reply: Shown = { t: Date.now(), role: "assistant", content: line, who: "preyas", model: "preyas" };
+        const reply: Shown = {
+          t: Date.now(),
+          role: "assistant",
+          content: line,
+          who: "preyas",
+          model: "preyas",
+          thinking: reaction.thinking || undefined,
+        };
         messagesRef.current = [...messagesRef.current, reply];
         setMessages(messagesRef.current);
         void speakPreyas(line, true);
@@ -424,6 +450,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                         </Text>
                       ) : null}
                       <Text style={styles.bubbleText}>{message.content}</Text>
+                      {!mine && message.thinking ? (
+                        <Pressable onPress={() => setOpenThink((current) => ({ ...current, [index]: !current[index] }))}>
+                          <Text style={styles.thinkToggle}>{openThink[index] ? "Hide thinking" : "Show thinking"}</Text>
+                        </Pressable>
+                      ) : null}
+                      {openThink[index] && message.thinking ? <Text style={styles.thinkBody}>{message.thinking}</Text> : null}
                       <Text style={styles.time}>{clock(message.t)}{mine ? (read ? "  ✓✓" : "  ✓") : ""}</Text>
                     </View>
                   </View>
@@ -439,7 +471,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 </View>
               ) : null}
               {phase === "thinking" && !live ? (
-                <Text style={styles.typing}>···</Text>
+                <Text style={styles.typing}>Preyas is thinking…</Text>
               ) : null}
               {note ? <Text style={styles.note}>{note}</Text> : null}
             </ScrollView>
@@ -594,7 +626,9 @@ const styles = StyleSheet.create({
   bubbleWho: { color: aqua, fontSize: 11, fontWeight: "700", marginBottom: 2 },
   bubbleText: { color: "#e7f3f7", fontSize: 15, lineHeight: 21 },
   time: { color: "#7e909a", fontSize: 11, marginTop: 4, textAlign: "right" },
-  typing: { color: aqua, fontSize: 22, letterSpacing: 2 },
+  typing: { color: aqua, fontSize: 13, marginTop: 4 },
+  thinkToggle: { color: "#7e909a", fontSize: 11, marginTop: 6 },
+  thinkBody: { color: "#8aa0ab", fontSize: 12, marginTop: 4 },
   note: { color: "#e2c27a", fontSize: 13 },
   composer: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "rgba(126,212,234,0.25)", borderRadius: 22, paddingHorizontal: 10, paddingVertical: 6 },
   input: { flex: 1, color: "#f4fbfe", paddingVertical: 6 },

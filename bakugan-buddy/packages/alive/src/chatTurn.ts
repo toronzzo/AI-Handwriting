@@ -159,11 +159,63 @@ export function completionExtras(model: string): {
   };
 }
 
-/** Prefer the visible answer. Reasoning is only a stand-in when content came back empty. */
-export function visibleReply(text: string, reasoning: string): string {
-  const answer = text.trim();
-  if (answer) return answer;
-  return reasoning.trim();
+const THINK_OPEN = "<think>";
+const THINK_CLOSE = "</think>";
+
+function partialTagSuffix(text: string, tag: string): number {
+  const lower = text.toLowerCase();
+  const want = tag.toLowerCase();
+  const max = Math.min(want.length - 1, lower.length);
+  for (let n = max; n >= 1; n--) {
+    if (lower.endsWith(want.slice(0, n))) return n;
+  }
+  return 0;
+}
+
+/**
+ * Pull Qwen `<think>` blocks out of a growing stream.
+ * A tag split across chunks is held back until it is complete.
+ * An unclosed `<think>` at the end stays in thinking, not in the answer.
+ */
+export function stripThinking(raw: string): { answer: string; thinking: string; inThink: boolean } {
+  const lower = raw.toLowerCase();
+  let answer = "";
+  let thinking = "";
+  let i = 0;
+  let inThink = false;
+  while (i < raw.length) {
+    const tag = inThink ? THINK_CLOSE : THINK_OPEN;
+    const at = lower.indexOf(tag, i);
+    if (at < 0) {
+      const rest = raw.slice(i);
+      if (inThink) thinking += rest;
+      else answer += rest;
+      break;
+    }
+    if (inThink) thinking += raw.slice(i, at);
+    else answer += raw.slice(i, at);
+    i = at + tag.length;
+    inThink = !inThink;
+  }
+  if (!inThink) {
+    const held = partialTagSuffix(answer, THINK_OPEN);
+    if (held > 0) answer = answer.slice(0, answer.length - held);
+  } else {
+    const held = partialTagSuffix(thinking, THINK_CLOSE);
+    if (held > 0) thinking = thinking.slice(0, thinking.length - held);
+  }
+  return {
+    answer: answer.replace(/[ \t]{2,}/g, " ").trim(),
+    thinking: thinking.trim(),
+    inThink,
+  };
+}
+
+/** Spoken and shown text. Thinking is never the answer. */
+export function visibleReply(text: string, reasoning: string): { answer: string; thinking: string; inThink: boolean } {
+  const stripped = stripThinking(text);
+  const thinking = [reasoning.trim(), stripped.thinking].filter(Boolean).join("\n").trim();
+  return { answer: stripped.answer, thinking, inThink: stripped.inThink };
 }
 
 /** Pull text and optional usage out of one OpenAI SSE block. */
@@ -194,14 +246,24 @@ export async function resolveChatBase(
   return { base: brainUrl.replace(/\/$/, ""), via: "proxy" };
 }
 
+function messagesForModel(messages: readonly ChatMessage[], model: string): ChatMessage[] {
+  const copy = messages.map((message) => ({ ...message }));
+  if (isPaidModel(model)) return copy;
+  const last = copy[copy.length - 1];
+  if (last && last.role === "user" && !/\/(?:no_)?think\b/.test(last.content)) {
+    last.content = `${last.content}\n/no_think`;
+  }
+  return copy;
+}
+
 export async function streamReply(options: {
   base: string;
   model: string;
   messages: readonly ChatMessage[];
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
-  onDelta?: (text: string) => void;
-}): Promise<{ text: string; usage: TokenUsage | null; ok: boolean; error: string }> {
+  onDelta?: (update: { answer: string; thinking: string; inThink: boolean }) => void;
+}): Promise<{ text: string; thinking: string; usage: TokenUsage | null; ok: boolean; error: string }> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? LOCAL_TIMEOUT_MS);
@@ -217,12 +279,15 @@ export async function streamReply(options: {
         presence_penalty: 0.3,
         frequency_penalty: 0.3,
         stream_options: { include_usage: true },
-        messages: options.messages.map((message) => ({ role: message.role, content: message.content })),
+        messages: messagesForModel(options.messages, options.model).map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
       }),
       signal: controller.signal,
     });
     if (!res.ok || !res.body) {
-      return { text: "", usage: null, ok: false, error: res.ok ? "empty" : `status ${res.status}` };
+      return { text: "", thinking: "", usage: null, ok: false, error: res.ok ? "empty" : `status ${res.status}` };
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -250,13 +315,19 @@ export async function streamReply(options: {
       reasoning += piece.reasoning;
       if (piece.usage) usage = piece.usage;
       const shown = visibleReply(text, reasoning);
-      if (shown) options.onDelta?.(shown);
+      if (shown.answer || shown.thinking) options.onDelta?.(shown);
     }
     const shown = visibleReply(text, reasoning);
-    return { text: shown, usage, ok: Boolean(shown), error: shown ? "" : "empty reply" };
+    return {
+      text: shown.answer,
+      thinking: shown.thinking,
+      usage,
+      ok: Boolean(shown.answer),
+      error: shown.answer ? "" : "empty reply",
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { text: "", usage: null, ok: false, error: message };
+    return { text: "", thinking: "", usage: null, ok: false, error: message };
   } finally {
     clearTimeout(timer);
   }

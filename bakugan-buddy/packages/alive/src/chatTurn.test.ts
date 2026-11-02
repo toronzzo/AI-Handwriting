@@ -10,6 +10,7 @@ import {
   estimateTokens,
   paidButton,
   parseSseBlock,
+  stripThinking,
   visibleReply,
   partnerFromTurns,
   resolveChatBase,
@@ -93,17 +94,36 @@ test("sse usage is kept and text deltas join", () => {
   assert.equal(piece.usage?.completion_tokens, 2);
 });
 
-test("a paid turn shows the answer when the model only filled reasoning", () => {
-  const extras = completionExtras("paid");
-  assert.equal(extras.max_tokens, 2048);
-  assert.deepEqual(extras.thinking, { type: "disabled" });
-  const piece = parseSseBlock(
+test("thinking is stripped before the answer is spoken, including a split tag", () => {
+  const extras = completionExtras("preyas");
+  assert.equal(extras.chat_template_kwargs?.enable_thinking, false);
+  assert.equal(completionExtras("paid").thinking?.type, "disabled");
+
+  const whole = stripThinking("Hello <think>secret plan</think> there.");
+  assert.equal(whole.answer, "Hello there.");
+  assert.equal(whole.thinking, "secret plan");
+  assert.equal(whole.inThink, false);
+
+  const split = "Hello <thi" + "nk>secret</thi" + "nk> there.";
+  const joined = stripThinking(split);
+  assert.equal(joined.answer, "Hello there.");
+  assert.equal(joined.thinking, "secret");
+  assert.equal(stripThinking("Hello <thi").answer, "Hello");
+  assert.equal(stripThinking("Hello <thi").inThink, false);
+
+  const open = stripThinking("Before <think>still going");
+  assert.equal(open.answer, "Before");
+  assert.equal(open.thinking, "still going");
+  assert.equal(open.inThink, true);
+
+  const onlyReasoning = parseSseBlock(
     'data: {"choices":[{"delta":{"reasoning_content":"The window is east.","content":""}}]}',
   );
-  assert.equal(piece.text, "");
-  assert.equal(visibleReply(piece.text, piece.reasoning), "The window is east.");
+  const hidden = visibleReply(onlyReasoning.text, onlyReasoning.reasoning);
+  assert.equal(hidden.answer, "");
+  assert.equal(hidden.thinking, "The window is east.");
   const answered = parseSseBlock(
     'data: {"choices":[{"delta":{"reasoning_content":"draft","content":"East window."}}]}',
   );
-  assert.equal(visibleReply(answered.text, answered.reasoning), "East window.");
+  assert.equal(visibleReply(answered.text, answered.reasoning).answer, "East window.");
 });
