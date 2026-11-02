@@ -23,13 +23,33 @@ def _yaml_string(value: str) -> str:
     return f'"{escaped}"'
 
 
+def _cost_per_token(upstream: str) -> tuple[str, str]:
+    """Off-peak cache-miss USD per token.
+
+    Source: https://api-docs.deepseek.com/quick_start/pricing/ checked 2026-10-29.
+    Flash is $0.15 / 1M input and $0.60 / 1M output. Pro is $0.66 and $1.98.
+    LiteLLM warns and hides per-message cost when model_info has no prices.
+    """
+    if upstream == PRO_MODEL:
+        return ("0.00000066", "0.00000198")
+    return ("0.00000015", "0.0000006")
+
+
 def _deepseek_entry(name: str, upstream: str) -> list[str]:
+    input_cost, output_cost = _cost_per_token(upstream)
     return [
         f"  - model_name: {name}",
         "    litellm_params:",
         f"      model: {_yaml_string(f'openai/{upstream}')}",
         f"      api_base: {_yaml_string(DEEPSEEK_API_BASE)}",
         "      api_key: os.environ/DEEPSEEK_API_KEY",
+        # DeepSeek can fill max_tokens with reasoning and leave content empty.
+        "      extra_body:",
+        "        thinking:",
+        '          type: "disabled"',
+        "    model_info:",
+        f"      input_cost_per_token: {input_cost}",
+        f"      output_cost_per_token: {output_cost}",
     ]
 
 

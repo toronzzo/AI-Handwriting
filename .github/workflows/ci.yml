@@ -91,6 +91,10 @@ jobs:
           bash -n bakugan-buddy/brain-server/start.sh
           bash -n bakugan-buddy/brain-server/use-model.sh
           bash -n bakugan-buddy/brain-server/lib/ensure-drive.sh
+          bash -c 'source bakugan-buddy/brain-server/lib/ensure-drive.sh
+            test "$(canonical_data_dir /Volumes/Agent/BakuganBuddy)" = /Volumes/Agent/agent
+            test "$(canonical_data_dir /Volumes/Agent/agent)" = /Volumes/Agent/agent
+            test "$(canonical_data_dir /Volumes/Other/agent)" = /Volumes/Other/agent'
           bash -n bakugan-buddy/brain-server/lib/prebuilt-tools.sh
           bash -n bakugan-buddy/brain-server/setup-all.sh
           if grep -nE '^[[:space:]]*brew install' bakugan-buddy/brain-server/*.sh bakugan-buddy/brain-server/lib/*.sh; then

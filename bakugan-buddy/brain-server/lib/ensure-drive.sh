@@ -2,8 +2,45 @@
 # Refuse to use the internal disk. BAKUGAN_DATA_DIR must be a mounted /Volumes path.
 # Default data root: the APFS volume Agent. Override with BAKUGAN_DATA_DIR.
 # Exits if Agent is not mounted and no override was set.
+# One folder for models, secrets, and the gateway. An older brain.env used
+# /Volumes/Agent/BakuganBuddy while agent-drive installs into /Volumes/Agent/agent.
+canonical_data_dir() {
+  local dir="${1%/}"
+  case "$dir" in
+    /Volumes/Agent/BakuganBuddy) printf '%s\n' /Volumes/Agent/agent ;;
+    *) printf '%s\n' "$dir" ;;
+  esac
+}
+
+apply_canonical_data_dir() {
+  local env_file="${1:-}"
+  local next=""
+  if [[ -n "${BAKUGAN_DATA_DIR:-}" ]]; then
+    next="$(canonical_data_dir "$BAKUGAN_DATA_DIR")"
+    if [[ "$next" != "$BAKUGAN_DATA_DIR" ]]; then
+      echo "Data root was $BAKUGAN_DATA_DIR."
+      echo "Using $next for models, secrets/.env, and the gateway venv."
+      BAKUGAN_DATA_DIR="$next"
+    fi
+  fi
+  export BAKUGAN_DATA_DIR
+  if [[ -n "${AGENT_DRIVE_ROOT:-}" ]]; then
+    AGENT_DRIVE_ROOT="$(canonical_data_dir "$AGENT_DRIVE_ROOT")"
+  else
+    AGENT_DRIVE_ROOT="${BAKUGAN_DATA_DIR:-}"
+  fi
+  export AGENT_DRIVE_ROOT
+  if [[ -n "$env_file" && -f "$env_file" && -n "${BAKUGAN_DATA_DIR:-}" ]]; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -v v="$BAKUGAN_DATA_DIR" 'BEGIN{done=0} index($0, "BAKUGAN_DATA_DIR=")==1 {print "BAKUGAN_DATA_DIR=" v; done=1; next} {print} END{if(!done) print "BAKUGAN_DATA_DIR=" v}' "$env_file" >"$tmp"
+    mv "$tmp" "$env_file"
+  fi
+}
+
 resolve_bakugan_data_dir() {
   if [[ -n "${BAKUGAN_DATA_DIR:-}" ]]; then
+    apply_canonical_data_dir
     return 0
   fi
   if mount | grep -F " on /Volumes/Agent " >/dev/null 2>&1; then

@@ -15,6 +15,7 @@ set -a
 # shellcheck disable=SC1091
 source "$ROOT/brain.env"
 set +a
+apply_canonical_data_dir "$ROOT/brain.env"
 ensure_bakugan_drive
 
 # shellcheck source=lib/prebuilt-tools.sh
@@ -134,14 +135,14 @@ if command -v dns-sd >/dev/null 2>&1; then
 fi
 
 GATEWAY_PID=""
-SECRETS="$BAKUGAN_DATA_DIR/secrets/.env"
+SECRETS="$AGENT_DRIVE_ROOT/secrets/.env"
 GW_DIR="$(cd "$ROOT/../../tools/agent-drive" && pwd)"
-if [[ -x "$BAKUGAN_DATA_DIR/venv/bin/litellm" && -f "$SECRETS" ]] && grep -Eq '^DEEPSEEK_API_KEY=.+' "$SECRETS" && ! grep -Eq '^DEEPSEEK_API_KEY=(changeme)?$' "$SECRETS"; then
-  AGENT_DRIVE_ROOT="$BAKUGAN_DATA_DIR" "$GW_DIR/gateway/start.sh" >>"$BAKUGAN_DATA_DIR/logs/gateway.out" 2>&1 &
+if [[ -x "$AGENT_DRIVE_ROOT/venv/bin/litellm" && -f "$SECRETS" ]] && grep -Eq '^DEEPSEEK_API_KEY=.+' "$SECRETS" && ! grep -Eq '^DEEPSEEK_API_KEY=(changeme)?$' "$SECRETS"; then
+  AGENT_DRIVE_ROOT="$AGENT_DRIVE_ROOT" "$GW_DIR/gateway/start.sh" >>"$AGENT_DRIVE_ROOT/logs/gateway.out" 2>&1 &
   GATEWAY_PID=$!
   echo "Paid model: gateway on http://127.0.0.1:4000 (DeepSeek flash)."
 else
-  echo "Paid model: off. Local brain only. Add DEEPSEEK_API_KEY to $BAKUGAN_DATA_DIR/secrets/.env to turn it on."
+  echo "Paid model: off. Local brain only. Add DEEPSEEK_API_KEY to $AGENT_DRIVE_ROOT/secrets/.env to turn it on."
 fi
 
 LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"

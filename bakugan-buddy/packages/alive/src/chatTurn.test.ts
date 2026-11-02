@@ -4,11 +4,13 @@ import {
   CHAT_MAX_TOKENS,
   HISTORY_TOKEN_BUDGET,
   chooseRoute,
+  completionExtras,
   deepseekIsPeak,
   estimatePaidCost,
   estimateTokens,
   paidButton,
   parseSseBlock,
+  visibleReply,
   partnerFromTurns,
   resolveChatBase,
   trimHistory,
@@ -89,4 +91,19 @@ test("sse usage is kept and text deltas join", () => {
   const piece = parseSseBlock(block);
   assert.equal(piece.text, "Hi there");
   assert.equal(piece.usage?.completion_tokens, 2);
+});
+
+test("a paid turn shows the answer when the model only filled reasoning", () => {
+  const extras = completionExtras("paid");
+  assert.equal(extras.max_tokens, 2048);
+  assert.deepEqual(extras.thinking, { type: "disabled" });
+  const piece = parseSseBlock(
+    'data: {"choices":[{"delta":{"reasoning_content":"The window is east.","content":""}}]}',
+  );
+  assert.equal(piece.text, "");
+  assert.equal(visibleReply(piece.text, piece.reasoning), "The window is east.");
+  const answered = parseSseBlock(
+    'data: {"choices":[{"delta":{"reasoning_content":"draft","content":"East window."}}]}',
+  );
+  assert.equal(visibleReply(answered.text, answered.reasoning), "East window.");
 });
