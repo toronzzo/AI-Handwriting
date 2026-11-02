@@ -29,6 +29,8 @@ import type { MicPhase } from "../../../../packages/alive/src/speech.ts";
 import { readBrainHost } from "../room/brain/brainLink";
 import { isWhisperHallucination, resetSpeech } from "../../../../packages/alive/src/speech.ts";
 import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../../../packages/alive/src/notes.ts";
+import { looksLikeTask, taskStatusLine, type TaskRecord } from "../../../../packages/alive/src/tasks.ts";
+import { confirmFor } from "../../../../packages/alive/src/confirm.ts";
 import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "../room/voice/VoiceSession";
 import { PreyasHero } from "./PreyasHero";
 
@@ -40,7 +42,8 @@ type ChatDialog =
   | { kind: "rename"; id: string; value: string }
   | { kind: "delete"; id: string; title: string }
   | { kind: "deleteNote"; id: string; text: string }
-  | { kind: "forget"; notes: Note[] };
+  | { kind: "forget"; notes: Note[] }
+  | { kind: "paid"; text: string };
 type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string };
 
 function toShown(rows: StoredRow[]): Shown[] {
@@ -136,6 +139,9 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [editing, setEditing] = useState<{ id: string; text: string; kind: NoteKind } | null>(null);
   const [chip, setChip] = useState("");
   const notesStamp = useRef(0);
+  const [task, setTask] = useState<TaskRecord | null>(null);
+  const [openSteps, setOpenSteps] = useState<Record<number, boolean>>({});
+  const taskPoll = useRef<ReturnType<typeof setInterval> | null>(null);
   const [pane, setPane] = useState<Pane>("companion");
   const [menu, setMenu] = useState(false);
   const [profile, setProfile] = useState(false);
@@ -401,6 +407,81 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     if (ok) setEditing(null);
   }
 
+  function watchTask(id: string) {
+    if (taskPoll.current) clearInterval(taskPoll.current);
+    taskPoll.current = setInterval(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`${bag.brainUrl}/v1/tasks/${encodeURIComponent(id)}`);
+          if (!res.ok) return;
+          const body = (await res.json()) as { task?: TaskRecord };
+          if (!body.task) return;
+          setTask(body.task);
+          if (body.task.status === "done" || body.task.status === "error") {
+            if (taskPoll.current) clearInterval(taskPoll.current);
+            taskPoll.current = null;
+          }
+        } catch {
+          /* the poll is best effort */
+        }
+      })();
+    }, 1200);
+  }
+
+  async function runTaskFlow(text: string) {
+    busy.current = true;
+    try {
+      await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+      await addLocal({
+        t: Date.now(),
+        role: "assistant",
+        content: "On it…",
+        who: "preyas",
+        model: "preyas",
+      });
+      const res = await fetch(`${bag.brainUrl}/v1/tasks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: text, chatId: activeIdRef.current || "" }),
+      });
+      if (!res.ok) throw new Error("task endpoint");
+      const body = (await res.json()) as { task?: TaskRecord };
+      if (!body.task) throw new Error("no task");
+      setTask(body.task);
+      setOpenSteps({});
+      watchTask(body.task.id);
+    } catch {
+      await addLocal({
+        t: Date.now(),
+        role: "assistant",
+        content: "I couldn't start that task. The brain may be offline.",
+        who: "preyas",
+        model: "preyas",
+      });
+    } finally {
+      busy.current = false;
+    }
+  }
+
+  async function resumeTask(id: string) {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/tasks/${encodeURIComponent(id)}/resume`, { method: "POST" });
+      if (!res.ok) return;
+      const body = (await res.json()) as { task?: TaskRecord };
+      if (!body.task) return;
+      setTask(body.task);
+      watchTask(body.task.id);
+    } catch {
+      /* stays paused */
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (taskPoll.current) clearInterval(taskPoll.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (!chip) return;
     const id = setTimeout(() => setChip(""), 4000);
@@ -587,6 +668,10 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       await handleForget(trimmed, command.query);
       return;
     }
+    if (!askPaid && looksLikeTask(trimmed)) {
+      await runTaskFlow(trimmed);
+      return;
+    }
     if (command?.kind === "recall") {
       const hits = await fetchNotes(command.query, 5);
       if (hits.length === 0) {
@@ -731,6 +816,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           title: "Rename chat",
           body: null as string | null,
           confirm: "Save",
+          no: "Cancel",
           danger: false,
           run: () => void saveRename(dialog.id, dialog.value),
         }
@@ -739,26 +825,45 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             title: "Are you sure?",
             body: `Delete "${dialog.title}"? This cannot be undone.`,
             confirm: "Delete",
+            no: "Cancel",
             danger: true,
             run: () => void removeChat(dialog.id),
           }
         : dialog.kind === "deleteNote"
-          ? {
-              title: "Are you sure?",
-              body: `Delete this note?\n\n${dialog.text}`,
-              confirm: "Delete",
-              danger: true,
-              run: () => void removeNote(dialog.id),
-            }
-          : {
-              title: "Forget these?",
-              body: `${dialog.notes.length} note${dialog.notes.length === 1 ? "" : "s"} will be deleted.\n\n${dialog.notes
-                .map((note) => `- ${note.text}`)
-                .join("\n")}`,
-              confirm: "Forget",
-              danger: true,
-              run: () => void forgetNotes(dialog.notes),
-            }
+          ? (() => {
+              const card = confirmFor({ kind: "delete_notes", count: 1 });
+              return {
+                title: card.title,
+                body: `Delete this note?\n\n${dialog.text}`,
+                confirm: card.yes,
+                no: card.no,
+                danger: card.danger,
+                run: () => void removeNote(dialog.id),
+              };
+            })()
+          : dialog.kind === "paid"
+            ? (() => {
+                const card = confirmFor({ kind: "paid", promptChars: dialog.text.length });
+                return {
+                  title: card.title,
+                  body: card.body,
+                  confirm: card.yes,
+                  no: card.no,
+                  danger: card.danger,
+                  run: () => void send(dialog.text, true),
+                };
+              })()
+            : (() => {
+                const card = confirmFor({ kind: "delete_notes", count: dialog.notes.length });
+                return {
+                  title: card.title,
+                  body: `${card.body}\n\n${dialog.notes.map((note) => `- ${note.text}`).join("\n")}`,
+                  confirm: card.yes,
+                  no: card.no,
+                  danger: card.danger,
+                  run: () => void forgetNotes(dialog.notes),
+                };
+              })()
     : null;
 
   const chatList = (withClose: boolean) => (
@@ -966,6 +1071,29 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 <Text style={styles.typing}>Preyas is thinking…</Text>
               ) : null}
               {note ? <Text style={styles.note}>{note}</Text> : null}
+              {task ? (
+                <View style={styles.taskCard}>
+                  <Text style={styles.taskStatus}>{taskStatusLine(task)}</Text>
+                  {task.steps.map((step) => (
+                    <View key={step.id} style={styles.stepRow}>
+                      <Pressable onPress={() => setOpenSteps((open) => ({ ...open, [step.id]: !open[step.id] }))}>
+                        <Text style={styles.stepTitle}>
+                          {step.status === "done" ? "✓" : step.status === "running" ? "…" : step.status === "error" ? "!" : "•"}{" "}
+                          {step.id}. {step.text}
+                        </Text>
+                      </Pressable>
+                      {openSteps[step.id] && step.result ? (
+                        <Text style={styles.stepResult}>{step.result}</Text>
+                      ) : null}
+                    </View>
+                  ))}
+                  {task.status === "paused" || task.status === "error" ? (
+                    <Pressable style={styles.resumeBtn} onPress={() => void resumeTask(task.id)}>
+                      <Text style={styles.resumeText}>Resume</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
             </ScrollView>
               {jumpVisible ? (
                 <View style={styles.jumpWrap} pointerEvents="box-none">
@@ -1023,7 +1151,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 style={[styles.chip, (!button.enabled || !lastUser) && styles.chipOff, hintPaid && button.enabled && styles.chipHint]}
                 disabled={!button.enabled || !lastUser}
                 onPress={() => {
-                  if (lastUser) void send(lastUser.content, true);
+                  if (lastUser) setDialog({ kind: "paid", text: lastUser.content });
                 }}
               >
                 <Text style={styles.chipText}>{button.enabled ? "Ask a paid model" : button.reason}</Text>
@@ -1144,7 +1272,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             )}
             <View style={styles.modalRow}>
               <Pressable onPress={() => setDialog(null)}>
-                <Text style={styles.modalCancel}>Cancel</Text>
+                <Text style={styles.modalCancel}>{confirmDialog.no}</Text>
               </Pressable>
               <Pressable onPress={confirmDialog.run}>
                 <Text style={[styles.modalOk, confirmDialog.danger && styles.modalDanger]}>
@@ -1264,6 +1392,13 @@ const styles = StyleSheet.create({
   noteMain: { flex: 1, minWidth: 0 },
   noteKind: { color: aqua, fontSize: 10, letterSpacing: 1 },
   noteText: { color: "#e7f3f7", fontSize: 13, lineHeight: 18, marginTop: 2 },
+  taskCard: { borderWidth: 1, borderColor: "rgba(126,212,234,0.3)", borderRadius: 12, backgroundColor: "#0c141c", padding: 10, gap: 6, marginTop: 6 },
+  taskStatus: { color: aqua, fontSize: 12, fontWeight: "700" },
+  stepRow: { gap: 2 },
+  stepTitle: { color: "#d5eef5", fontSize: 13 },
+  stepResult: { color: "#9fb3bd", fontSize: 12, lineHeight: 17, marginLeft: 14 },
+  resumeBtn: { alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(126,212,234,0.5)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, marginTop: 2 },
+  resumeText: { color: aqua, fontSize: 12, fontWeight: "700" },
   drawerBtn: { paddingHorizontal: 4, paddingVertical: 2 },
   drawerBtnText: { color: aqua, fontSize: 20 },
   drawerWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 20, flexDirection: "row" },

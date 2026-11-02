@@ -16,6 +16,8 @@ import { clipTooShort, isWhisperHallucination } from "../packages/alive/src/spee
 import { notesContext, queryForRetrieval } from "../packages/alive/src/notes.ts";
 import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
 import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
+import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./lib/tasks.mjs";
+import { planTask, runTask } from "./lib/taskRunner.mjs";
 import os from "node:os";
 
 const llamaUrl = (process.env.LLAMA_URL || "http://127.0.0.1:8790").replace(/\/$/, "");
@@ -137,6 +139,17 @@ async function extractNotesForChat(chatId) {
   }
 }
 
+/** Plan a task, save it, then run it in the background. */
+async function startTask(title, chatId) {
+  const seed = searchNotes(dataDir, title, 4)
+    .map((note) => `- ${note.text}`)
+    .join("\n");
+  const steps = await planTask(llamaUrl, title, seed);
+  const task = newTask(dataDir, { title, chatId, steps });
+  void runTask(dataDir, task, { llamaUrl }).catch(() => {});
+  return task;
+}
+
 const server = http.createServer(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") {
@@ -248,6 +261,82 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(204);
       res.end();
       return;
+    }
+
+    if (url.pathname === "/v1/tasks") {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      if (req.method === "GET") {
+        const active = url.searchParams.get("active") === "1";
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ tasks: listTasks(dataDir, { active }) }));
+        return;
+      }
+      if (req.method === "POST") {
+        const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        const title = String(body.title || "").trim().slice(0, 300);
+        if (!title) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "task title is empty" }));
+          return;
+        }
+        try {
+          const task = await startTask(title, String(body.chatId || ""));
+          res.writeHead(201, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ task }));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: `could not plan the task: ${message}` }));
+        }
+        return;
+      }
+    }
+
+    const taskRoute = url.pathname.match(/^\/v1\/tasks\/([^/]+)(\/resume)?$/);
+    if (taskRoute) {
+      if (!dataDir) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "drive missing" }));
+        return;
+      }
+      const id = decodeURIComponent(taskRoute[1]);
+      const resuming = Boolean(taskRoute[2]);
+      try {
+        const task = loadTask(dataDir, id);
+        if (!task) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "task not found" }));
+          return;
+        }
+        if (resuming && req.method === "POST") {
+          if (task.status !== "done") {
+            for (const step of task.steps) {
+              if (step.status === "running" || step.status === "error") step.status = "pending";
+            }
+            task.status = "planned";
+            task.updated = Date.now();
+            saveTask(dataDir, task);
+            void runTask(dataDir, task, { llamaUrl }).catch(() => {});
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ task }));
+          return;
+        }
+        if (!resuming && req.method === "GET") {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ task }));
+          return;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: message }));
+        return;
+      }
     }
 
     if (url.pathname === "/v1/notes") {
@@ -502,6 +591,14 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ error: message }));
   }
 });
+
+if (dataDir) {
+  try {
+    pauseInterrupted(dataDir);
+  } catch {
+    /* tasks are resumable, not critical */
+  }
+}
 
 server.listen(port, host, () => {
   process.stdout.write(`brain proxy ${host}:${port} -> ${llamaUrl}\n`);
