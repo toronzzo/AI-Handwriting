@@ -17,6 +17,8 @@ import { notesContext, queryForRetrieval } from "../packages/alive/src/notes.ts"
 import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
 import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
+import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
+import { answerFromDocument, keyPointsFrom, summarizeDocument } from "./lib/docSummary.mjs";
 import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./lib/tasks.mjs";
 import { launchTaskRun, planTask, taskRunActive } from "./lib/taskRunner.mjs";
 import os from "node:os";
@@ -237,6 +239,13 @@ async function startTask(title, chatId) {
   return task;
 }
 
+/** Summaries in flight, so the UI can poll progress. */
+const docJobs = new Map();
+
+function docJobKey(name) {
+  return String(name).toLowerCase();
+}
+
 const server = http.createServer(async (req, res) => {
   cors(res);
   if (req.method === "OPTIONS") {
@@ -348,6 +357,141 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(204);
       res.end();
       return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/documents") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          inbox: INBOX_PATH,
+          documents: listDocuments(INBOX_PATH),
+          jobs: [...docJobs.values()].map((job) => ({ name: job.name, done: job.done, total: job.total, status: job.status })),
+        }),
+      );
+      return;
+    }
+
+    const docRoute = url.pathname.match(/^\/v1\/documents\/([^/]+)\/(text|summarize|ask|notes|summary)$/);
+    if (docRoute) {
+      let name;
+      try {
+        name = safeDocumentName(decodeURIComponent(docRoute[1]));
+      } catch (error) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        return;
+      }
+      const action = docRoute[2];
+
+      if (action === "text" && req.method === "GET") {
+        try {
+          const book = await readDocumentText(name);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ name, preview: book.text.slice(0, 6000), length: book.text.length, cached: book.cached }));
+        } catch (error) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        }
+        return;
+      }
+
+      if (action === "summary" && req.method === "GET") {
+        const job = docJobs.get(docJobKey(name));
+        if (!job) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "no summary for this document yet" }));
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: job.status === "done",
+            name,
+            status: job.status,
+            done: job.done,
+            total: job.total,
+            summary: job.summary,
+            points: job.points,
+            error: job.error,
+          }),
+        );
+        return;
+      }
+
+      if (action === "ask" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        const question = String(body.question || "").trim();
+        if (!question) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "question is required" }));
+          return;
+        }
+        try {
+          const book = await readDocumentText(name);
+          const answer = await answerFromDocument(book.text, question, { llamaUrl });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, name, question, answer }));
+        } catch (error) {
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+        }
+        return;
+      }
+
+      if (action === "summarize" && req.method === "POST") {
+        const key = docJobKey(name);
+        const running = docJobs.get(key);
+        if (running && running.status === "running") {
+          res.writeHead(202, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, running: true, ...running }));
+          return;
+        }
+        const job = { name, done: 0, total: 0, status: "running", started: Date.now() };
+        docJobs.set(key, job);
+        void (async () => {
+          try {
+            const book = await readDocumentText(name);
+            const summary = await summarizeDocument(book.text, {
+              llamaUrl,
+              onProgress: (done, total) => {
+                job.done = done;
+                job.total = total;
+              },
+            });
+            job.status = "done";
+            job.summary = summary;
+            job.points = keyPointsFrom(summary);
+          } catch (error) {
+            job.status = "error";
+            job.error = error instanceof Error ? error.message : String(error);
+          }
+        })();
+        res.writeHead(202, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, running: true, name, done: 0, total: 0, status: "running" }));
+        return;
+      }
+
+      if (action === "notes" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+        const points = Array.isArray(body.points) ? body.points : [];
+        if (!dataDir) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "drive missing" }));
+          return;
+        }
+        let saved = 0;
+        for (const point of points.slice(0, 10)) {
+          const added = addNote(dataDir, {
+            text: String(point?.text || ""),
+            kind: String(point?.kind || "fact"),
+            sourceChatId: String(body.chatId || ""),
+          });
+          if (added.note && !added.duplicate) saved += 1;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, saved }));
+        return;
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/v1/search") {
