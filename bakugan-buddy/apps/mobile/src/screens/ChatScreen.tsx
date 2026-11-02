@@ -1972,6 +1972,8 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 ref={logRef}
                 style={styles.log}
                 contentContainerStyle={styles.logInner}
+                horizontal={false}
+                showsHorizontalScrollIndicator={false}
                 onScroll={onLogScroll}
                 scrollEventThrottle={16}
                 onContentSizeChange={() => {
@@ -2136,9 +2138,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 >
                   <Text style={styles.micText}>{phase}</Text>
                 </Pressable>
-              ) : (
-                <Text style={styles.voiceHint}>Voice works on the Mac; type here</Text>
-              )}
+              ) : null}
               <Pressable
                 style={styles.send}
                 onPress={submitDraft}
@@ -2146,6 +2146,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 <Text style={styles.sendText}>➤</Text>
               </Pressable>
             </View>
+            {!micOk ? <Text style={styles.voiceHint}>Voice works on the Mac; type here</Text> : null}
             <View style={styles.chips}>
               {QUICK.map((chip) => (
                 <Pressable key={chip.label} style={styles.chip} onPress={() => void send(chip.prompt, false)}>
@@ -2582,10 +2583,13 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: "#070b12",
+    // Belt and braces: no child may widen the page, so it never scrolls sideways.
+    overflow: "hidden",
+    maxWidth: "100%",
     paddingTop: "env(safe-area-inset-top)" as unknown as number,
     paddingBottom: "env(safe-area-inset-bottom)" as unknown as number,
   },
-  voiceHint: { color: "#8aa0ab", fontSize: 11, maxWidth: 110 },
+  voiceHint: { color: "#8aa0ab", fontSize: 11, marginTop: 6, textAlign: "center", width: "100%" },
   pairInput: { fontSize: 24, letterSpacing: 6, textAlign: "center" },
   nav: {
     flexDirection: "row",
@@ -2622,7 +2626,7 @@ const styles = StyleSheet.create({
     minWidth: 120,
   },
   menuItem: { color: "#e8f7fb", paddingVertical: 6 },
-  split: { flex: 1, flexDirection: "row", padding: 16, gap: 16 },
+  split: { flex: 1, flexDirection: "row", padding: 16, gap: 16, minWidth: 0, maxWidth: "100%" },
   stack: { flexDirection: "column" },
   left: { flex: 1, gap: 8 },
   leftShort: { flexGrow: 0 },
@@ -2640,7 +2644,7 @@ const styles = StyleSheet.create({
   caption: { color: "#8aa0ab", fontSize: 12, marginTop: 6 },
   profileBtn: { marginTop: 8, alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(126,212,234,0.4)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   profileText: { color: aqua, fontWeight: "700" },
-  chatCard: { flex: 1.2, flexDirection: "row", gap: 12, borderWidth: 1, borderColor: "rgba(126,212,234,0.22)", borderRadius: 18, backgroundColor: "#0b1218", padding: 12, minHeight: 320 },
+  chatCard: { flex: 1.2, flexDirection: "row", gap: 12, borderWidth: 1, borderColor: "rgba(126,212,234,0.22)", borderRadius: 18, backgroundColor: "#0b1218", padding: 12, minHeight: 320, minWidth: 0, maxWidth: "100%" },
   thread: { flex: 1, minWidth: 0 },
   sidebar: { width: 210, borderRightWidth: 1, borderRightColor: "rgba(126,212,234,0.16)", paddingRight: 10 },
   sidebarInner: { flex: 1, gap: 8 },
@@ -2713,7 +2717,7 @@ const styles = StyleSheet.create({
   dotOff: { backgroundColor: "#5c6a72" },
   online: { color: "#c5d4db", fontSize: 12 },
   miniBall: { width: 28, height: 28, borderRadius: 14, backgroundColor: "#1a3c4a", borderWidth: 1, borderColor: aqua },
-  log: { flex: 1 },
+  log: { flex: 1, width: "100%" },
   logWrap: { flex: 1, position: "relative" },
   jumpWrap: { position: "absolute", left: 0, right: 0, bottom: 6, alignItems: "center" },
   jump: {
@@ -2725,15 +2729,17 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   jumpText: { color: aqua, fontSize: 12, fontWeight: "700" },
-  logInner: { gap: 10, paddingVertical: 8 },
-  bubbleWrap: { flexDirection: "row", alignItems: "flex-end", gap: 8, maxWidth: "92%" },
+  logInner: { gap: 10, paddingVertical: 8, width: "100%" },
+  // A bubble is capped by the screen, never by a pixel width: 420px overflowed a
+  // 390px phone. flexShrink lets the row give way instead of pushing sideways.
+  bubbleWrap: { flexDirection: "row", alignItems: "flex-end", gap: 8, maxWidth: "82%", flexShrink: 1 },
   bubbleLeft: { alignSelf: "flex-start" },
   bubbleRight: { alignSelf: "flex-end" },
-  bubble: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, maxWidth: 420 },
+  bubble: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, maxWidth: "100%", flexShrink: 1 },
   bubbleHis: { backgroundColor: "#121a22", borderWidth: 1, borderColor: "rgba(126,212,234,0.18)" },
   bubbleMine: { backgroundColor: "#143246" },
   bubbleWho: { color: aqua, fontSize: 11, fontWeight: "700", marginBottom: 2 },
-  bubbleText: { color: "#e7f3f7", fontSize: 15, lineHeight: 21 },
+  bubbleText: { color: "#e7f3f7", fontSize: 15, lineHeight: 21, flexShrink: 1 },
   time: { color: "#7e909a", fontSize: 11, marginTop: 4, textAlign: "right" },
   typing: { color: aqua, fontSize: 13, marginTop: 4 },
   sources: { marginTop: 6, gap: 2 },
@@ -2777,8 +2783,8 @@ const styles = StyleSheet.create({
   chipOff: { opacity: 0.45 },
   chipHint: { backgroundColor: "rgba(126,212,234,0.15)" },
   chipText: { color: "#d5eef5", fontSize: 12 },
-  footerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8, gap: 8 },
-  footer: { color: "#8aa0ab", fontSize: 12 },
+  footerRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", marginTop: 8, gap: 8 },
+  footer: { color: "#8aa0ab", fontSize: 12, flexShrink: 1 },
   switchRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   switchLabel: { color: "#8aa0ab", fontSize: 11 },
   fill: { flex: 1 },
