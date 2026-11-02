@@ -33,6 +33,7 @@ import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../..
 import { looksLikeTask, taskStatusLine, type TaskRecord } from "../../../../packages/alive/src/tasks.ts";
 import { confirmFor } from "../../../../packages/alive/src/confirm.ts";
 import { matchDocuments, parseDocumentRequest } from "../../../../packages/alive/src/documents.ts";
+import { formatDue, parseReminder, type Reminder } from "../../../../packages/alive/src/reminders.ts";
 import {
   needsWebSearch,
   searchQueryFrom,
@@ -49,6 +50,7 @@ type Shown = ChatMessage & {
   document?: { name: string; summary?: string; points?: { text: string; kind: NoteKind }[] };
 };
 type InboxFile = { name: string; size: number; type: string; modified: number };
+type PendingReminder = { text: string; dueAt: string; repeat: "none" | "daily" | "weekly" | "weekdays"; label: string };
 type PartnerCard = { turns: number; level: number; bond: number; caption: string };
 type Pane = "companion" | "activity" | "collection";
 type ChatMeta = { id: string; title: string; created: number; updated: number };
@@ -57,7 +59,9 @@ type ChatDialog =
   | { kind: "delete"; id: string; title: string }
   | { kind: "deleteNote"; id: string; text: string }
   | { kind: "forget"; notes: Note[] }
-  | { kind: "paid"; text: string };
+  | { kind: "paid"; text: string }
+  | { kind: "deleteReminders"; reminders: Reminder[] }
+  | { kind: "remind"; pending: PendingReminder };
 type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string };
 
 function toShown(rows: StoredRow[]): Shown[] {
@@ -162,6 +166,9 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [docBusy, setDocBusy] = useState("");
   const [docProgress, setDocProgress] = useState("");
   const [docChoice, setDocChoice] = useState<{ name: string; matches: string[] } | null>(null);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [remindersOpen, setRemindersOpen] = useState(false);
+  const [pendingReminder, setPendingReminder] = useState<PendingReminder | null>(null);
   const [searchNote, setSearchNote] = useState("");
   const [openSteps, setOpenSteps] = useState<Record<number, boolean>>({});
   const taskPoll = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -429,6 +436,117 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     if (!editing) return;
     const ok = await patchNote(editing.id, editing.text, editing.kind);
     if (ok) setEditing(null);
+  }
+
+  async function refreshReminders() {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/reminders`);
+      if (!res.ok) return [];
+      const body = (await res.json()) as { reminders?: Reminder[] };
+      const rows = Array.isArray(body.reminders) ? body.reminders : [];
+      setReminders(rows);
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+
+  /** Save a reminder the user just confirmed. */
+  async function saveReminder(pending: PendingReminder, chatId: string | null) {
+    try {
+      const res = await fetch(`${bag.brainUrl}/v1/reminders`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: pending.text, dueAt: pending.dueAt, repeat: pending.repeat, chatId: chatId || "" }),
+      });
+      if (!res.ok) throw new Error("could not save the reminder");
+      setChip(`Reminder set for ${pending.label}`);
+      void refreshReminders();
+    } catch {
+      setChip("Could not save the reminder");
+    }
+  }
+
+  async function updateReminder(id: string, patch: Record<string, unknown>) {
+    try {
+      await fetch(`${bag.brainUrl}/v1/reminders/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      void refreshReminders();
+    } catch {
+      setChip("Could not update the reminder");
+    }
+  }
+
+  /** "remind me …" → confirm card; "what are my reminders"; "cancel the X reminder". */
+  async function handleReminderCommand(text: string, chatId: string | null): Promise<boolean> {
+    const lower = text.trim().toLowerCase();
+    if (/^what are my reminders\b|^my reminders\b/.test(lower)) {
+      const rows = reminders.length ? reminders : await refreshReminders();
+      const upcoming = rows
+        .filter((row) => row.status === "pending" || row.status === "snoozed")
+        .sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime())
+        .slice(0, 6);
+      await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+      await addLocal({
+        t: Date.now(),
+        role: "assistant",
+        content: upcoming.length
+          ? upcoming.map((row) => `• ${formatDue(new Date(row.dueAt))}: ${row.text}`).join("\n")
+          : "You have no reminders yet.",
+        who: "preyas",
+        model: "preyas",
+      });
+      return true;
+    }
+    const cancel = lower.match(/^cancel(?:\s+the)?\s+(.+?)(?:\s+reminder)?$/i);
+    if (cancel) {
+      const target = (cancel[1] || "").trim();
+      const rows = await refreshReminders();
+      const hits = rows.filter(
+        (row) => row.text.toLowerCase().includes(target.toLowerCase()) && row.status !== "done",
+      );
+      if (!hits.length) {
+        await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+        await addLocal({
+          t: Date.now(),
+          role: "assistant",
+          content: `I don't have a pending reminder about "${target}".`,
+          who: "preyas",
+          model: "preyas",
+        });
+        return true;
+      }
+      setDialog({ kind: "deleteReminders", reminders: hits });
+      return true;
+    }
+    const parsed = parseReminder(text);
+    if (parsed.ok) {
+      const pending = {
+        text: parsed.text,
+        dueAt: parsed.dueAt.toISOString(),
+        repeat: parsed.repeat,
+        label: parsed.label,
+      };
+      setPendingReminder(pending);
+      setDialog({ kind: "remind", pending });
+      return true;
+    }
+    if (parsed.reason === "no-time" && /^\s*(?:please\s+)?remind\b/i.test(text)) {
+      await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+      await addLocal({
+        t: Date.now(),
+        role: "assistant",
+        content: "When should I remind you? Say a time, like \"tomorrow at 9\" or \"in 2 hours\".",
+        who: "preyas",
+        model: "preyas",
+      });
+      return true;
+    }
+    void chatId;
+    return false;
   }
 
   async function refreshInbox() {
@@ -863,6 +981,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       const handled = await handleDocumentRequest(docRequest, trimmed, chatId);
       if (handled) return;
     }
+    if (!askPaid && (await handleReminderCommand(trimmed, chatId))) return;
     const command = parseNoteCommand(trimmed);
     if (command?.kind === "remember") {
       await handleRemember(trimmed, command.text);
@@ -1037,8 +1156,45 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     setDrawerOpen(false);
   }
 
+  const nextReminder = pendingReminder;
   const confirmDialog = dialog
-    ? dialog.kind === "rename"
+    ? dialog.kind === "remind"
+      ? {
+          title: `Remind you ${dialog.pending.label}: ${dialog.pending.text}?`,
+          body: null as string | null,
+          confirm: "Yes",
+          no: "Change",
+          danger: false,
+          run: () => {
+            const pending = dialog.pending;
+            setDialog(null);
+            setPendingReminder(null);
+            void saveReminder(pending, activeIdRef.current);
+            void addLocal({
+              t: Date.now(),
+              role: "assistant",
+              content: `Reminder set for ${pending.label}.`,
+              who: "preyas",
+              model: "preyas",
+            });
+          },
+        }
+      : dialog.kind === "deleteReminders"
+        ? {
+            title: `Cancel ${dialog.reminders.length} reminder${dialog.reminders.length === 1 ? "" : "s"}?`,
+            body: dialog.reminders.map((row) => `- ${row.text}`).join("\n"),
+            confirm: "Yes",
+            no: "No",
+            danger: true,
+            run: () => {
+              for (const row of dialog.reminders) {
+                void fetch(`${bag.brainUrl}/v1/reminders/${encodeURIComponent(row.id)}`, { method: "DELETE" });
+              }
+              setDialog(null);
+              void refreshReminders();
+            },
+          }
+        : dialog.kind === "rename"
       ? {
           title: "Rename chat",
           body: null as string | null,
@@ -1117,6 +1273,16 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             }}
           >
             <Text style={styles.notesBtnText}>Docs</Text>
+          </Pressable>
+          <Pressable
+            style={styles.notesBtn}
+            onPress={() => {
+              setRemindersOpen(true);
+              setDrawerOpen(false);
+              void refreshReminders();
+            }}
+          >
+            <Text style={styles.notesBtnText}>Reminders</Text>
           </Pressable>
           {withClose ? (
             <Pressable onPress={() => setDrawerOpen(false)} hitSlop={8}>
@@ -1439,6 +1605,56 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         <View style={styles.drawerWrap}>
           <Pressable style={styles.scrim} onPress={() => setDrawerOpen(false)} />
           <View style={styles.drawer}>{chatList(true)}</View>
+        </View>
+      ) : null}
+
+      {remindersOpen ? (
+        <View style={styles.notesWrap}>
+          <Pressable style={styles.scrim} onPress={() => setRemindersOpen(false)} />
+          <View style={styles.notesPanel}>
+            <View style={styles.notesHead}>
+              <Text style={styles.sidebarTitle}>REMINDERS</Text>
+              <Pressable onPress={() => setRemindersOpen(false)} hitSlop={8}>
+                <Text style={styles.sidebarClose}>✕</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.docHint}>Say "remind me tomorrow at 9 to call the vet".</Text>
+            <ScrollView style={styles.notesScroll} contentContainerStyle={styles.notesList}>
+              {reminders
+                .filter((row) => row.status !== "done")
+                .map((row) => (
+                  <View key={row.id} style={styles.noteRow}>
+                    <View style={styles.noteMain}>
+                      <Text style={styles.noteKind}>
+                        {formatDue(new Date(row.dueAt))}
+                        {row.repeat !== "none" ? ` · ${row.repeat}` : ""}
+                      </Text>
+                      <Text style={styles.noteText}>{row.text}</Text>
+                    </View>
+                    <Pressable style={styles.docBtn} onPress={() => void updateReminder(row.id, { action: "done" })}>
+                      <Text style={styles.docBtnText}>Done</Text>
+                    </Pressable>
+                    <Pressable style={styles.docBtn} onPress={() => void updateReminder(row.id, { action: "snooze", snooze: "10m" })}>
+                      <Text style={styles.docBtnText}>+10m</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              {reminders.filter((row) => row.status !== "done").length === 0 ? (
+                <Text style={styles.chatEmpty}>Nothing scheduled.</Text>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      ) : null}
+
+      {nextReminder ? (
+        <View style={styles.reminderBanner}>
+          <Text style={styles.reminderBannerText}>
+            Reminder: {nextReminder.text} · {nextReminder.label}
+          </Text>
+          <Pressable onPress={() => setPendingReminder(null)}>
+            <Text style={styles.sidebarClose}>✕</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -1786,6 +2002,8 @@ const styles = StyleSheet.create({
   typing: { color: aqua, fontSize: 13, marginTop: 4 },
   sources: { marginTop: 6, gap: 2 },
   docHint: { color: "#8aa0ab", fontSize: 11, lineHeight: 16 },
+  reminderBanner: { position: "absolute", top: 56, left: 12, right: 12, zIndex: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderWidth: 1, borderColor: "rgba(126,212,234,0.5)", backgroundColor: "#0f222c", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  reminderBannerText: { color: "#d5eef5", fontSize: 13, flex: 1 },
   docBtn: { borderWidth: 1, borderColor: "rgba(126,212,234,0.45)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
   docBtnText: { color: aqua, fontSize: 11, fontWeight: "700" },
   docChoice: { borderWidth: 1, borderColor: "rgba(126,212,234,0.3)", borderRadius: 10, padding: 8 },
