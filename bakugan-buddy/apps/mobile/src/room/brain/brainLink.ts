@@ -1,4 +1,21 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { brainUrlFor } from "../../../../../packages/alive/src/phone.ts";
+
+/**
+ * The brain lives on whatever host served the page: 127.0.0.1 on the Mac,
+ * 192.168.x.x on a phone. This is what makes one build work on both.
+ */
+export function currentBrainUrl(): string {
+  if (typeof window !== "undefined" && window.location?.hostname) {
+    return brainUrlFor({
+      hostname: window.location.hostname,
+      protocol: window.location.protocol,
+      port: window.location.port,
+      href: window.location.href,
+    });
+  }
+  return "http://127.0.0.1:8788";
+}
 
 const KEY = "bakugan-buddy.brain.host";
 
@@ -59,6 +76,7 @@ export async function findBrain(options: {
   const first = [
     options.saved || "",
     options.envUrl || "",
+    currentBrainUrl(),
     "http://127.0.0.1:8788",
     "http://127.0.0.1:4000",
   ];

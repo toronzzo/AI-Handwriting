@@ -27,7 +27,9 @@ import {
   type ChatMessage,
 } from "../../../../packages/alive/src/chatTurn.ts";
 import type { MicPhase } from "../../../../packages/alive/src/speech.ts";
-import { readBrainHost } from "../room/brain/brainLink";
+import { currentBrainUrl, readBrainHost } from "../room/brain/brainLink";
+import { brainFetch, isUnauthorized, pairWithCode } from "../room/brain/token";
+import { isValidPairingCode, microphoneAvailable, normalizePairingCode } from "../../../../packages/alive/src/phone.ts";
 import { isWhisperHallucination, resetSpeech } from "../../../../packages/alive/src/speech.ts";
 import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../../../packages/alive/src/notes.ts";
 import { looksLikeTask, taskStatusLine, type TaskRecord } from "../../../../packages/alive/src/tasks.ts";
@@ -175,6 +177,10 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [briefing, setBriefing] = useState<string>("");
+  const [needPair, setNeedPair] = useState(false);
+  const [pairCode, setPairCode] = useState("");
+  const [pairError, setPairError] = useState("");
+  const [phoneInfo, setPhoneInfo] = useState<{ lanIp: string; phoneUrl: string; pairingCode: string; devices: number } | null>(null);
   const [remindersOpen, setRemindersOpen] = useState(false);
   const [pendingReminder, setPendingReminder] = useState<PendingReminder | null>(null);
   const [searchNote, setSearchNote] = useState("");
@@ -183,8 +189,16 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [pane, setPane] = useState<Pane>("companion");
   const [menu, setMenu] = useState(false);
   const [profile, setProfile] = useState(false);
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const wide = width >= 900;
+  const micOk =
+    typeof window === "undefined" ||
+    microphoneAvailable({
+      protocol: window.location.protocol,
+      hostname: window.location.hostname,
+      isSecureContext: window.isSecureContext,
+    });
+  const phone = !wide && Math.min(width, height) < 600;
 
   const setActiveChat = (id: string | null) => {
     activeIdRef.current = id;
@@ -193,7 +207,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function loadChat(id: string, cancelled?: () => boolean): Promise<boolean> {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`);
+      const res = await brainFetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`);
       if (!res.ok) return false;
       const body = (await res.json()) as {
         chat?: ChatMeta;
@@ -226,7 +240,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function startChat(): Promise<ChatMeta | null> {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/chats`, {
+      const res = await brainFetch(`${bag.brainUrl}/v1/chats`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -251,7 +265,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function saveRename(id: string, title: string) {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`, {
+      const res = await brainFetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title }),
@@ -271,7 +285,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function removeChat(id: string) {
     try {
-      await fetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await brainFetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
     } catch {
       /* the row goes away locally either way */
     }
@@ -289,7 +303,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       const params = new URLSearchParams();
       if (query.trim()) params.set("q", query.trim());
       params.set("limit", String(limit));
-      const res = await fetch(`${bag.brainUrl}/v1/notes?${params.toString()}`);
+      const res = await brainFetch(`${bag.brainUrl}/v1/notes?${params.toString()}`);
       if (!res.ok) return [];
       const body = (await res.json()) as { notes?: Note[] };
       return Array.isArray(body.notes) ? body.notes : [];
@@ -327,7 +341,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function postNote(text: string, kind: NoteKind): Promise<Note | null> {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/notes`, {
+      const res = await brainFetch(`${bag.brainUrl}/v1/notes`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text, kind, sourceChatId: activeIdRef.current || "" }),
@@ -347,7 +361,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function patchNote(id: string, text: string, kind: NoteKind): Promise<boolean> {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/notes/${encodeURIComponent(id)}`, {
+      const res = await brainFetch(`${bag.brainUrl}/v1/notes/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text, kind }),
@@ -367,7 +381,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function removeNote(id: string) {
     try {
-      await fetch(`${bag.brainUrl}/v1/notes/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await brainFetch(`${bag.brainUrl}/v1/notes/${encodeURIComponent(id)}`, { method: "DELETE" });
     } catch {
       /* the row goes away locally either way */
     }
@@ -424,7 +438,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   async function forgetNotes(notes: Note[]) {
     for (const note of notes) {
       try {
-        await fetch(`${bag.brainUrl}/v1/notes/${encodeURIComponent(note.id)}`, { method: "DELETE" });
+        await brainFetch(`${bag.brainUrl}/v1/notes/${encodeURIComponent(note.id)}`, { method: "DELETE" });
       } catch {
         /* keep going: the rest still need forgetting */
       }
@@ -446,9 +460,25 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     if (ok) setEditing(null);
   }
 
+  async function submitPairing() {
+    if (!isValidPairingCode(pairCode)) {
+      setPairError("Six digits, please.");
+      return;
+    }
+    const result = await pairWithCode(bag.brainUrl, pairCode, "iPhone");
+    if (!result.ok) {
+      setPairError(result.error || "That code was not accepted.");
+      return;
+    }
+    setPairError("");
+    setNeedPair(false);
+    setPairCode("");
+    window.location.reload();
+  }
+
   async function refreshBriefing() {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/briefing/today`);
+      const res = await brainFetch(`${bag.brainUrl}/v1/briefing/today`);
       if (!res.ok) return "";
       const body = (await res.json()) as { text?: string | null };
       const text = body.text || "";
@@ -462,7 +492,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   async function runBriefingNow(chatId: string | null) {
     setChip("Building your briefing…");
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/briefing/run`, { method: "POST" });
+      const res = await brainFetch(`${bag.brainUrl}/v1/briefing/run`, { method: "POST" });
       const body = (await res.json()) as { ok?: boolean; text?: string; error?: string };
       if (!body.ok || !body.text) throw new Error(body.error || "no briefing");
       setBriefing(body.text);
@@ -485,7 +515,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function saveBriefingSettings(patch: { briefingTime?: string; briefingOn?: boolean }) {
     try {
-      await fetch(`${bag.brainUrl}/v1/briefing/settings`, {
+      await brainFetch(`${bag.brainUrl}/v1/briefing/settings`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(patch),
@@ -496,9 +526,21 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
   }
 
+  async function refreshPhone() {
+    try {
+      const res = await brainFetch(`${bag.brainUrl}/v1/phone`);
+      if (!res.ok) return null;
+      const body = (await res.json()) as { lanIp: string; phoneUrl: string; pairingCode: string; devices: number };
+      setPhoneInfo(body);
+      return body;
+    } catch {
+      return null;
+    }
+  }
+
   async function refreshHealth() {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/status`);
+      const res = await brainFetch(`${bag.brainUrl}/v1/status`);
       if (!res.ok) return null;
       const body = (await res.json()) as Health;
       setHealth(body);
@@ -510,7 +552,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function restartPreyas() {
     try {
-      await fetch(`${bag.brainUrl}/v1/restart`, { method: "POST" });
+      await brainFetch(`${bag.brainUrl}/v1/restart`, { method: "POST" });
       setChip("Restarting Preyas…");
     } catch {
       setChip("Could not restart");
@@ -519,7 +561,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function refreshReminders() {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/reminders`);
+      const res = await brainFetch(`${bag.brainUrl}/v1/reminders`);
       if (!res.ok) return [];
       const body = (await res.json()) as { reminders?: Reminder[] };
       const rows = Array.isArray(body.reminders) ? body.reminders : [];
@@ -533,7 +575,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   /** Save a reminder the user just confirmed. */
   async function saveReminder(pending: PendingReminder, chatId: string | null) {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/reminders`, {
+      const res = await brainFetch(`${bag.brainUrl}/v1/reminders`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: pending.text, dueAt: pending.dueAt, repeat: pending.repeat, chatId: chatId || "" }),
@@ -548,7 +590,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function updateReminder(id: string, patch: Record<string, unknown>) {
     try {
-      await fetch(`${bag.brainUrl}/v1/reminders/${encodeURIComponent(id)}`, {
+      await brainFetch(`${bag.brainUrl}/v1/reminders/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(patch),
@@ -677,7 +719,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function refreshInbox() {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/documents`);
+      const res = await brainFetch(`${bag.brainUrl}/v1/documents`);
       if (!res.ok) return [];
       const body = (await res.json()) as { inbox?: string; documents?: InboxFile[] };
       const files = Array.isArray(body.documents) ? body.documents : [];
@@ -696,7 +738,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     for (let attempt = 0; attempt < 160; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       try {
-        const res = await fetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/summary`);
+        const res = await brainFetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/summary`);
         if (!res.ok) continue;
         const body = (await res.json()) as {
           ok?: boolean;
@@ -723,7 +765,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     const query = searchQueryFrom(text) || text.trim();
     setSearching(true);
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/search?q=${encodeURIComponent(query)}`);
+      const res = await brainFetch(`${bag.brainUrl}/v1/search?q=${encodeURIComponent(query)}`);
       const body = (await res.json()) as { ok?: boolean; results?: SearchResult[]; error?: string };
       if (!body.ok || !body.results?.length) {
         setSearchNote(body.error ? `No web results (${body.error}).` : "No web results.");
@@ -744,7 +786,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     taskPoll.current = setInterval(() => {
       void (async () => {
         try {
-          const res = await fetch(`${bag.brainUrl}/v1/tasks/${encodeURIComponent(id)}`);
+          const res = await brainFetch(`${bag.brainUrl}/v1/tasks/${encodeURIComponent(id)}`);
           if (!res.ok) return;
           const body = (await res.json()) as { task?: TaskRecord };
           if (!body.task) return;
@@ -771,7 +813,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         who: "preyas",
         model: "preyas",
       });
-      const res = await fetch(`${bag.brainUrl}/v1/tasks`, {
+      const res = await brainFetch(`${bag.brainUrl}/v1/tasks`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title: text, chatId: activeIdRef.current || "" }),
@@ -825,7 +867,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     if (request.kind === "question") {
       setDocBusy(name);
       try {
-        const res = await fetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/ask`, {
+        const res = await brainFetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/ask`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ question: request.question }),
@@ -849,7 +891,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     setDocBusy(name);
     setDocProgress("");
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/summarize`, { method: "POST" });
+      const res = await brainFetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/summarize`, { method: "POST" });
       if (!res.ok) throw new Error("could not start the summary");
       const done = await waitForSummary(name);
       const reply: Shown = {
@@ -882,7 +924,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function saveKeyPoints(name: string, points: { text: string; kind: NoteKind }[]) {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/notes`, {
+      const res = await brainFetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/notes`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ points, chatId: activeIdRef.current || "" }),
@@ -897,7 +939,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
   async function resumeTask(id: string) {
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/tasks/${encodeURIComponent(id)}/resume`, { method: "POST" });
+      const res = await brainFetch(`${bag.brainUrl}/v1/tasks/${encodeURIComponent(id)}/resume`, { method: "POST" });
       if (!res.ok) return;
       const body = (await res.json()) as { task?: TaskRecord };
       if (!body.task) return;
@@ -924,13 +966,17 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     let cancel = false;
     void (async () => {
       const saved = await readBrainHost();
-      const brain = saved || "http://127.0.0.1:8788";
+      const brain = saved || currentBrainUrl();
       bag.brainUrl = brain.replace(/\/$/, "");
       const endpoint = await resolveChatBase(bag.brainUrl);
       if (cancel) return;
       setVia(endpoint.via);
       try {
-        const res = await fetch(`${bag.brainUrl}/v1/chats`);
+        const res = await brainFetch(`${bag.brainUrl}/v1/chats`);
+        if (isUnauthorized(res.status)) {
+          setNeedPair(true);
+          return;
+        }
         if (res.ok) {
           const body = (await res.json()) as { chats?: ChatMeta[] };
           let list = Array.isArray(body.chats) ? body.chats : [];
@@ -954,7 +1000,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         /* notes arrive with the next exchange */
       }
       try {
-        const res = await fetch(`${bag.brainUrl}/v1/paid`);
+        const res = await brainFetch(`${bag.brainUrl}/v1/paid`);
         if (res.ok) {
           const body = (await res.json()) as PaidInfo;
           if (!cancel) setPaid(body);
@@ -983,7 +1029,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     const ping = async () => {
       if (!bag.brainUrl) return;
       try {
-        const res = await fetch(`${bag.brainUrl}/v1/health`);
+        const res = await brainFetch(`${bag.brainUrl}/v1/health`);
         const body = (await res.json()) as { ok?: boolean; service?: string };
         if (!cancel) setOnline(Boolean(res.ok && (body.ok || body.service === "bakugan-brain")));
       } catch {
@@ -1024,7 +1070,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   async function remember(entry: ChatMessage, chatId = activeIdRef.current) {
     if (!bag.brainUrl || !chatId) return;
     try {
-      const res = await fetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(chatId)}/messages`, {
+      const res = await brainFetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(chatId)}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(entry),
@@ -1351,7 +1397,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             danger: true,
             run: () => {
               for (const row of dialog.reminders) {
-                void fetch(`${bag.brainUrl}/v1/reminders/${encodeURIComponent(row.id)}`, { method: "DELETE" });
+                void brainFetch(`${bag.brainUrl}/v1/reminders/${encodeURIComponent(row.id)}`, { method: "DELETE" });
               }
               setDialog(null);
               void refreshReminders();
@@ -1560,9 +1606,31 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           ) : (
             <Text style={styles.dim}>Checking…</Text>
           )}
-          <Pressable style={styles.profileBtn} onPress={() => void refreshHealth()}>
+          <Pressable
+            style={styles.profileBtn}
+            onPress={() => {
+              void refreshHealth();
+              void refreshPhone();
+            }}
+          >
             <Text style={styles.profileText}>Refresh</Text>
           </Pressable>
+          <View style={styles.phoneCard}>
+            <Text style={styles.kicker}>OPEN ON IPHONE</Text>
+            {phoneInfo?.phoneUrl ? (
+              <>
+                <Text style={styles.phoneUrl} selectable>
+                  {phoneInfo.phoneUrl}
+                </Text>
+                <Text style={styles.dim}>
+                  Same Wi-Fi. First visit asks for this code: {phoneInfo.pairingCode}
+                </Text>
+                <Text style={styles.dim}>{phoneInfo.devices} paired device(s)</Text>
+              </>
+            ) : (
+              <Text style={styles.dim}>No Wi-Fi address yet; connect the Mac to a network.</Text>
+            )}
+          </View>
           <Pressable
             style={[styles.profileBtn, styles.restartBtn]}
             onPress={() => setDialog({ kind: "restart" })}
@@ -1786,14 +1854,18 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 onSubmitEditing={submitDraft}
               />
               <Pressable onPress={() => setDraft((value) => `${value}💧 `)}><Text style={styles.emoji}>☺</Text></Pressable>
-              <Pressable
-                style={styles.mic}
-                onPress={() => {
-                  if (bag.playing) interruptTalk(bag);
-                }}
-              >
-                <Text style={styles.micText}>{phase}</Text>
-              </Pressable>
+              {micOk ? (
+                <Pressable
+                  style={styles.mic}
+                  onPress={() => {
+                    if (bag.playing) interruptTalk(bag);
+                  }}
+                >
+                  <Text style={styles.micText}>{phase}</Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.voiceHint}>Voice works on the Mac; type here</Text>
+              )}
               <Pressable
                 style={styles.send}
                 onPress={submitDraft}
@@ -2063,6 +2135,37 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         </View>
       ) : null}
 
+      {needPair ? (
+        <View style={styles.modalWrap}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>Pair this phone</Text>
+            <Text style={styles.modalBody}>
+              Enter the 6-digit code shown on the Mac, under Status → Open on iPhone.
+            </Text>
+            <TextInput
+              value={pairCode}
+              onChangeText={(value) => {
+                const clean = normalizePairingCode(value);
+                setPairCode(clean);
+                setPairError("");
+                if (clean.length === 6) void submitPairing();
+              }}
+              placeholder="123456"
+              placeholderTextColor="#6d7c88"
+              keyboardType="number-pad"
+              maxLength={6}
+              style={[styles.modalInput, styles.pairInput]}
+            />
+            {pairError ? <Text style={styles.note}>{pairError}</Text> : null}
+            <View style={styles.modalRow}>
+              <Pressable onPress={() => void submitPairing()}>
+                <Text style={styles.modalOk}>Pair</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
       {profile ? (
         <View style={styles.sheet}>
           <Text style={styles.bigName}>PREYAS</Text>
@@ -2078,7 +2181,14 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
 
 const aqua = "#7ed4ea";
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#070b12" },
+  root: {
+    flex: 1,
+    backgroundColor: "#070b12",
+    paddingTop: "env(safe-area-inset-top)" as unknown as number,
+    paddingBottom: "env(safe-area-inset-bottom)" as unknown as number,
+  },
+  voiceHint: { color: "#8aa0ab", fontSize: 11, maxWidth: 110 },
+  pairInput: { fontSize: 24, letterSpacing: 6, textAlign: "center" },
   nav: {
     flexDirection: "row",
     alignItems: "center",
@@ -2160,7 +2270,7 @@ const styles = StyleSheet.create({
   chipSaved: { alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(61,222,138,0.5)", backgroundColor: "rgba(61,222,138,0.12)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 6 },
   chipSavedText: { color: "#8ff0bd", fontSize: 12, fontWeight: "700" },
   notesWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 25, flexDirection: "row", justifyContent: "flex-end" },
-  notesPanel: { width: 340, maxWidth: "88%", backgroundColor: "#0b1218", borderLeftWidth: 1, borderLeftColor: "rgba(126,212,234,0.3)", padding: 12, gap: 8 },
+  notesPanel: { width: 360, maxWidth: "100%", height: "100%", backgroundColor: "#0b1218", borderLeftWidth: 1, borderLeftColor: "rgba(126,212,234,0.3)", padding: 12, gap: 8 },
   notesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   notesScroll: { flex: 1 },
   notesList: { gap: 8, paddingBottom: 12 },
@@ -2239,6 +2349,8 @@ const styles = StyleSheet.create({
   healthLabel: { color: "#e7f3f7", fontSize: 14, width: 120 },
   healthDetail: { color: "#9aa8b2", fontSize: 12, flex: 1 },
   restartBtn: { borderColor: "rgba(255,138,138,0.5)", marginTop: 8 },
+  phoneCard: { marginVertical: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: "rgba(126,212,234,0.3)", backgroundColor: "#0c141c", gap: 6 },
+  phoneUrl: { color: aqua, fontSize: 16, fontWeight: "700" },
   reminderBanner: { position: "absolute", top: 56, left: 12, right: 12, zIndex: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderWidth: 1, borderColor: "rgba(126,212,234,0.5)", backgroundColor: "#0f222c", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
   reminderBannerText: { color: "#d5eef5", fontSize: 13, flex: 1 },
   docBtn: { borderWidth: 1, borderColor: "rgba(126,212,234,0.45)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
@@ -2251,11 +2363,11 @@ const styles = StyleSheet.create({
   thinkBody: { color: "#8aa0ab", fontSize: 12, marginTop: 4 },
   note: { color: "#e2c27a", fontSize: 13 },
   composer: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "rgba(126,212,234,0.25)", borderRadius: 22, paddingHorizontal: 10, paddingVertical: 6 },
-  input: { flex: 1, color: "#f4fbfe", paddingVertical: 6 },
+  input: { flex: 1, color: "#f4fbfe", paddingVertical: 8, fontSize: 16 },
   emoji: { color: aqua, fontSize: 18 },
-  mic: { borderWidth: 1, borderColor: aqua, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, minWidth: 72 },
+  mic: { borderWidth: 1, borderColor: aqua, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, minWidth: 72, minHeight: 44, justifyContent: "center" },
   micText: { color: "#d5eef5", fontSize: 11, textAlign: "center", textTransform: "capitalize" },
-  send: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#1a6f86", alignItems: "center", justifyContent: "center" },
+  send: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#1a6f86", alignItems: "center", justifyContent: "center" },
   sendText: { color: "#f4fbfe", fontSize: 16 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
   chip: { borderWidth: 1, borderColor: "rgba(126,212,234,0.35)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
