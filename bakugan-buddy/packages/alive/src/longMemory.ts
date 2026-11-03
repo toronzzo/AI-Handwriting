@@ -24,6 +24,7 @@ export const FACT_EXTRACT_PROMPT = [
   "You extract lasting memory for Preyas, a Bakugan who lives with his partner.",
   "Keep at most 3 facts. Each fact is one short sentence about the partner or a real event.",
   "Skip jokes, moods, and anything that will not matter tomorrow.",
+  "Never guess: if a detail is missing or uncertain, write [UNVERIFIED] for it.",
   "Reply with one JSON object and nothing else.",
   EXTRACT_SHAPE,
 ].join("\n");
