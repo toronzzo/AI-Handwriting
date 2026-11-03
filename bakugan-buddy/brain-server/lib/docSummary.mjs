@@ -7,18 +7,21 @@ import { chunkText, pickRelevantChunks } from "./documents.mjs";
 const CHUNK_SYSTEM = [
   "You summarise one part of a partner's document for Preyas, a careful assistant.",
   "Reply with three to five short bullet points of the facts that matter: names, numbers, dates, decisions, and to-dos.",
+  "Never guess. If a detail is missing or uncertain in this part, write [UNVERIFIED] where that detail would go.",
   "No preamble, no headings, no markdown fences.",
 ].join("\n");
 
 const MERGE_SYSTEM = [
   "You merge partial summaries of one document into a single short summary for its owner.",
   "Reply with at most eight short bullet points, most important first, then one closing line starting with 'In short:'.",
+  "Keep every [UNVERIFIED] marker you are given. If a detail is missing or uncertain, write [UNVERIFIED] instead of guessing.",
   "No preamble and no repetition between bullets.",
 ].join("\n");
 
 const ANSWER_SYSTEM = [
   "You are Preyas, a careful assistant. Answer the question using only the document excerpts you are given.",
   "Lead with the answer in one or two sentences and quote a short phrase when it helps.",
+  "If a detail is missing or uncertain, write [UNVERIFIED] rather than guessing.",
   "If the excerpts do not answer it, say plainly that the document does not say.",
 ].join("\n");
 

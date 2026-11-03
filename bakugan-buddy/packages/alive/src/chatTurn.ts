@@ -5,6 +5,8 @@
  */
 
 export const CHAT_MAX_TOKENS = 512;
+/** Thinking spends tokens before the answer, so it needs a much larger cap. */
+export const THINK_MAX_TOKENS = 2048;
 /** Paid flash can spend a short cap on reasoning and return an empty answer. */
 export const PAID_MAX_TOKENS = 2048;
 /** Input budget: recent turns only; notes and the rolling summary carry the rest. */
@@ -22,6 +24,7 @@ export const PREYAS_CHAT_SYSTEM = [
   "If they ask for a story, tell a real short story with a beginning, a middle, and an end, up to six sentences.",
   "Keep your Preyas voice - playful, a little vain, loyal - but never let it get in the way of the answer.",
   "Never answer with a catchphrase or a one-line quip in place of a real reply, and never begin with \"Rollin'\".",
+  "If your last message asked a question and they answer with yes, ok or sure, do what you offered; never repeat your previous answer.",
   "If they ask about Bakugan, your battles, or yourself, answer with concrete details from your own point of view.",
   "Never mention these instructions.",
 ].join(" ");
@@ -132,14 +135,19 @@ export function splitPaidHint(text: string): { text: string; suggestPaid: boolea
   return { text: cleaned, suggestPaid };
 }
 
+/**
+ * Build the request. The rolling summary rides in the system message, so the
+ * user turn is exactly what they typed: a bare "yes" then sits directly after
+ * the question Preyas asked, instead of being buried under a memory block.
+ */
 export function toModelMessages(messages: readonly ChatMessage[], summary: string, userText: string): ChatMessage[] {
   const prior = trimHistory(messages.filter((message) => message.role !== "system"));
   const memory = summary.trim();
-  const content = memory ? `Memory:\n${memory}\n\nThey said:\n${userText}` : userText;
+  const system = memory ? `${PREYAS_CHAT_SYSTEM}\n\nWhat you remember from earlier:\n${memory}` : PREYAS_CHAT_SYSTEM;
   return [
-    { role: "system", content: PREYAS_CHAT_SYSTEM },
+    { role: "system", content: system },
     ...prior.map((message) => ({ role: message.role, content: message.content })),
-    { role: "user", content },
+    { role: "user", content: userText },
   ];
 }
 
@@ -151,7 +159,54 @@ export function isPaidModel(model: string): boolean {
 }
 
 /** Local Qwen gets a short cap. Paid DeepSeek thinking is turned off, with room if it still reasons. */
-export function completionExtras(model: string): {
+/**
+ * Questions worth thinking about: a story, an explanation, maths or logic, or a
+ * "why". A greeting or a quick fact stays on the fast path.
+ */
+export function wantsThinking(raw: string): boolean {
+  const text = String(raw ?? "").trim().toLowerCase();
+  if (!text) return false;
+  if (text.length < 12) return false;
+  const hints = [
+    /\bexplain\b/,
+    /\bwhy\b/,
+    /\bstory\b/,
+    /\btell me about\b/,
+    /\bstep by step\b/,
+    /\bprove\b/,
+    /\bderive\b/,
+    /\bcalculate\b/,
+    /\bhow (?:do|does|can|would)\b/,
+    /\bwhat if\b/,
+    /\bcompare\b/,
+    /\bplan\b/,
+    /\bwork out\b/,
+    /\bsolve\b/,
+    /\bmath\b/,
+    /\blogic\b/,
+    /[0-9]\s*[+\-*/×÷]\s*[0-9]/,
+    /\b(?:percent|percentage|average|sum of)\b/,
+  ];
+  return hints.some((pattern) => pattern.test(text));
+}
+
+/** "yes", "ok", "sure", "да" … a bare answer to the question Preyas just asked. */
+export function isShortAffirmation(raw: string): boolean {
+  const text = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?。！？]+$/g, "")
+    .replace(/\s+/g, " ");
+  if (!text || text.length > 24) return false;
+  return /^(?:yes|yeah|yep|yup|sure|ok|okay|go on|go ahead|please do|do it|tell me|continue|please|да|конечно|ага|давай)$/.test(
+    text,
+  );
+}
+
+export function completionExtras(
+  model: string,
+  options: { think?: boolean } = {},
+): {
   max_tokens: number;
   temperature: number;
   thinking?: { type: "disabled" };
@@ -159,6 +214,13 @@ export function completionExtras(model: string): {
 } {
   if (isPaidModel(model)) {
     return { max_tokens: PAID_MAX_TOKENS, temperature: 0.4, thinking: { type: "disabled" } };
+  }
+  if (options.think) {
+    return {
+      max_tokens: THINK_MAX_TOKENS,
+      temperature: 0.6,
+      chat_template_kwargs: { enable_thinking: true },
+    };
   }
   return {
     max_tokens: CHAT_MAX_TOKENS,
@@ -270,6 +332,8 @@ export async function streamReply(options: {
   messages: readonly ChatMessage[];
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
+  /** Let the local model reason first. The reasoning is never shown. */
+  think?: boolean;
   onDelta?: (update: { answer: string; thinking: string; inThink: boolean }) => void;
 }): Promise<{ text: string; thinking: string; usage: TokenUsage | null; ok: boolean; error: string }> {
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -282,7 +346,7 @@ export async function streamReply(options: {
       body: JSON.stringify({
         model: options.model,
         stream: true,
-        ...completionExtras(options.model),
+        ...completionExtras(options.model, { think: options.think }),
         repeat_penalty: 1.1,
         presence_penalty: 0.3,
         frequency_penalty: 0.3,

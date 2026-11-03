@@ -36,6 +36,7 @@ import { looksLikeTask, taskStatusLine, type TaskRecord } from "../../../../pack
 import { confirmFor } from "../../../../packages/alive/src/confirm.ts";
 import { matchDocuments, parseDocumentRequest } from "../../../../packages/alive/src/documents.ts";
 import { formatDue, parseReminder, type Reminder } from "../../../../packages/alive/src/reminders.ts";
+import { isShortAffirmation, wantsThinking } from "../../../../packages/alive/src/chatTurn.ts";
 import {
   needsWebSearch,
   searchQueryFrom,
@@ -103,6 +104,9 @@ const QUICK: { label: string; prompt: string }[] = [
   { label: "Fun Fact", prompt: "Tell me a fun fact about yourself." },
   { label: "Just Chat", prompt: "Let's just talk. What's on your mind?" },
 ];
+
+/** Reasoning plus a full answer takes longer than a quick reply. */
+const THINK_TIMEOUT_MS = 180_000;
 
 function clock(t: number): string {
   try {
@@ -178,6 +182,8 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [briefing, setBriefing] = useState<string>("");
+  const [thinkForced, setThinkForced] = useState(false);
+  const [thinking, setThinking] = useState(false);
   const [needPair, setNeedPair] = useState(false);
   const [pairCode, setPairCode] = useState("");
   const [pairError, setPairError] = useState("");
@@ -1340,6 +1346,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     isCurrent: () => boolean = () => true,
     sources: SearchResult[] = [],
     searchQuery = "",
+    think = false,
   ) {
     const endpoint = await resolveChatBase(bag.brainUrl);
     if (isCurrent()) setVia(endpoint.via);
@@ -1352,7 +1359,8 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       base,
       model,
       messages: toModelMessages(prior, summaryRef.current, withSources(userText, searchQuery, sources)),
-      timeoutMs: route === "paid" ? 45_000 : LOCAL_TIMEOUT_MS,
+      think,
+      timeoutMs: route === "paid" ? 45_000 : think ? THINK_TIMEOUT_MS : LOCAL_TIMEOUT_MS,
       onDelta: (update) => {
         const shown = splitPaidHint(update.answer).text;
         last = shown;
@@ -1390,15 +1398,18 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     const chatId = activeIdRef.current;
     const epoch = sendEpoch.current;
     const isCurrent = () => activeIdRef.current === chatId && sendEpoch.current === epoch;
-    const docRequest = parseDocumentRequest(trimmed);
+    // "yes" / "ok" / "да" answers the question Preyas just asked. It must not be
+    // read as a document request, a task, a reminder or a note.
+    const affirmation = isShortAffirmation(trimmed);
+    const docRequest = affirmation ? null : parseDocumentRequest(trimmed);
     if (docRequest && !askPaid) {
       const handled = await handleDocumentRequest(docRequest, trimmed, chatId);
       if (handled) return;
     }
-    if (!askPaid && (await handleStudyCommand(trimmed, chatId))) return;
-    if (!askPaid && (await handleBriefingCommand(trimmed, chatId))) return;
-    if (!askPaid && (await handleReminderCommand(trimmed, chatId))) return;
-    const command = parseNoteCommand(trimmed);
+    if (!askPaid && !affirmation && (await handleStudyCommand(trimmed, chatId))) return;
+    if (!askPaid && !affirmation && (await handleBriefingCommand(trimmed, chatId))) return;
+    if (!askPaid && !affirmation && (await handleReminderCommand(trimmed, chatId))) return;
+    const command = affirmation ? null : parseNoteCommand(trimmed);
     if (command?.kind === "remember") {
       await handleRemember(trimmed, command.text);
       return;
@@ -1407,7 +1418,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       await handleForget(trimmed, command.query);
       return;
     }
-    if (!askPaid && looksLikeTask(trimmed)) {
+    if (!askPaid && !affirmation && looksLikeTask(trimmed)) {
       await runTaskFlow(trimmed);
       return;
     }
@@ -1462,7 +1473,11 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           searchQuery = found.query;
           if (!sources.length && isCurrent()) setChip("Web search found nothing");
         }
-        const local = await ask("local", history, trimmed, isCurrent, sources, searchQuery);
+        const think = thinkForced || wantsThinking(trimmed);
+        if (think && isCurrent()) setThinking(true);
+        const local = await ask("local", history, trimmed, isCurrent, sources, searchQuery, think).finally(() => {
+          if (isCurrent()) setThinking(false);
+        });
         const cleaned = splitPaidHint(local.text);
         if (isCurrent() && cleaned.suggestPaid) setHintPaid(true);
         if (local.ok) {
@@ -2071,7 +2086,9 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                   </View>
                 </View>
               ) : null}
-              {docBusy ? (
+              {thinking ? (
+                <Text style={styles.typing}>Preyas is thinking…</Text>
+              ) : docBusy ? (
                 <Text style={styles.typing}>
                   {docProgress || `Reading ${docBusy}…`}
                 </Text>
@@ -2139,6 +2156,13 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                   <Text style={styles.micText}>{phase}</Text>
                 </Pressable>
               ) : null}
+              <Pressable
+                style={[styles.thinkBtn, thinkForced && styles.thinkBtnOn]}
+                onPress={() => setThinkForced((on) => !on)}
+                accessibilityLabel={thinkForced ? "Thinking on" : "Thinking off"}
+              >
+                <Text style={styles.thinkBtnText}>🧠</Text>
+              </Pressable>
               <Pressable
                 style={styles.send}
                 onPress={submitDraft}
@@ -2776,6 +2800,9 @@ const styles = StyleSheet.create({
   emoji: { color: aqua, fontSize: 18 },
   mic: { borderWidth: 1, borderColor: aqua, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, minWidth: 72, minHeight: 44, justifyContent: "center" },
   micText: { color: "#d5eef5", fontSize: 11, textAlign: "center", textTransform: "capitalize" },
+  thinkBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: "rgba(126,212,234,0.35)", alignItems: "center", justifyContent: "center" },
+  thinkBtnOn: { backgroundColor: "rgba(126,212,234,0.25)", borderColor: aqua },
+  thinkBtnText: { fontSize: 18 },
   send: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#1a6f86", alignItems: "center", justifyContent: "center" },
   sendText: { color: "#f4fbfe", fontSize: 16 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
