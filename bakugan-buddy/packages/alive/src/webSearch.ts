@@ -117,24 +117,79 @@ export function parseDuckDuckGoHtml(html: string, limit = 5): SearchResult[] {
   return results;
 }
 
+// An explicit request to look something up, not the word "search" appearing
+// anywhere (a pasted PR report can mention "web search" without wanting one).
+const SEARCH_INTENT =
+  /^\s*(?:please\s+)?(?:search|google|look\s?up)\b|\b(?:search\s+for|search\s+what|google\s+(?:for|it|this)|look\s?up|look\s+it\s+up)\b/i;
+
 const FRESH_HINTS = [
-  /\bsearch\b/i,
-  /\blook up\b/i,
   /\blatest\b/i,
   /\bnews\b/i,
-  /\bprice of\b/i,
+  /\btoday\b/i,
+  /\bweather\b/i,
+  /\bprice\b/i,
   /\bwho is\b/i,
   /\bhow much (is|does|are)\b/i,
   /\bcurrent\b.*\b(price|score|rate|version|weather)\b/i,
-  /\b20\d\d\b/,
 ];
 
-/** True when the message clearly wants information from the outside world. */
-export function needsWebSearch(raw: string): boolean {
+// Questions about our own world are answered from memory, not the web.
+const LOCAL_TOPICS =
+  /\b(chat|our talk|conversation|my notes?|reminders?|documents?|study|decks?|cards|vault|what did i say|you said|you told me)\b/i;
+
+// Short conversational replies never need the web.
+const FOLLOW_UP =
+  /^(yes|yeah|yep|no|nope|ok(?:ay)?|sure|why|how|what|huh|really|go on|continue|tell me more|and\??|thanks?|thank you|lol|haha|nice|cool|wow|hm+|mhm)[.!?\s]*$/i;
+
+// Feelings, advice and chat about us are never a web question.
+const SMALL_TALK = /\bhow are you\b|\bfeel(?:ing|ings)?\b|\badvice\b|\bwhat do you think about (me|us)\b/i;
+
+/**
+ * Should this message trigger a web search? Pure and small so it is easy to
+ * tune. Saying "search"/"look up" always searches. A long pasted block that
+ * is being explained, questions about our chat/notes/documents/vault, and
+ * small talk or short follow-ups never do. Fresh-fact hints (latest, news,
+ * today, weather, price…) do.
+ */
+export function shouldWebSearch(raw: string): boolean {
   const text = String(raw ?? "").trim();
   if (!text) return false;
   if (/^\/search\b/i.test(text)) return true;
+  if (SEARCH_INTENT.test(text)) return true;
+  if (FOLLOW_UP.test(text)) return false;
+  if (SMALL_TALK.test(text)) return false;
+  const lines = text.split("\n").filter((line) => line.trim()).length;
+  const longPastedBlock = text.length > 400 || lines > 2;
+  if (longPastedBlock) return false;
+  if (LOCAL_TOPICS.test(text)) return false;
   return FRESH_HINTS.some((pattern) => pattern.test(text));
+}
+
+/** Backwards-compatible name; the full trigger rules live in shouldWebSearch. */
+export function needsWebSearch(raw: string): boolean {
+  return shouldWebSearch(raw);
+}
+
+/**
+ * Keep only the sources the reply actually cites as [n], each with its
+ * original number so the label matches the citation. An answer built only on
+ * the user's pasted text cites nothing, so nothing is shown.
+ */
+export function citedSourceEntries(
+  reply: string,
+  sources: readonly SearchResult[],
+): { n: number; source: SearchResult }[] {
+  const text = String(reply ?? "");
+  const out: { n: number; source: SearchResult }[] = [];
+  const seen = new Set<number>();
+  for (const match of text.matchAll(/\[(\d+)\]/g)) {
+    const n = Number(match[1]);
+    const source = sources[n - 1];
+    if (!source || seen.has(n)) continue;
+    seen.add(n);
+    out.push({ n, source });
+  }
+  return out;
 }
 
 /** The query to send, with a leading /search stripped. */
