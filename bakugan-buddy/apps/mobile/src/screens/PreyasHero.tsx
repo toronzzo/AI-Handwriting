@@ -38,13 +38,13 @@ function Scene({ talking }: { talking: boolean }) {
   }, [camera, scene]);
   return (
     <>
-      <color attach="background" args={["#071018"]} />
+      <color attach="background" args={["#071410"]} />
       <ambientLight intensity={0.62} color="#d7f6ff" />
       <directionalLight position={[2.4, 3.6, 2.2]} intensity={1.7} color="#f7fcff" />
-      <directionalLight position={[-2.2, 1.1, -1.2]} intensity={0.4} color="#5ec8e4" />
+      <directionalLight position={[-2.2, 1.1, -1.2]} intensity={0.4} color="#43d9ad" />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.78, 0]}>
         <ringGeometry args={[0.72, 0.98, 40]} />
-        <meshBasicMaterial color="#3ec6e6" transparent opacity={0.5} />
+        <meshBasicMaterial color="#43d9ad" transparent opacity={0.5} />
       </mesh>
       <mesh position={[0, -0.86, 0]}>
         <cylinderGeometry args={[0.58, 0.78, 0.12, 28]} />
@@ -76,7 +76,7 @@ export function PreyasHero({ talking, short }: { talking: boolean; short: boolea
 }
 
 const styles = StyleSheet.create({
-  frame: { width: "100%", borderRadius: 18, overflow: "hidden", backgroundColor: "#071018" },
+  frame: { width: "100%", borderRadius: 18, overflow: "hidden", backgroundColor: "#071410" },
   tall: { height: 280 },
   short: { height: 168 },
 });
