@@ -45,7 +45,8 @@ import {
 } from "../../../../packages/alive/src/webSearch.ts";
 import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "../room/voice/VoiceSession";
 import { PreyasHero } from "./PreyasHero";
-
+import { MAIN_TABS, type Section } from "../nav";
+import { theme } from "../theme";
 type Shown = ChatMessage & {
   t: number;
   thinking?: string;
@@ -56,7 +57,6 @@ type Shown = ChatMessage & {
 type InboxFile = { name: string; size: number; type: string; modified: number };
 type PendingReminder = { text: string; dueAt: string; repeat: "none" | "daily" | "weekly" | "weekdays"; label: string };
 type PartnerCard = { turns: number; level: number; bond: number; caption: string };
-type Pane = "companion" | "activity" | "collection" | "status";
 type HealthPart = { ok: boolean; label: string; detail: string };
 type Health = { ok: boolean; parts: Record<string, HealthPart>; drive?: { mounted: boolean; freeGb: number | null }; memory?: { swapUsedMb: number | null } };
 type ChatMeta = { id: string; title: string; created: number; updated: number };
@@ -73,7 +73,6 @@ type ChatDialog =
   | { kind: "briefingOff" }
   | { kind: "deleteDeck"; id: string; title: string };
 type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string };
-
 function toShown(rows: StoredRow[]): Shown[] {
   return rows.map((row) => ({
     t: typeof row.t === "number" ? row.t : Date.now(),
@@ -85,7 +84,6 @@ function toShown(rows: StoredRow[]): Shown[] {
     thinking: typeof row.thinking === "string" ? row.thinking : undefined,
   }));
 }
-
 function dayLabel(t: number): string {
   try {
     return new Date(t).toLocaleDateString([], { month: "short", day: "numeric" });
@@ -93,21 +91,17 @@ function dayLabel(t: number): string {
     return "";
   }
 }
-
 function newestFirst(list: ChatMeta[]): ChatMeta[] {
   return [...list].sort((a, b) => b.updated - a.updated);
 }
-
 const QUICK: { label: string; prompt: string }[] = [
   { label: "Battle Ready!", prompt: "I'm ready. What's our strategy?" },
   { label: "Power Up", prompt: "Show me a power up. Keep it short." },
   { label: "Fun Fact", prompt: "Tell me a fun fact about yourself." },
   { label: "Just Chat", prompt: "Let's just talk. What's on your mind?" },
 ];
-
 /** Reasoning plus a full answer takes longer than a quick reply. */
 const THINK_TIMEOUT_MS = 180_000;
-
 function clock(t: number): string {
   try {
     return new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -115,9 +109,7 @@ function clock(t: number): string {
     return "";
   }
 }
-
 type PaidInfo = { available: boolean; offPeakOnly: boolean; reason: string };
-
 function blankSinks(): TalkSinks {
   return {
     brainUrl: "",
@@ -135,8 +127,15 @@ function blankSinks(): TalkSinks {
     phase: "listening",
   };
 }
-
-export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" | "bench") => void }) {
+export function ChatScreen({
+  section,
+  onSection,
+  onNavigate,
+}: {
+  section: Section;
+  onSection?: (section: Section) => void;
+  onNavigate?: (tab: "room" | "body" | "bench") => void;
+}) {
   const sinks = useRef<TalkSinks>(blankSinks());
   const bag = sinks.current;
   const messagesRef = useRef<Shown[]>([]);
@@ -165,7 +164,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const activeIdRef = useRef<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [dialog, setDialog] = useState<ChatDialog | null>(null);
-  const [notesOpen, setNotesOpen] = useState(false);
   const [notesList, setNotesList] = useState<Note[]>([]);
   const [notesQuery, setNotesQuery] = useState("");
   const [editing, setEditing] = useState<{ id: string; text: string; kind: NoteKind } | null>(null);
@@ -173,7 +171,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const notesStamp = useRef(0);
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [searching, setSearching] = useState(false);
-  const [docsOpen, setDocsOpen] = useState(false);
   const [inbox, setInbox] = useState<InboxFile[]>([]);
   const [inboxPath, setInboxPath] = useState("");
   const [docBusy, setDocBusy] = useState("");
@@ -189,16 +186,15 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   const [pairError, setPairError] = useState("");
   const [phoneInfo, setPhoneInfo] = useState<{ lanIp: string; phoneUrl: string; pairingCode: string; devices: number } | null>(null);
   const [decks, setDecks] = useState<{ id: string; title: string; cards: number; due: number; language: string }[]>([]);
-  const [studyOpen, setStudyOpen] = useState(false);
   const [review, setReview] = useState<{ deck: string; title: string; cards: { id: string; question: string; answer: string }[]; index: number; flipped: boolean } | null>(null);
   const [quiz, setQuiz] = useState<{ deck: string; questions: { question: string; answer: string; options: string[] }[]; index: number; results: boolean[]; typed: string; feedback: string } | null>(null);
-  const [remindersOpen, setRemindersOpen] = useState(false);
   const [pendingReminder, setPendingReminder] = useState<PendingReminder | null>(null);
   const [searchNote, setSearchNote] = useState("");
   const [openSteps, setOpenSteps] = useState<Record<number, boolean>>({});
   const taskPoll = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [pane, setPane] = useState<Pane>("companion");
-  const [menu, setMenu] = useState(false);
+  const [memFilter, setMemFilter] = useState<"all" | "notes" | "reminders" | "docs">("all");
+  const [briefingSettings, setBriefingSettings] = useState<{ briefingTime: string; briefingOn: boolean } | null>(null);
+  const [briefingDismissed, setBriefingDismissed] = useState(false);
   const [profile, setProfile] = useState(false);
   const { width, height } = useWindowDimensions();
   const wide = width >= 900;
@@ -210,12 +206,10 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       isSecureContext: window.isSecureContext,
     });
   const phone = !wide && Math.min(width, height) < 600;
-
   const setActiveChat = (id: string | null) => {
     activeIdRef.current = id;
     setActiveChatId(id);
   };
-
   async function loadChat(id: string, cancelled?: () => boolean): Promise<boolean> {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`);
@@ -248,7 +242,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       return false;
     }
   }
-
   async function startChat(): Promise<ChatMeta | null> {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/chats`, {
@@ -266,14 +259,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       return null;
     }
   }
-
   async function newChat() {
     const chat = await startChat();
     if (!chat) return;
     await loadChat(chat.id);
     setDrawerOpen(false);
   }
-
   async function saveRename(id: string, title: string) {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`, {
@@ -293,7 +284,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
     setDialog(null);
   }
-
   async function removeChat(id: string) {
     try {
       await brainFetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -308,7 +298,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       else await newChat();
     }
   }
-
   async function fetchNotes(query: string, limit = 50): Promise<Note[]> {
     try {
       const params = new URLSearchParams();
@@ -322,17 +311,14 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       return [];
     }
   }
-
   function stampOf(rows: Note[]): number {
     return rows.reduce((max, note) => Math.max(max, note.updated || 0), 0);
   }
-
   async function refreshNotes(query = notesQuery) {
     const rows = await fetchNotes(query);
     setNotesList(rows);
     return rows;
   }
-
   /** The model extracts notes after a reply; poll a few times, then show the chip. */
   function scheduleNotesCheck() {
     for (const delay of [1500, 4000, 8000]) {
@@ -343,13 +329,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           if (stamp > notesStamp.current) {
             notesStamp.current = stamp;
             setChip("Saved to notes");
-            if (notesOpen) setNotesList(rows);
+            setNotesList(rows);
           }
         })();
       }, delay);
     }
   }
-
   async function postNote(text: string, kind: NoteKind): Promise<Note | null> {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/notes`, {
@@ -369,7 +354,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       return null;
     }
   }
-
   async function patchNote(id: string, text: string, kind: NoteKind): Promise<boolean> {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/notes/${encodeURIComponent(id)}`, {
@@ -389,7 +373,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       return false;
     }
   }
-
   async function removeNote(id: string) {
     try {
       await brainFetch(`${bag.brainUrl}/v1/notes/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -400,13 +383,11 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     setEditing(null);
     setDialog(null);
   }
-
   async function addLocal(entry: Shown) {
     messagesRef.current = [...messagesRef.current, entry];
     setMessages(messagesRef.current);
     await remember(entry);
   }
-
   async function handleRemember(raw: string, text: string) {
     busy.current = true;
     try {
@@ -424,7 +405,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       busy.current = false;
     }
   }
-
   async function handleForget(raw: string, query: string) {
     busy.current = true;
     try {
@@ -445,7 +425,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       busy.current = false;
     }
   }
-
   async function forgetNotes(notes: Note[]) {
     for (const note of notes) {
       try {
@@ -464,13 +443,11 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       model: "preyas",
     });
   }
-
   async function saveEditing() {
     if (!editing) return;
     const ok = await patchNote(editing.id, editing.text, editing.kind);
     if (ok) setEditing(null);
   }
-
   async function submitPairing() {
     if (!isValidPairingCode(pairCode)) {
       setPairError("Six digits, please.");
@@ -486,20 +463,19 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     setPairCode("");
     window.location.reload();
   }
-
   async function refreshBriefing() {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/briefing/today`);
       if (!res.ok) return "";
-      const body = (await res.json()) as { text?: string | null };
+      const body = (await res.json()) as { text?: string | null; settings?: { briefingTime: string; briefingOn: boolean } };
       const text = body.text || "";
       setBriefing(text);
+      if (body.settings) setBriefingSettings(body.settings);
       return text;
     } catch {
       return "";
     }
   }
-
   async function runBriefingNow(chatId: string | null) {
     setChip("Building your briefing…");
     try {
@@ -523,7 +499,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       setChip("Could not build the briefing");
     }
   }
-
   async function saveBriefingSettings(patch: { briefingTime?: string; briefingOn?: boolean }) {
     try {
       await brainFetch(`${bag.brainUrl}/v1/briefing/settings`, {
@@ -531,16 +506,18 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         headers: { "content-type": "application/json" },
         body: JSON.stringify(patch),
       });
+      setBriefingSettings((cur) => ({
+        briefingTime: patch.briefingTime ?? cur?.briefingTime ?? "08:00",
+        briefingOn: patch.briefingOn ?? cur?.briefingOn ?? true,
+      }));
       setChip(patch.briefingOn === false ? "Briefing off" : patch.briefingTime ? `Briefing at ${patch.briefingTime}` : "Briefing updated");
     } catch {
       setChip("Could not save the setting");
     }
   }
-
   function normalizeCompare(value: string): string {
     return String(value || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, "");
   }
-
   async function refreshDecks() {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/study/decks`);
@@ -553,7 +530,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       return [];
     }
   }
-
   async function makeDeck(name: string) {
     setChip(`Making flashcards from ${name}…`);
     try {
@@ -572,7 +548,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       return null;
     }
   }
-
   async function startReview(deckId: string, title: string) {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/study/decks/${encodeURIComponent(deckId)}/due`);
@@ -584,12 +559,10 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         return;
       }
       setReview({ deck: deckId, title, cards: cards.slice(0, 20), index: 0, flipped: false });
-      setStudyOpen(false);
     } catch {
       setChip("Could not open the deck");
     }
   }
-
   async function gradeReview(grade: "again" | "hard" | "good" | "easy") {
     if (!review) return;
     const card = review.cards[review.index];
@@ -612,7 +585,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
     setReview({ ...review, index: next, flipped: false });
   }
-
   async function startQuiz(deckId: string, title: string) {
     setChip("Building a quiz…");
     try {
@@ -625,12 +597,10 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       if (!body.ok || !body.questions?.length) throw new Error("no quiz");
       setQuiz({ deck: deckId, questions: body.questions, index: 0, results: [], typed: "", feedback: "" });
       setChip("");
-      setStudyOpen(false);
     } catch {
       setChip("Could not build a quiz");
     }
   }
-
   async function answerQuiz(given: string) {
     if (!quiz) return;
     const question = quiz.questions[quiz.index];
@@ -647,7 +617,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       typed: "",
     });
   }
-
   async function nextQuizQuestion() {
     if (!quiz) return;
     const next = quiz.index + 1;
@@ -675,7 +644,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
     setQuiz({ ...quiz, index: next, feedback: "", typed: "" });
   }
-
   async function refreshPhone() {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/phone`);
@@ -687,7 +655,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       return null;
     }
   }
-
   async function refreshHealth() {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/status`);
@@ -699,7 +666,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       return null;
     }
   }
-
   async function restartPreyas() {
     try {
       await brainFetch(`${bag.brainUrl}/v1/restart`, { method: "POST" });
@@ -708,7 +674,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       setChip("Could not restart");
     }
   }
-
   async function refreshReminders() {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/reminders`);
@@ -721,7 +686,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       return [];
     }
   }
-
   /** Save a reminder the user just confirmed. */
   async function saveReminder(pending: PendingReminder, chatId: string | null) {
     try {
@@ -737,7 +701,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       setChip("Could not save the reminder");
     }
   }
-
   async function updateReminder(id: string, patch: Record<string, unknown>) {
     try {
       await brainFetch(`${bag.brainUrl}/v1/reminders/${encodeURIComponent(id)}`, {
@@ -750,7 +713,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       setChip("Could not update the reminder");
     }
   }
-
   /** "make flashcards from X", "study", "quiz me on X", "explain X simply". */
   async function handleStudyCommand(text: string, chatId: string | null): Promise<boolean> {
     const lower = text.trim().toLowerCase();
@@ -781,8 +743,8 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         });
         return true;
       }
-      setStudyOpen(true);
-      setStudyOpen(true);
+      onSection?.("learn");
+      void refreshDecks();
       return true;
     }
     const quizMe = lower.match(/^quiz\s+me\s+(?:on|about)\s+(.+)$/i);
@@ -848,7 +810,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
     return false;
   }
-
   /** "/briefing", "what's my day", "briefing at 9", "turn off briefing". */
   async function handleBriefingCommand(text: string, chatId: string | null): Promise<boolean> {
     const lower = text.trim().toLowerCase();
@@ -895,7 +856,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     void chatId;
     return false;
   }
-
   /** "remind me …" → confirm card; "what are my reminders"; "cancel the X reminder". */
   async function handleReminderCommand(text: string, chatId: string | null): Promise<boolean> {
     const lower = text.trim().toLowerCase();
@@ -964,7 +924,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     void chatId;
     return false;
   }
-
   async function refreshInbox() {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/documents`);
@@ -978,7 +937,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       return [];
     }
   }
-
   /** Wait for a summary job, reporting chunk progress while it runs. */
   async function waitForSummary(
     name: string,
@@ -1007,7 +965,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
     return { error: "the summary took too long" };
   }
-
   /** Run a web search for a message that needs fresh information. */
   async function runWebSearch(text: string): Promise<{ query: string; results: SearchResult[] }> {
     const query = searchQueryFrom(text) || text.trim();
@@ -1028,7 +985,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       setSearching(false);
     }
   }
-
   function watchTask(id: string) {
     if (taskPoll.current) clearInterval(taskPoll.current);
     taskPoll.current = setInterval(() => {
@@ -1049,7 +1005,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       })();
     }, 1200);
   }
-
   async function runTaskFlow(text: string) {
     busy.current = true;
     try {
@@ -1084,7 +1039,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       busy.current = false;
     }
   }
-
   /** Handle "summarize <file>", "read <file>", "what does <file> say about X", "/doc <file>". */
   async function handleDocumentRequest(
     request: { kind: string; name: string; question?: string },
@@ -1102,7 +1056,8 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
         who: "preyas",
         model: "preyas",
       });
-      setDocsOpen(true);
+      onSection?.("memory");
+      setMemFilter("docs");
       return true;
     }
     if (hits.length > 1) {
@@ -1111,7 +1066,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
     const name = hits[0]!.name;
     await addLocal({ t: Date.now(), role: "user", content: raw, who: "user" });
-
     if (request.kind === "question") {
       setDocBusy(name);
       try {
@@ -1135,7 +1089,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       }
       return true;
     }
-
     setDocBusy(name);
     setDocProgress("");
     try {
@@ -1169,7 +1122,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
     return true;
   }
-
   async function saveKeyPoints(name: string, points: { text: string; kind: NoteKind }[]) {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/documents/${encodeURIComponent(name)}/notes`, {
@@ -1184,7 +1136,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       setChip("Could not save the key points");
     }
   }
-
   async function resumeTask(id: string) {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/tasks/${encodeURIComponent(id)}/resume`, { method: "POST" });
@@ -1197,19 +1148,16 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       /* stays paused */
     }
   }
-
   useEffect(() => {
     return () => {
       if (taskPoll.current) clearInterval(taskPoll.current);
     };
   }, []);
-
   useEffect(() => {
     if (!chip) return;
     const id = setTimeout(() => setChip(""), 4000);
     return () => clearTimeout(id);
   }, [chip]);
-
   useEffect(() => {
     let cancel = false;
     void (async () => {
@@ -1256,6 +1204,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       } catch {
         if (!cancel) setPaid({ available: false, offPeakOnly: false, reason: "Brain is offline" });
       }
+      void refreshBriefing();
     })();
     const timer = setInterval(() => {
       setPhase(bag.phase || "listening");
@@ -1271,7 +1220,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       clearInterval(timer);
     };
   }, [bag]);
-
   useEffect(() => {
     let cancel = false;
     const ping = async () => {
@@ -1291,16 +1239,28 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       clearInterval(id);
     };
   }, [bag, via]);
-
   // New turns follow the newest bubble only while the thread is parked at the bottom.
   useEffect(() => {
     if (pinned.current) logRef.current?.scrollToEnd({ animated: true });
   }, [messages.length]);
-
+  // Each tab loads its own data only when it is opened.
+  useEffect(() => {
+    if (section === "learn") void refreshDecks();
+    if (section === "memory") {
+      void refreshNotes(notesQuery);
+      void refreshReminders();
+      void refreshInbox();
+    }
+    if (section === "settings") {
+      void refreshHealth();
+      void refreshPhone();
+      void refreshBriefing();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section]);
   const scrollToLatest = (animated = true) => {
     logRef.current?.scrollToEnd({ animated });
   };
-
   const onLogScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
@@ -1308,13 +1268,11 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     pinned.current = atBottom;
     setJumpVisible(!atBottom);
   };
-
   const jumpToLatest = () => {
     pinned.current = true;
     setJumpVisible(false);
     scrollToLatest();
   };
-
   async function remember(entry: ChatMessage, chatId = activeIdRef.current) {
     if (!bag.brainUrl || !chatId) return;
     try {
@@ -1333,12 +1291,10 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       /* the line is still on screen */
     }
   }
-
   async function speakPreyas(text: string, final: boolean, fresh = false) {
     if (fresh) resetSpeech(bag);
     queueSpokenLine(bag, text, "happy", final);
   }
-
   async function ask(
     route: "local" | "paid",
     prior: ChatMessage[],
@@ -1385,7 +1341,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       endpoint,
     };
   }
-
   async function send(text: string, askPaid: boolean) {
     const trimmed = text.trim();
     if (!trimmed || busy.current || !bag.brainUrl) return;
@@ -1562,14 +1517,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     }
   }
   sendRef.current = send;
-
   const submitDraft = () => {
     const text = draft;
     if (!text.trim() || busy.current) return;
     setDraft("");
     void send(text, false);
   };
-
   const button = paidButton({
     available: paid.available,
     offPeakOnly: paid.offPeakOnly,
@@ -1578,15 +1531,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
   });
   const lastUser = [...messages].reverse().find((message) => message.who === "user");
   const go = (tab: "room" | "body" | "bench") => {
-    setMenu(false);
     onNavigate?.(tab);
   };
-
   async function openChat(id: string) {
     await loadChat(id);
     setDrawerOpen(false);
   }
-
   const nextReminder = pendingReminder;
   const confirmDialog = dialog
     ? dialog.kind === "remind"
@@ -1735,58 +1685,15 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 };
               })()
     : null;
-
   const chatList = (withClose: boolean) => (
     <View style={styles.sidebarInner}>
       <View style={styles.sidebarHead}>
         <Text style={styles.sidebarTitle}>CHATS</Text>
-        <View style={styles.sidebarHeadRight}>
-          <Pressable
-            style={styles.notesBtn}
-            onPress={() => {
-              setNotesOpen(true);
-              setDrawerOpen(false);
-              void refreshNotes("");
-            }}
-          >
-            <Text style={styles.notesBtnText}>Notes</Text>
+        {withClose ? (
+          <Pressable onPress={() => setDrawerOpen(false)} hitSlop={8}>
+            <Text style={styles.sidebarClose}>✕</Text>
           </Pressable>
-          <Pressable
-            style={styles.notesBtn}
-            onPress={() => {
-              setDocsOpen(true);
-              setDrawerOpen(false);
-              void refreshInbox();
-            }}
-          >
-            <Text style={styles.notesBtnText}>Docs</Text>
-          </Pressable>
-          <Pressable
-            style={styles.notesBtn}
-            onPress={() => {
-              setRemindersOpen(true);
-              setDrawerOpen(false);
-              void refreshReminders();
-            }}
-          >
-            <Text style={styles.notesBtnText}>Reminders</Text>
-          </Pressable>
-          <Pressable
-            style={styles.notesBtn}
-            onPress={() => {
-              setStudyOpen(true);
-              setDrawerOpen(false);
-              void refreshDecks();
-            }}
-          >
-            <Text style={styles.notesBtnText}>Study</Text>
-          </Pressable>
-          {withClose ? (
-            <Pressable onPress={() => setDrawerOpen(false)} hitSlop={8}>
-              <Text style={styles.sidebarClose}>✕</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        ) : null}
       </View>
       <Pressable style={styles.newChat} onPress={() => void newChat()}>
         <Text style={styles.newChatText}>+ New chat</Text>
@@ -1820,63 +1727,13 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
       </ScrollView>
     </View>
   );
-
   return (
     <View style={styles.root}>
       <VoiceSession sinks={bag} />
-      <View style={styles.nav}>
-        <View style={styles.brandRow}>
-          <View style={styles.mark} />
-          <View>
-            <Text style={styles.brandTop}>BAKUGAN</Text>
-            <Text style={styles.brandSub}>COMPANION</Text>
-          </View>
-        </View>
-        <View style={styles.navTabs}>
-          <Pressable onPress={() => go("room")}><Text style={styles.navTab}>Home</Text></Pressable>
-          <Pressable style={styles.navOn} onPress={() => setPane("companion")}><Text style={styles.navTabOn}>Companion</Text></Pressable>
-          <Pressable onPress={() => setPane("activity")}><Text style={[styles.navTab, pane === "activity" && styles.navTabOn]}>Activity</Text></Pressable>
-          <Pressable onPress={() => setPane("collection")}><Text style={[styles.navTab, pane === "collection" && styles.navTabOn]}>Collection</Text></Pressable>
-          <Pressable
-            onPress={() => {
-              setPane("status");
-              void refreshHealth();
-            }}
-          >
-            <Text style={[styles.navTab, pane === "status" && styles.navTabOn]}>Status</Text>
-          </Pressable>
-        </View>
-        <View style={styles.navRight}>
-          <Pressable style={styles.partnerBtn} onPress={() => setMenu((open) => !open)}>
-            <View style={styles.miniBall} />
-            <Text style={styles.partnerName}>Preyas</Text>
-            <Text style={styles.caret}>▾</Text>
-          </Pressable>
-          <Pressable onPress={() => setMenu((open) => !open)}><Text style={styles.more}>···</Text></Pressable>
-          {menu ? (
-            <View style={styles.menu}>
-              <Pressable onPress={() => go("room")}><Text style={styles.menuItem}>Room</Text></Pressable>
-              <Pressable onPress={() => go("body")}><Text style={styles.menuItem}>Body</Text></Pressable>
-              <Pressable onPress={() => go("bench")}><Text style={styles.menuItem}>Benchmark</Text></Pressable>
-            </View>
-          ) : null}
-        </View>
-      </View>
-
-      {pane === "activity" ? (
+      {section === "settings" ? (
         <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
-          <Text style={styles.kicker}>ACTIVITY</Text>
-          {messages.length === 0 ? <Text style={styles.dim}>No turns yet. They show up here after you talk.</Text> : null}
-          {messages.map((message, index) => (
-            <Text key={`act-${message.t}-${index}`} style={styles.dim}>
-              {clock(message.t)} · {message.who === "paid" ? "deepseek-flash" : message.who === "user" ? "You" : "Preyas"} · {message.content}
-            </Text>
-          ))}
-        </ScrollView>
-      ) : pane === "status" ? (
-        <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
+          <Text style={styles.sectionTitle}>Settings</Text>
           <Text style={styles.kicker}>STATUS</Text>
-          <Text style={styles.bigName}>PREYAS</Text>
           {health ? (
             <View style={styles.healthList}>
               {Object.entries(health.parts).map(([key, part]) => (
@@ -1919,25 +1776,194 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
               <Text style={styles.dim}>No Wi-Fi address yet; connect the Mac to a network.</Text>
             )}
           </View>
+          <View style={styles.phoneCard}>
+            <Text style={styles.kicker}>DAILY BRIEFING</Text>
+            <View style={styles.briefingRow}>
+              <Switch
+                value={briefingSettings?.briefingOn ?? true}
+                onValueChange={(on) => void saveBriefingSettings({ briefingOn: on })}
+              />
+              <Text style={styles.dim}>
+                Every morning at {briefingSettings?.briefingTime ?? "08:00"}
+              </Text>
+            </View>
+            <Pressable style={styles.profileBtn} onPress={() => void runBriefingNow(activeIdRef.current)}>
+              <Text style={styles.profileText}>Send it now</Text>
+            </Pressable>
+            <Text style={styles.dim}>To change the time, tell Preyas: "briefing at 7:30".</Text>
+          </View>
           <Pressable
             style={[styles.profileBtn, styles.restartBtn]}
             onPress={() => setDialog({ kind: "restart" })}
           >
             <Text style={styles.modalDanger}>Restart Preyas</Text>
           </Pressable>
+          <View style={styles.phoneCard}>
+            <Text style={styles.kicker}>ADVANCED</Text>
+            <View style={styles.advRow}>
+              <Pressable onPress={() => go("room")}><Text style={styles.advLink}>Preyas' room</Text></Pressable>
+              <Pressable onPress={() => go("body")}><Text style={styles.advLink}>Body</Text></Pressable>
+              <Pressable onPress={() => go("bench")}><Text style={styles.advLink}>Benchmark</Text></Pressable>
+            </View>
+          </View>
         </ScrollView>
-      ) : pane === "collection" ? (
-        <View style={[styles.fill, styles.pad]}>
-          <Text style={styles.kicker}>COLLECTION</Text>
-          <Text style={styles.bigName}>Preyas</Text>
-          <Text style={styles.tagline}>Ball form. Aquos. One partner, kept on your drive.</Text>
+      ) : section === "learn" ? (
+        <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
+          <Text style={styles.sectionTitle}>Learn</Text>
+          <Text style={styles.dim}>{MAIN_TABS[1]!.empty}</Text>
+          {decks.length === 0 ? (
+            <View style={styles.emptyTab}>
+              <Text style={styles.dim}>{MAIN_TABS[1]!.example}</Text>
+            </View>
+          ) : null}
+          {decks.map((deck) => (
+            <View key={deck.id} style={styles.deckRow}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.deckTitle}>{deck.title}</Text>
+                <Text style={styles.dim}>{deck.cards} cards · {deck.due} due{deck.language ? ` · ${deck.language}` : ""}</Text>
+              </View>
+              <Pressable style={styles.deckBtn} onPress={() => void startReview(deck.id, deck.title)}>
+                <Text style={styles.deckBtnText}>Review</Text>
+              </Pressable>
+              <Pressable style={styles.deckBtn} onPress={() => void startQuiz(deck.id, deck.title)}>
+                <Text style={styles.deckBtnText}>Quiz</Text>
+              </Pressable>
+              <Pressable hitSlop={6} onPress={() => setDialog({ kind: "deleteDeck", id: deck.id, title: deck.title })}>
+                <Text style={styles.chatRowIconText}>🗑</Text>
+              </Pressable>
+            </View>
+          ))}
+        </ScrollView>
+      ) : section === "memory" ? (
+        <View style={styles.fill}>
+          <View style={styles.memHead}>
+            <Text style={styles.sectionTitle}>Memory</Text>
+            <Text style={styles.dim}>{MAIN_TABS[2]!.empty}</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={notesQuery}
+              onChangeText={setNotesQuery}
+              placeholder="Search memory…"
+              placeholderTextColor={theme.faint}
+              onSubmitEditing={() => {
+                setMemFilter("notes");
+                void refreshNotes(notesQuery);
+              }}
+              returnKeyType="search"
+            />
+            <View style={styles.chips}>
+              {(["all", "notes", "reminders", "docs"] as const).map((filter) => (
+                <Pressable
+                  key={filter}
+                  style={[styles.chip, memFilter === filter && styles.chipHint]}
+                  onPress={() => {
+                    setMemFilter(filter);
+                    if (filter === "notes" || filter === "all") void refreshNotes(notesQuery);
+                  }}
+                >
+                  <Text style={styles.chipText}>{filter === "all" ? "All" : filter === "notes" ? "Notes" : filter === "reminders" ? "Reminders" : "Documents"}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
+            {(memFilter === "all" || memFilter === "notes") ? (
+              <>
+                {notesList.length === 0 && memFilter === "notes" ? (
+                  <Text style={styles.dim}>{MAIN_TABS[2]!.example}</Text>
+                ) : null}
+                {notesList.map((noteRow) => (
+                  <View key={noteRow.id} style={styles.noteRow}>
+                    {editing?.id === noteRow.id ? (
+                      <View style={styles.noteEditing}>
+                        <TextInput style={styles.modalInput} value={editing.text} onChangeText={(text) => setEditing({ ...editing, text })} multiline />
+                        <View style={styles.kindRow}>
+                          {NOTE_KINDS.map((kind) => (
+                            <Pressable key={kind} style={[styles.kindChip, editing.kind === kind && styles.kindChipOn]} onPress={() => setEditing({ ...editing, kind })}>
+                              <Text style={styles.kindText}>{kind}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                        <View style={styles.noteActions}>
+                          <Pressable onPress={() => setEditing(null)}><Text style={styles.modalCancel}>Cancel</Text></Pressable>
+                          <Pressable onPress={() => void saveEditing()}><Text style={styles.modalOk}>Save</Text></Pressable>
+                        </View>
+                      </View>
+                    ) : (
+                      <>
+                        <Pressable style={styles.noteMain} onPress={() => setEditing({ id: noteRow.id, text: noteRow.text, kind: noteRow.kind })}>
+                          <Text style={styles.noteKind}>{noteRow.kind}</Text>
+                          <Text style={styles.noteText}>{noteRow.text}</Text>
+                        </Pressable>
+                        <Pressable hitSlop={6} onPress={() => setDialog({ kind: "deleteNote", id: noteRow.id, text: noteRow.text })}>
+                          <Text style={styles.chatRowIconText}>🗑</Text>
+                        </Pressable>
+                      </>
+                    )}
+                  </View>
+                ))}
+              </>
+            ) : null}
+            {(memFilter === "all" || memFilter === "reminders") ? (
+              <>
+                {reminders.filter((row) => row.status !== "done").length === 0 && memFilter === "reminders" ? (
+                  <Text style={styles.dim}>No reminders. Tell Preyas: "remind me to call mum at 6".</Text>
+                ) : null}
+                {reminders.filter((row) => row.status !== "done").map((row) => (
+                  <View key={row.id} style={styles.noteRow}>
+                    <View style={styles.noteMain}>
+                      <Text style={styles.noteKind}>
+                        {formatDue(new Date(row.dueAt))}
+                        {row.repeat !== "none" ? ` · ${row.repeat}` : ""}
+                      </Text>
+                      <Text style={styles.noteText}>{row.text}</Text>
+                    </View>
+                    <Pressable hitSlop={6} onPress={() => void updateReminder(row.id, { action: "done" })}>
+                      <Text style={styles.deckBtnText}>Done</Text>
+                    </Pressable>
+                    <Pressable hitSlop={6} onPress={() => void updateReminder(row.id, { action: "snooze", snooze: "10m" })}>
+                      <Text style={styles.dim}>+10m</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            ) : null}
+            {(memFilter === "all" || memFilter === "docs") ? (
+              <>
+                {inbox.length === 0 && memFilter === "docs" ? (
+                  <Text style={styles.dim}>
+                    No documents yet. Drop a PDF or text file into the inbox folder{inboxPath ? ` (${inboxPath})` : ""} and ask Preyas to read it.
+                  </Text>
+                ) : null}
+                {inbox.map((file) => (
+                  <View key={file.name} style={styles.noteRow}>
+                    <View style={styles.noteMain}>
+                      <Text style={styles.noteKind}>{file.type} · {Math.max(1, Math.round(file.size / 1024))} KB</Text>
+                      <Text style={styles.noteText} numberOfLines={2}>{file.name}</Text>
+                    </View>
+                    <Pressable
+                      hitSlop={6}
+                      onPress={() => {
+                        onSection?.("chat");
+                        void send(`summarize ${file.name}`, false);
+                      }}
+                    >
+                      <Text style={styles.deckBtnText}>Summarize</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            ) : null}
+            {memFilter === "all" && notesList.length === 0 && reminders.length === 0 && inbox.length === 0 ? (
+              <Text style={styles.dim}>{MAIN_TABS[2]!.example}</Text>
+            ) : null}
+          </ScrollView>
         </View>
       ) : (
         <View style={[styles.split, !wide && styles.stack]}>
-          <View style={[styles.left, !wide && styles.leftShort]}>
-            <PreyasHero talking={phase === "speaking"} short={!wide} />
-            {wide ? (
-              <>
+          {wide ? (
+          <View style={styles.left}>
+            <PreyasHero talking={phase === "speaking"} short={false} />
             <Text style={styles.kicker}>YOUR PARTNER</Text>
             <Text style={styles.bigName}>PREYAS</Text>
             <Text style={styles.tagline}>Playful in the room. Loyal at heart.</Text>
@@ -1957,12 +1983,8 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
             <Pressable style={styles.profileBtn} onPress={() => setProfile(true)}>
               <Text style={styles.profileText}>View Profile  →</Text>
             </Pressable>
-              </>
-            ) : (
-              <Text style={styles.tagline}>Preyas · Aquos · level {partner.level}</Text>
-            )}
           </View>
-
+          ) : null}
           <View style={styles.chatCard}>
             {wide ? <View style={styles.sidebar}>{chatList(false)}</View> : null}
             <View style={styles.thread}>
@@ -1972,16 +1994,32 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                   <Text style={styles.drawerBtnText}>☰</Text>
                 </Pressable>
               ) : null}
-              <View style={styles.miniBall} />
+              <Pressable onPress={() => setProfile(true)} hitSlop={6} accessibilityLabel="Preyas profile">
+                <View style={styles.miniBall} />
+              </Pressable>
               <View style={styles.chatHeadText}>
-                <Text style={styles.chatName}>Preyas  ◆</Text>
-                <Text style={styles.subtitle}>Always by your side</Text>
+                <Text style={styles.chatName}>Preyas</Text>
+                <Text style={styles.subtitle}>{online ? "Here with you" : "Offline"} · level {partner.level}</Text>
               </View>
               <View style={styles.onlineRow}>
                 <View style={[styles.dot, online ? styles.dotOn : styles.dotOff]} />
                 <Text style={styles.online}>{online ? "Online" : "Offline"}</Text>
               </View>
+              <Pressable style={styles.gearBtn} onPress={() => onSection?.("settings")} hitSlop={8} accessibilityLabel="Settings">
+                <Text style={styles.gearText}>⚙</Text>
+              </Pressable>
             </View>
+            {briefing && !briefingDismissed ? (
+              <View style={styles.briefingCard}>
+                <View style={styles.briefingCardHead}>
+                  <Text style={styles.briefingTitle}>Your day</Text>
+                  <Pressable onPress={() => setBriefingDismissed(true)} hitSlop={8} accessibilityLabel="Dismiss briefing">
+                    <Text style={styles.sidebarClose}>✕</Text>
+                  </Pressable>
+                </View>
+                <Text style={styles.bubbleText}>{briefing}</Text>
+              </View>
+            ) : null}
             <View style={styles.logWrap}>
               <ScrollView
                 ref={logRef}
@@ -1998,7 +2036,8 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
               {messages.length === 0 && !live ? (
                 <View style={styles.emptyChat}>
                   <Text style={styles.emptyTitle}>Say hi to Preyas.</Text>
-                  <Text style={styles.emptyText}>Ask a question, use a quick chip below, or say “remember …” to save a note.</Text>
+                  <Text style={styles.emptyText}>{MAIN_TABS[0]!.empty}</Text>
+                  <Text style={styles.emptyText}>{MAIN_TABS[0]!.example}</Text>
                 </View>
               ) : null}
               {messages.map((message, index) => {
@@ -2029,21 +2068,18 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                           <View style={styles.briefingActions}>
                             <Pressable
                               style={styles.docBtn}
-                              onPress={() => {
-                                setPane("status");
-                                void refreshHealth();
-                              }}
+                              onPress={() => onSection?.("settings")}
                             >
-                              <Text style={styles.docBtnText}>Open status</Text>
+                              <Text style={styles.docBtnText}>Open settings</Text>
                             </Pressable>
                             <Pressable
                               style={styles.docBtn}
                               onPress={() => {
-                                setRemindersOpen(true);
-                                void refreshReminders();
+                                onSection?.("memory");
+                                setMemFilter("reminders");
                               }}
                             >
-                              <Text style={styles.docBtnText}>Done on reminders</Text>
+                              <Text style={styles.docBtnText}>Open reminders</Text>
                             </Pressable>
                           </View>
                         </View>
@@ -2141,7 +2177,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 value={draft}
                 onChangeText={setDraft}
                 placeholder="Message Preyas..."
-                placeholderTextColor="#6d7c88"
+                placeholderTextColor="#6d857c"
                 style={styles.input}
                 onSubmitEditing={submitDraft}
               />
@@ -2198,57 +2234,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           </View>
         </View>
       )}
-
       {!wide && drawerOpen ? (
         <View style={styles.drawerWrap}>
           <Pressable style={styles.scrim} onPress={() => setDrawerOpen(false)} />
           <View style={styles.drawer}>{chatList(true)}</View>
         </View>
       ) : null}
-
-      {studyOpen ? (
-        <View style={styles.notesWrap}>
-          <Pressable style={styles.scrim} onPress={() => setStudyOpen(false)} />
-          <View style={styles.notesPanel}>
-            <View style={styles.notesHead}>
-              <Text style={styles.sidebarTitle}>STUDY</Text>
-              <Pressable onPress={() => setStudyOpen(false)} hitSlop={8}>
-                <Text style={styles.sidebarClose}>✕</Text>
-              </Pressable>
-            </View>
-            <ScrollView style={styles.notesScroll} contentContainerStyle={styles.notesList}>
-              {decks.map((deck) => (
-                <View key={deck.id} style={styles.noteRow}>
-                  <View style={styles.noteMain}>
-                    <Text style={styles.noteKind}>
-                      {deck.cards} cards{deck.due > 0 ? ` · ${deck.due} due` : " · none due"}
-                    </Text>
-                    <Text style={styles.noteText}>{deck.title}</Text>
-                  </View>
-                  <Pressable style={styles.docBtn} onPress={() => void startReview(deck.id, deck.title)}>
-                    <Text style={styles.docBtnText}>Review</Text>
-                  </Pressable>
-                  <Pressable style={styles.docBtn} onPress={() => void startQuiz(deck.id, deck.title)}>
-                    <Text style={styles.docBtnText}>Quiz</Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.chatRowIcon}
-                    onPress={() => setDialog({ kind: "deleteDeck", id: deck.id, title: deck.title })}
-                  >
-                    <Text style={styles.chatRowIconText}>🗑</Text>
-                  </Pressable>
-                </View>
-              ))}
-              {decks.length === 0 ? (
-                <Text style={styles.chatEmpty}>
-                  No decks yet. Make one with "make flashcards from {inbox[0]?.name || "<file>"}" or from the Docs panel.
-                </Text>
-              ) : null}
-            </ScrollView>
-          </View>
-        </View>
-      ) : null}
-
       {review ? (
         <View style={styles.modalWrap}>
           <View style={styles.modal}>
@@ -2290,7 +2281,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           </View>
         </View>
       ) : null}
-
       {quiz ? (
         <View style={styles.modalWrap}>
           <View style={styles.modal}>
@@ -2312,7 +2302,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 value={quiz.typed}
                 onChangeText={(value) => setQuiz({ ...quiz, typed: value })}
                 placeholder="Your answer"
-                placeholderTextColor="#6d7c88"
+                placeholderTextColor="#6d857c"
                 style={styles.modalInput}
                 onSubmitEditing={() => void answerQuiz(quiz.typed)}
               />
@@ -2330,46 +2320,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           </View>
         </View>
       ) : null}
-
-      {remindersOpen ? (
-        <View style={styles.notesWrap}>
-          <Pressable style={styles.scrim} onPress={() => setRemindersOpen(false)} />
-          <View style={styles.notesPanel}>
-            <View style={styles.notesHead}>
-              <Text style={styles.sidebarTitle}>REMINDERS</Text>
-              <Pressable onPress={() => setRemindersOpen(false)} hitSlop={8}>
-                <Text style={styles.sidebarClose}>✕</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.docHint}>Say "remind me tomorrow at 9 to call the vet".</Text>
-            <ScrollView style={styles.notesScroll} contentContainerStyle={styles.notesList}>
-              {reminders
-                .filter((row) => row.status !== "done")
-                .map((row) => (
-                  <View key={row.id} style={styles.noteRow}>
-                    <View style={styles.noteMain}>
-                      <Text style={styles.noteKind}>
-                        {formatDue(new Date(row.dueAt))}
-                        {row.repeat !== "none" ? ` · ${row.repeat}` : ""}
-                      </Text>
-                      <Text style={styles.noteText}>{row.text}</Text>
-                    </View>
-                    <Pressable style={styles.docBtn} onPress={() => void updateReminder(row.id, { action: "done" })}>
-                      <Text style={styles.docBtnText}>Done</Text>
-                    </Pressable>
-                    <Pressable style={styles.docBtn} onPress={() => void updateReminder(row.id, { action: "snooze", snooze: "10m" })}>
-                      <Text style={styles.docBtnText}>+10m</Text>
-                    </Pressable>
-                  </View>
-                ))}
-              {reminders.filter((row) => row.status !== "done").length === 0 ? (
-                <Text style={styles.chatEmpty}>Nothing scheduled.</Text>
-              ) : null}
-            </ScrollView>
-          </View>
-        </View>
-      ) : null}
-
       {nextReminder ? (
         <View style={styles.reminderBanner}>
           <Text style={styles.reminderBannerText}>
@@ -2380,49 +2330,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           </Pressable>
         </View>
       ) : null}
-
-      {docsOpen ? (
-        <View style={styles.notesWrap}>
-          <Pressable style={styles.scrim} onPress={() => setDocsOpen(false)} />
-          <View style={styles.notesPanel}>
-            <View style={styles.notesHead}>
-              <Text style={styles.sidebarTitle}>DOCUMENTS</Text>
-              <Pressable onPress={() => setDocsOpen(false)} hitSlop={8}>
-                <Text style={styles.sidebarClose}>✕</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.docHint}>
-              Drop files into the Agent drive, in BakuganBuddy/documents{inboxPath ? ` (${inboxPath})` : ""}, then refresh.
-            </Text>
-            <Pressable style={styles.newChat} onPress={() => void refreshInbox()}>
-              <Text style={styles.newChatText}>Refresh</Text>
-            </Pressable>
-            <ScrollView style={styles.notesScroll} contentContainerStyle={styles.notesList}>
-              {inbox.map((file) => (
-                <View key={file.name} style={styles.noteRow}>
-                  <View style={styles.noteMain}>
-                    <Text style={styles.noteKind}>{file.type} · {Math.max(1, Math.round(file.size / 1024))} KB</Text>
-                    <Text style={styles.noteText} numberOfLines={2}>{file.name}</Text>
-                  </View>
-                  <Pressable
-                    style={styles.docBtn}
-                    onPress={() => {
-                      setDocsOpen(false);
-                      void send(`summarize ${file.name}`, false);
-                    }}
-                  >
-                    <Text style={styles.docBtnText}>Summarize</Text>
-                  </Pressable>
-                </View>
-              ))}
-              {inbox.length === 0 ? (
-                <Text style={styles.chatEmpty}>No documents yet. Drop one into the inbox folder.</Text>
-              ) : null}
-            </ScrollView>
-          </View>
-        </View>
-      ) : null}
-
       {docChoice ? (
         <View style={styles.modalWrap}>
           <View style={styles.modal}>
@@ -2449,86 +2356,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           </View>
         </View>
       ) : null}
-
-      {notesOpen ? (
-        <View style={styles.notesWrap}>
-          <Pressable style={styles.scrim} onPress={() => setNotesOpen(false)} />
-          <View style={styles.notesPanel}>
-            <View style={styles.notesHead}>
-              <Text style={styles.sidebarTitle}>NOTES</Text>
-              <Pressable onPress={() => setNotesOpen(false)} hitSlop={8}>
-                <Text style={styles.sidebarClose}>✕</Text>
-              </Pressable>
-            </View>
-            <TextInput
-              value={notesQuery}
-              onChangeText={(value) => {
-                setNotesQuery(value);
-                void refreshNotes(value);
-              }}
-              placeholder="Search notes..."
-              placeholderTextColor="#6d7c88"
-              style={styles.modalInput}
-            />
-            <ScrollView style={styles.notesScroll} contentContainerStyle={styles.notesList}>
-              {notesList.map((note) => (
-                <View key={note.id} style={styles.noteRow}>
-                  {editing?.id === note.id ? (
-                    <View style={styles.noteEditing}>
-                      <TextInput
-                        value={editing.text}
-                        onChangeText={(value) => setEditing({ ...editing, text: value })}
-                        style={styles.modalInput}
-                        multiline
-                      />
-                      <View style={styles.kindRow}>
-                        {NOTE_KINDS.map((kind) => (
-                          <Pressable
-                            key={kind}
-                            style={[styles.kindChip, editing.kind === kind && styles.kindChipOn]}
-                            onPress={() => setEditing({ ...editing, kind })}
-                          >
-                            <Text style={styles.kindText}>{kind}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                      <View style={styles.noteActions}>
-                        <Pressable onPress={() => setEditing(null)}>
-                          <Text style={styles.modalCancel}>Cancel</Text>
-                        </Pressable>
-                        <Pressable onPress={() => void saveEditing()}>
-                          <Text style={styles.modalOk}>Save</Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                  ) : (
-                    <>
-                      <Pressable
-                        style={styles.noteMain}
-                        onPress={() => setEditing({ id: note.id, text: note.text, kind: note.kind })}
-                      >
-                        <Text style={styles.noteKind}>{note.kind}</Text>
-                        <Text style={styles.noteText}>{note.text}</Text>
-                      </Pressable>
-                      <Pressable
-                        style={styles.chatRowIcon}
-                        hitSlop={6}
-                        onPress={() => setDialog({ kind: "deleteNote", id: note.id, text: note.text })}
-                      >
-                        <Text style={styles.chatRowIconText}>🗑</Text>
-                      </Pressable>
-                    </>
-                  )}
-                </View>
-              ))}
-              {notesList.length === 0 ? (
-                <Text style={styles.chatEmpty}>No notes yet. Say "remember …" in chat.</Text>
-              ) : null}
-            </ScrollView>
-          </View>
-        </View>
-      ) : null}
-
       {confirmDialog ? (
         <View style={styles.modalWrap}>
           <View style={styles.modal}>
@@ -2557,13 +2384,12 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           </View>
         </View>
       ) : null}
-
       {needPair ? (
         <View style={styles.modalWrap}>
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>Pair this phone</Text>
             <Text style={styles.modalBody}>
-              Enter the 6-digit code shown on the Mac, under Status → Open on iPhone.
+              Enter the 6-digit code shown on the Mac, under Settings → Open on iPhone.
             </Text>
             <TextInput
               value={pairCode}
@@ -2574,7 +2400,7 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
                 if (clean.length === 6) void submitPairing();
               }}
               placeholder="123456"
-              placeholderTextColor="#6d7c88"
+              placeholderTextColor="#6d857c"
               keyboardType="number-pad"
               maxLength={6}
               style={[styles.modalInput, styles.pairInput]}
@@ -2588,7 +2414,6 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
           </View>
         </View>
       ) : null}
-
       {profile ? (
         <View style={styles.sheet}>
           <Text style={styles.bigName}>PREYAS</Text>
@@ -2601,153 +2426,108 @@ export function ChatScreen({ onNavigate }: { onNavigate?: (tab: "room" | "body" 
     </View>
   );
 }
-
-const aqua = "#7ed4ea";
+const aqua = theme.accent;
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: "#070b12",
+    backgroundColor: "#07100d",
     // Belt and braces: no child may widen the page, so it never scrolls sideways.
     overflow: "hidden",
     maxWidth: "100%",
     paddingTop: "env(safe-area-inset-top)" as unknown as number,
     paddingBottom: "env(safe-area-inset-bottom)" as unknown as number,
   },
-  voiceHint: { color: "#8aa0ab", fontSize: 11, marginTop: 6, textAlign: "center", width: "100%" },
+  voiceHint: { color: "#8aa89b", fontSize: 11, marginTop: 6, textAlign: "center", width: "100%" },
   pairInput: { fontSize: 24, letterSpacing: 6, textAlign: "center" },
-  nav: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(126,212,234,0.18)",
-    gap: 12,
-  },
-  brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  mark: { width: 16, height: 16, borderWidth: 1.5, borderColor: aqua, transform: [{ rotate: "45deg" }] },
-  brandTop: { color: "#e8f7fb", fontSize: 11, fontWeight: "800", letterSpacing: 1.4 },
-  brandSub: { color: aqua, fontSize: 10, letterSpacing: 2 },
-  navTabs: { flexDirection: "row", alignItems: "center", gap: 14, flexWrap: "wrap", justifyContent: "center", flex: 1 },
-  navTab: { color: "#9aa8b2", fontSize: 13 },
-  navTabOn: { color: "#e8f7fb", fontSize: 13, fontWeight: "700" },
-  navOn: { borderWidth: 1, borderColor: aqua, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 4 },
-  navRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  partnerBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
-  partnerName: { color: "#e8f7fb", fontSize: 13 },
-  caret: { color: aqua, fontSize: 10 },
-  more: { color: "#9aa8b2", fontSize: 18, paddingHorizontal: 4 },
-  menu: {
-    position: "absolute",
-    top: 28,
-    right: 0,
-    backgroundColor: "#101820",
-    borderWidth: 1,
-    borderColor: "rgba(126,212,234,0.35)",
-    padding: 8,
-    zIndex: 4,
-    minWidth: 120,
-  },
-  menuItem: { color: "#e8f7fb", paddingVertical: 6 },
   split: { flex: 1, flexDirection: "row", padding: 16, gap: 16, minWidth: 0, maxWidth: "100%" },
   stack: { flexDirection: "column" },
   left: { flex: 1, gap: 8 },
-  leftShort: { flexGrow: 0 },
-  kicker: { color: "#8aa0ab", fontSize: 11, letterSpacing: 1.6, marginTop: 8 },
-  bigName: { color: "#f4fbfe", fontSize: 36, fontWeight: "800", letterSpacing: 1 },
-  tagline: { color: "#b7c6ce", fontSize: 14 },
+  kicker: { color: "#8aa89b", fontSize: 11, letterSpacing: 1.6, marginTop: 8 },
+  bigName: { color: "#eaf7f1", fontSize: 36, fontWeight: "800", letterSpacing: 1 },
+  tagline: { color: "#b3c8bf", fontSize: 14 },
   pills: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
-  pill: { color: "#d5eef5", borderWidth: 1, borderColor: "rgba(126,212,234,0.35)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12 },
-  bondCard: { marginTop: 8, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: "rgba(126,212,234,0.28)", backgroundColor: "#0c141c" },
+  pill: { color: "#d2efe2", borderWidth: 1, borderColor: "rgba(67,217,173,0.35)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12 },
+  bondCard: { marginTop: 8, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: "rgba(67,217,173,0.28)", backgroundColor: "#0c1613" },
   bondHead: { flexDirection: "row", justifyContent: "space-between" },
-  bondTitle: { color: "#e8f7fb", fontWeight: "700" },
+  bondTitle: { color: "#e4f5ec", fontWeight: "700" },
   bondPct: { color: aqua, fontWeight: "700" },
-  track: { height: 8, borderRadius: 4, backgroundColor: "#1a2832", marginTop: 8, overflow: "hidden" },
+  track: { height: 8, borderRadius: 4, backgroundColor: "#18251f", marginTop: 8, overflow: "hidden" },
   fillBar: { height: 8, backgroundColor: aqua },
-  caption: { color: "#8aa0ab", fontSize: 12, marginTop: 6 },
-  profileBtn: { marginTop: 8, alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(126,212,234,0.4)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  caption: { color: "#8aa89b", fontSize: 12, marginTop: 6 },
+  profileBtn: { marginTop: 8, alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(67,217,173,0.4)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   profileText: { color: aqua, fontWeight: "700" },
-  chatCard: { flex: 1.2, flexDirection: "row", gap: 12, borderWidth: 1, borderColor: "rgba(126,212,234,0.22)", borderRadius: 18, backgroundColor: "#0b1218", padding: 12, minHeight: 320, minWidth: 0, maxWidth: "100%" },
+  chatCard: { flex: 1.2, flexDirection: "row", gap: 12, borderWidth: 1, borderColor: "rgba(67,217,173,0.22)", borderRadius: 18, backgroundColor: "#0a1310", padding: 12, minHeight: 320, minWidth: 0, maxWidth: "100%" },
   thread: { flex: 1, minWidth: 0 },
-  sidebar: { width: 210, borderRightWidth: 1, borderRightColor: "rgba(126,212,234,0.16)", paddingRight: 10 },
+  sidebar: { width: 210, borderRightWidth: 1, borderRightColor: "rgba(67,217,173,0.16)", paddingRight: 10 },
   sidebarInner: { flex: 1, gap: 8 },
   sidebarHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sidebarTitle: { color: "#8aa0ab", fontSize: 11, letterSpacing: 1.6 },
-  sidebarClose: { color: "#9aa8b2", fontSize: 16, paddingHorizontal: 4 },
-  newChat: { borderWidth: 1, borderColor: "rgba(126,212,234,0.45)", borderRadius: 12, paddingVertical: 8, alignItems: "center" },
+  sidebarTitle: { color: "#8aa89b", fontSize: 11, letterSpacing: 1.6 },
+  sidebarClose: { color: "#93aca2", fontSize: 16, paddingHorizontal: 4 },
+  newChat: { borderWidth: 1, borderColor: "rgba(67,217,173,0.45)", borderRadius: 12, paddingVertical: 8, alignItems: "center" },
   newChatText: { color: aqua, fontSize: 13, fontWeight: "700" },
   chatList: { flex: 1 },
   chatListInner: { gap: 4, paddingBottom: 8 },
   chatRow: { flexDirection: "row", alignItems: "center", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 6, gap: 2 },
-  chatRowOn: { backgroundColor: "rgba(126,212,234,0.12)" },
+  chatRowOn: { backgroundColor: "rgba(67,217,173,0.12)" },
   chatRowMain: { flex: 1, minWidth: 0 },
-  chatRowTitle: { color: "#e7f3f7", fontSize: 13, fontWeight: "600" },
-  chatRowDate: { color: "#7e909a", fontSize: 11, marginTop: 1 },
+  chatRowTitle: { color: "#e2f4ea", fontSize: 13, fontWeight: "600" },
+  chatRowDate: { color: "#7e988d", fontSize: 11, marginTop: 1 },
   chatRowIcon: { paddingHorizontal: 3 },
-  chatRowIconText: { color: "#9aa8b2", fontSize: 13 },
-  chatEmpty: { color: "#7e909a", fontSize: 12 },
+  chatRowIconText: { color: "#93aca2", fontSize: 13 },
+  chatEmpty: { color: "#7e988d", fontSize: 12 },
   emptyChat: { alignItems: "center", paddingVertical: 36, paddingHorizontal: 20, gap: 6 },
-  emptyTitle: { color: "#e8f7fb", fontSize: 16, fontWeight: "800" },
-  emptyText: { color: "#8aa0ab", fontSize: 13, lineHeight: 19, textAlign: "center" },
-  sidebarHeadRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  notesBtn: { borderWidth: 1, borderColor: "rgba(126,212,234,0.4)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
-  notesBtnText: { color: aqua, fontSize: 11, fontWeight: "700" },
+  emptyTitle: { color: "#e4f5ec", fontSize: 16, fontWeight: "800" },
+  emptyText: { color: "#8aa89b", fontSize: 13, lineHeight: 19, textAlign: "center" },
   chipSaved: { alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(61,222,138,0.5)", backgroundColor: "rgba(61,222,138,0.12)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 6 },
   chipSavedText: { color: "#8ff0bd", fontSize: 12, fontWeight: "700" },
-  notesWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 25, flexDirection: "row", justifyContent: "flex-end" },
-  notesPanel: { width: 360, maxWidth: "100%", height: "100%", backgroundColor: "#0b1218", borderLeftWidth: 1, borderLeftColor: "rgba(126,212,234,0.3)", padding: 12, gap: 8 },
-  notesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  notesScroll: { flex: 1 },
-  notesList: { gap: 8, paddingBottom: 12 },
-  noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, borderWidth: 1, borderColor: "rgba(126,212,234,0.18)", borderRadius: 10, padding: 8 },
+  noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, borderWidth: 1, borderColor: "rgba(67,217,173,0.18)", borderRadius: 10, padding: 8 },
   noteEditing: { flex: 1, gap: 6 },
   kindRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  kindChip: { borderWidth: 1, borderColor: "rgba(126,212,234,0.3)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
-  kindChipOn: { backgroundColor: "rgba(126,212,234,0.2)" },
-  kindText: { color: "#d5eef5", fontSize: 11 },
+  kindChip: { borderWidth: 1, borderColor: "rgba(67,217,173,0.3)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
+  kindChipOn: { backgroundColor: "rgba(67,217,173,0.2)" },
+  kindText: { color: "#d2efe2", fontSize: 11 },
   noteActions: { flexDirection: "row", justifyContent: "flex-end", gap: 14 },
   noteMain: { flex: 1, minWidth: 0 },
   noteKind: { color: aqua, fontSize: 10, letterSpacing: 1 },
-  noteText: { color: "#e7f3f7", fontSize: 13, lineHeight: 18, marginTop: 2 },
-  taskCard: { borderWidth: 1, borderColor: "rgba(126,212,234,0.3)", borderRadius: 12, backgroundColor: "#0c141c", padding: 10, gap: 6, marginTop: 6 },
+  noteText: { color: "#e2f4ea", fontSize: 13, lineHeight: 18, marginTop: 2 },
+  taskCard: { borderWidth: 1, borderColor: "rgba(67,217,173,0.3)", borderRadius: 12, backgroundColor: "#0c1613", padding: 10, gap: 6, marginTop: 6 },
   taskStatus: { color: aqua, fontSize: 12, fontWeight: "700" },
   stepRow: { gap: 2 },
-  stepTitle: { color: "#d5eef5", fontSize: 13 },
-  stepResult: { color: "#9fb3bd", fontSize: 12, lineHeight: 17, marginLeft: 14 },
-  resumeBtn: { alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(126,212,234,0.5)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, marginTop: 2 },
+  stepTitle: { color: "#d2efe2", fontSize: 13 },
+  stepResult: { color: "#9fbcb0", fontSize: 12, lineHeight: 17, marginLeft: 14 },
+  resumeBtn: { alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(67,217,173,0.5)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, marginTop: 2 },
   resumeText: { color: aqua, fontSize: 12, fontWeight: "700" },
   drawerBtn: { paddingHorizontal: 4, paddingVertical: 2 },
   drawerBtnText: { color: aqua, fontSize: 20 },
   drawerWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 20, flexDirection: "row" },
   scrim: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.55)" },
-  drawer: { width: 260, maxWidth: "82%", backgroundColor: "#0b1218", borderRightWidth: 1, borderRightColor: "rgba(126,212,234,0.3)", padding: 12, zIndex: 21 },
+  drawer: { width: 260, maxWidth: "82%", backgroundColor: "#0a1310", borderRightWidth: 1, borderRightColor: "rgba(67,217,173,0.3)", padding: 12, zIndex: 21 },
   modalWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 30, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center", padding: 20 },
-  modal: { width: "100%", maxWidth: 360, backgroundColor: "#101820", borderWidth: 1, borderColor: "rgba(126,212,234,0.4)", borderRadius: 16, padding: 16, gap: 10 },
-  modalTitle: { color: "#f4fbfe", fontSize: 16, fontWeight: "800" },
-  modalBody: { color: "#b7c6ce", fontSize: 13, lineHeight: 19 },
-  modalInput: { borderWidth: 1, borderColor: "rgba(126,212,234,0.35)", borderRadius: 10, color: "#f4fbfe", paddingHorizontal: 10, paddingVertical: 8 },
+  modal: { width: "100%", maxWidth: 360, backgroundColor: "#0e1a16", borderWidth: 1, borderColor: "rgba(67,217,173,0.4)", borderRadius: 16, padding: 16, gap: 10 },
+  modalTitle: { color: "#eaf7f1", fontSize: 16, fontWeight: "800" },
+  modalBody: { color: "#b3c8bf", fontSize: 13, lineHeight: 19 },
+  modalInput: { borderWidth: 1, borderColor: "rgba(67,217,173,0.35)", borderRadius: 10, color: "#eaf7f1", paddingHorizontal: 10, paddingVertical: 8, fontSize: 16 },
   modalRow: { flexDirection: "row", justifyContent: "flex-end", gap: 16, marginTop: 4 },
-  modalCancel: { color: "#9aa8b2", fontWeight: "700" },
+  modalCancel: { color: "#93aca2", fontWeight: "700" },
   modalOk: { color: aqua, fontWeight: "800" },
   modalDanger: { color: "#ff8a8a" },
   chatHead: { flexDirection: "row", alignItems: "center", gap: 10, paddingBottom: 8 },
   chatHeadText: { flex: 1 },
-  chatName: { color: "#f4fbfe", fontWeight: "800", fontSize: 16 },
-  subtitle: { color: "#8aa0ab", fontSize: 12 },
+  chatName: { color: "#eaf7f1", fontWeight: "800", fontSize: 16 },
+  subtitle: { color: "#8aa89b", fontSize: 12 },
   onlineRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   dotOn: { backgroundColor: "#3dde8a" },
-  dotOff: { backgroundColor: "#5c6a72" },
-  online: { color: "#c5d4db", fontSize: 12 },
-  miniBall: { width: 28, height: 28, borderRadius: 14, backgroundColor: "#1a3c4a", borderWidth: 1, borderColor: aqua },
+  dotOff: { backgroundColor: "#5c7269" },
+  online: { color: "#c5d8cf", fontSize: 12 },
+  miniBall: { width: 28, height: 28, borderRadius: 14, backgroundColor: "#174033", borderWidth: 1, borderColor: aqua },
   log: { flex: 1, width: "100%" },
   logWrap: { flex: 1, position: "relative" },
   jumpWrap: { position: "absolute", left: 0, right: 0, bottom: 6, alignItems: "center" },
   jump: {
     borderWidth: 1,
-    borderColor: "rgba(126,212,234,0.5)",
-    backgroundColor: "#0f222c",
+    borderColor: "rgba(67,217,173,0.5)",
+    backgroundColor: "#0f241d",
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -2760,62 +2540,75 @@ const styles = StyleSheet.create({
   bubbleLeft: { alignSelf: "flex-start" },
   bubbleRight: { alignSelf: "flex-end" },
   bubble: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, maxWidth: "100%", flexShrink: 1 },
-  bubbleHis: { backgroundColor: "#121a22", borderWidth: 1, borderColor: "rgba(126,212,234,0.18)" },
-  bubbleMine: { backgroundColor: "#143246" },
+  bubbleHis: { backgroundColor: "#111c18", borderWidth: 1, borderColor: "rgba(67,217,173,0.18)" },
+  bubbleMine: { backgroundColor: "#143b30" },
   bubbleWho: { color: aqua, fontSize: 11, fontWeight: "700", marginBottom: 2 },
-  bubbleText: { color: "#e7f3f7", fontSize: 15, lineHeight: 21, flexShrink: 1 },
-  time: { color: "#7e909a", fontSize: 11, marginTop: 4, textAlign: "right" },
+  bubbleText: { color: "#e2f4ea", fontSize: 15, lineHeight: 21, flexShrink: 1 },
+  time: { color: "#7e988d", fontSize: 11, marginTop: 4, textAlign: "right" },
   typing: { color: aqua, fontSize: 13, marginTop: 4 },
   sources: { marginTop: 6, gap: 2 },
-  docHint: { color: "#8aa0ab", fontSize: 11, lineHeight: 16 },
   healthList: { gap: 8, marginVertical: 10 },
-  briefingCard: { marginTop: 8, borderWidth: 1, borderColor: "rgba(126,212,234,0.35)", borderRadius: 12, backgroundColor: "#0c141c", padding: 10, gap: 6 },
+  briefingCard: { marginTop: 8, borderWidth: 1, borderColor: "rgba(67,217,173,0.35)", borderRadius: 12, backgroundColor: "#0c1613", padding: 10, gap: 6 },
   briefingTitle: { color: aqua, fontSize: 12, fontWeight: "700", letterSpacing: 1 },
-  briefingText: { color: "#e7f3f7", fontSize: 13, lineHeight: 19 },
+  briefingText: { color: "#e2f4ea", fontSize: 13, lineHeight: 19 },
   briefingActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   healthRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  healthLabel: { color: "#e7f3f7", fontSize: 14, width: 120 },
-  healthDetail: { color: "#9aa8b2", fontSize: 12, flex: 1 },
+  healthLabel: { color: "#e2f4ea", fontSize: 14, width: 120 },
+  healthDetail: { color: "#93aca2", fontSize: 12, flex: 1 },
   restartBtn: { borderColor: "rgba(255,138,138,0.5)", marginTop: 8 },
-  phoneCard: { marginVertical: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: "rgba(126,212,234,0.3)", backgroundColor: "#0c141c", gap: 6 },
+  phoneCard: { marginVertical: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: "rgba(67,217,173,0.3)", backgroundColor: "#0c1613", gap: 6 },
   phoneUrl: { color: aqua, fontSize: 16, fontWeight: "700" },
-  reviewQuestion: { color: "#f4fbfe", fontSize: 16, fontWeight: "700", lineHeight: 22 },
-  reviewAnswer: { color: "#b7c6ce", fontSize: 14, lineHeight: 20 },
+  reviewQuestion: { color: "#eaf7f1", fontSize: 16, fontWeight: "700", lineHeight: 22 },
+  reviewAnswer: { color: "#b3c8bf", fontSize: 14, lineHeight: 20 },
   gradeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   gradeAgain: { borderColor: "rgba(255,138,138,0.6)" },
   quizOptions: { gap: 6 },
-  reminderBanner: { position: "absolute", top: 56, left: 12, right: 12, zIndex: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderWidth: 1, borderColor: "rgba(126,212,234,0.5)", backgroundColor: "#0f222c", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
-  reminderBannerText: { color: "#d5eef5", fontSize: 13, flex: 1 },
-  docBtn: { borderWidth: 1, borderColor: "rgba(126,212,234,0.45)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
+  reminderBanner: { position: "absolute", top: 56, left: 12, right: 12, zIndex: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderWidth: 1, borderColor: "rgba(67,217,173,0.5)", backgroundColor: "#0f241d", borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  reminderBannerText: { color: "#d2efe2", fontSize: 13, flex: 1 },
+  docBtn: { borderWidth: 1, borderColor: "rgba(67,217,173,0.45)", borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
   docBtnText: { color: aqua, fontSize: 11, fontWeight: "700" },
-  docChoice: { borderWidth: 1, borderColor: "rgba(126,212,234,0.3)", borderRadius: 10, padding: 8 },
+  docChoice: { borderWidth: 1, borderColor: "rgba(67,217,173,0.3)", borderRadius: 10, padding: 8 },
   savePoints: { marginTop: 8, alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(61,222,138,0.5)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5 },
   savePointsText: { color: "#8ff0bd", fontSize: 12, fontWeight: "700" },
-  sourceLink: { color: "#9fdcf0", fontSize: 12, textDecorationLine: "underline" },
-  thinkToggle: { color: "#7e909a", fontSize: 11, marginTop: 6 },
-  thinkBody: { color: "#8aa0ab", fontSize: 12, marginTop: 4 },
+  sourceLink: { color: "#8ff0d0", fontSize: 12, textDecorationLine: "underline" },
+  thinkToggle: { color: "#7e988d", fontSize: 11, marginTop: 6 },
+  thinkBody: { color: "#8aa89b", fontSize: 12, marginTop: 4 },
   note: { color: "#e2c27a", fontSize: 13 },
-  composer: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "rgba(126,212,234,0.25)", borderRadius: 22, paddingHorizontal: 10, paddingVertical: 6 },
-  input: { flex: 1, color: "#f4fbfe", paddingVertical: 8, fontSize: 16 },
+  composer: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "rgba(67,217,173,0.25)", borderRadius: 22, paddingHorizontal: 10, paddingVertical: 6 },
+  input: { flex: 1, color: "#eaf7f1", paddingVertical: 8, fontSize: 16 },
   emoji: { color: aqua, fontSize: 18 },
   mic: { borderWidth: 1, borderColor: aqua, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, minWidth: 72, minHeight: 44, justifyContent: "center" },
-  micText: { color: "#d5eef5", fontSize: 11, textAlign: "center", textTransform: "capitalize" },
-  thinkBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: "rgba(126,212,234,0.35)", alignItems: "center", justifyContent: "center" },
-  thinkBtnOn: { backgroundColor: "rgba(126,212,234,0.25)", borderColor: aqua },
-  thinkBtnText: { fontSize: 18 },
-  send: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#1a6f86", alignItems: "center", justifyContent: "center" },
-  sendText: { color: "#f4fbfe", fontSize: 16 },
+  micText: { color: "#d2efe2", fontSize: 11, textAlign: "center", textTransform: "capitalize" },
+  thinkBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: "rgba(67,217,173,0.35)", alignItems: "center", justifyContent: "center" },
+  thinkBtnOn: { backgroundColor: "rgba(67,217,173,0.25)", borderColor: aqua },
+  thinkBtnText: { fontSize: 15 },
+  send: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#1a7a63", alignItems: "center", justifyContent: "center" },
+  sendText: { color: "#eaf7f1", fontSize: 16 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  chip: { borderWidth: 1, borderColor: "rgba(126,212,234,0.35)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
+  chip: { borderWidth: 1, borderColor: "rgba(67,217,173,0.35)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
   chipOff: { opacity: 0.45 },
-  chipHint: { backgroundColor: "rgba(126,212,234,0.15)" },
-  chipText: { color: "#d5eef5", fontSize: 12 },
+  chipHint: { backgroundColor: "rgba(67,217,173,0.15)" },
+  chipText: { color: "#d2efe2", fontSize: 12 },
   footerRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", marginTop: 8, gap: 8 },
-  footer: { color: "#8aa0ab", fontSize: 12, flexShrink: 1 },
+  footer: { color: "#8aa89b", fontSize: 12, flexShrink: 1 },
   switchRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  switchLabel: { color: "#8aa0ab", fontSize: 11 },
+  switchLabel: { color: "#8aa89b", fontSize: 11 },
   fill: { flex: 1 },
   pad: { padding: 20, gap: 8 },
-  dim: { color: "#9aa8b2", fontSize: 14 },
-  sheet: { position: "absolute", left: 24, right: 24, bottom: 24, backgroundColor: "#101820", borderWidth: 1, borderColor: aqua, borderRadius: 16, padding: 16, gap: 8 },
+  dim: { color: "#93aca2", fontSize: 14 },
+  sheet: { position: "absolute", left: 24, right: 24, bottom: 24, backgroundColor: "#0e1a16", borderWidth: 1, borderColor: aqua, borderRadius: 16, padding: 16, gap: 8 },
+  // One header per tab, one gear in the chat header.
+  sectionTitle: { color: "#eaf7f1", fontSize: 18, fontWeight: "800" },
+  gearBtn: { padding: 4 },
+  gearText: { color: "#93aca2", fontSize: 18 },
+  briefingCardHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  briefingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  advRow: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
+  advLink: { color: aqua, fontSize: 14, fontWeight: "700", paddingVertical: 4 },
+  memHead: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4, gap: 8 },
+  emptyTab: { marginTop: 16, alignItems: "center", gap: 6 },
+  deckRow: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: "rgba(67,217,173,0.18)", borderRadius: 12, padding: 10 },
+  deckTitle: { color: "#e2f4ea", fontSize: 14, fontWeight: "700" },
+  deckBtn: { borderWidth: 1, borderColor: "rgba(67,217,173,0.45)", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
+  deckBtnText: { color: aqua, fontSize: 12, fontWeight: "700" },
 });
