@@ -1,7 +1,10 @@
 /**
- * The daily briefing: gather facts with code, then let the local model say them
- * in Preyas's voice. No web, no paid model, and nothing invented — if the model
- * is down the plain list is shown instead.
+ * The daily briefing.
+ *
+ * The items are built by code from local facts only, most urgent first, so the
+ * model can never invent or drop one. The local model writes a single short
+ * opening line, given only the number and kinds of items — never their text.
+ * If there is nothing to say, the briefing says so plainly and invents nothing.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -13,9 +16,12 @@ import { localParts, warsawWallTime } from "../../packages/alive/src/reminders.t
 
 export const DEFAULT_TIME = "08:30";
 export const BRIEFING_CHAT_TITLE = "Daily briefing";
+export const EMPTY_OPENING = "Nothing on your plate today — quiet waters.";
+export const FALLBACK_OPENING = "Morning, partner! Here's your day.";
 const DEADLINE_WINDOW_DAYS = 7;
-const RECENT_DAYS = 2;
-const MAX_LINES = 5;
+const MAX_ITEMS = 6;
+const OPENING_MAX = 120;
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 export function briefingsDir(root) {
   return path.join(root, "memory", "briefings");
@@ -27,6 +33,10 @@ export function settingsPath(root) {
 
 export function briefingPath(root, day) {
   return path.join(briefingsDir(root), `${day}.md`);
+}
+
+export function briefingJsonPath(root, day) {
+  return path.join(briefingsDir(root), `${day}.json`);
 }
 
 /** YYYY-MM-DD in Europe/Warsaw, not in UTC. */
@@ -78,18 +88,19 @@ function addDays(instant, days) {
   return new Date(instant.getTime() + days * 86_400_000);
 }
 
-/** Everything the briefing should mention, for a fixed "now". */
+/** Everything the briefing may mention, for a fixed "now". */
 export function gatherFacts(root, options = {}) {
   const {
     now = new Date(),
     buddyRoot = root,
     documentsInbox = path.join(buddyRoot, "documents"),
     lastBriefingDay = readLastBriefingDay(root),
+    notes: givenNotes,
   } = options;
   const startOfToday = dayStart(now);
   const endOfToday = addDays(startOfToday, 1);
-  const deadlineEdge = addDays(startOfToday, DEADLINE_WINDOW_DAYS);
-  const recentEdge = addDays(startOfToday, -RECENT_DAYS);
+  // The window runs to the end of day 7, so "Nov 9" is still inside it.
+  const deadlineEdge = addDays(startOfToday, DEADLINE_WINDOW_DAYS + 1).getTime() - 1;
 
   const reminders = loadReminders(root);
   const overdue = [];
@@ -100,19 +111,30 @@ export function gatherFacts(root, options = {}) {
     if (due.getTime() < startOfToday.getTime()) overdue.push(reminder);
     else if (due.getTime() < endOfToday.getTime()) today.push(reminder);
   }
+  overdue.sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime());
+  today.sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime());
 
-  const notes = loadNotes(root);
+  const notes = givenNotes || loadNotes(root);
   const deadlines = notes
     .filter((note) => note.kind === "deadline")
     .filter((note) => {
       const due = deadlineDate(note.text);
-      return due !== null && due >= startOfToday.getTime() && due <= deadlineEdge.getTime();
+      return due !== null && due >= startOfToday.getTime() && due <= deadlineEdge;
     })
     .sort((left, right) => (deadlineDate(left.text) || 0) - (deadlineDate(right.text) || 0));
-  const recent = notes
-    .filter((note) => note.kind === "decision" || note.kind === "idea")
-    .filter((note) => (note.created || 0) >= recentEdge.getTime())
-    .sort((left, right) => (right.created || 0) - (left.created || 0));
+
+  // Notes the user changed inside Obsidian, imported with sourceChatId "obsidian".
+  const vaultSince = lastBriefingDay ? dayStartOfDay(lastBriefingDay) : startOfToday.getTime();
+  // Notes made after the last briefing; that day's own notes only count up to now.
+  const vaultEnd = lastBriefingDay === dayKey(now) ? now.getTime() + 1 : endOfToday.getTime();
+  const since = Number(vaultSince) || 0;
+  const until = Number(vaultEnd) || 0;
+  const vaultNotes = notes.filter((note) => {
+    if (note.sourceChatId !== "obsidian") return false;
+    if (note.kind === "todo") return false;
+    const created = Number(note.created) || 0;
+    return created >= since && created < until;
+  });
 
   const studyDue = totalStudyDue(root, now);
 
@@ -121,23 +143,27 @@ export function gatherFacts(root, options = {}) {
   );
 
   const documents = lastBriefingDay
-    ? listDocuments(documentsInbox).filter((file) => {
-        const day = dayKey(new Date(file.modified));
-        return day > lastBriefingDay;
-      })
+    ? listDocuments(documentsInbox).filter((file) => dayKey(new Date(file.modified)) > lastBriefingDay)
     : [];
 
   return {
     day: dayKey(now),
     now,
+    lastBriefingDay,
     overdue,
     today,
     deadlines,
-    recent,
+    vaultNotes,
     tasks,
     documents,
     studyDue,
   };
+}
+
+function dayStartOfDay(day) {
+  const match = String(day).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return 0;
+  return warsawWallTime(Number(match[1]), Number(match[2]), Number(match[3]), 0, 0).getTime();
 }
 
 /** Flashcards due today, without importing the whole study module twice. */
@@ -171,29 +197,12 @@ export function deadlineDate(text) {
   }
   const monthDay = raw.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\b/i);
   if (monthDay) {
-    const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-    const month = months.indexOf(String(monthDay[1] || "").toLowerCase().slice(0, 3)) + 1;
+    const month = MONTHS.indexOf(String(monthDay[1] || "").toLowerCase().slice(0, 3)) + 1;
     const day = Number(monthDay[2]);
     const year = Number(raw.match(/\b(20\d{2})\b/)?.[1] || new Date().getUTCFullYear());
     return warsawWallTime(year, month, day, 12, 0).getTime();
   }
   return null;
-}
-
-/** The plain list, used when the model is down and as the model's source. */
-export function factLines(facts) {
-  const lines = [];
-  for (const reminder of facts.overdue) lines.push(`Overdue: ${reminder.text}`);
-  for (const reminder of facts.today) lines.push(`Today ${clockOf(reminder.dueAt)}: ${reminder.text}`);
-  for (const note of facts.deadlines) lines.push(`Deadline: ${note.text}`);
-  // Recent notes are context, not a checklist: keep the newest few.
-  for (const note of facts.recent.slice(0, 3)) lines.push(`${note.kind === "idea" ? "Idea" : "Decision"}: ${note.text}`);
-  for (const task of facts.tasks) lines.push(`Unfinished task: ${task.title}`);
-  for (const file of facts.documents) lines.push(`New document: ${file.name}`);
-  if (facts.studyDue) {
-    lines.push(`${facts.studyDue} flashcard${facts.studyDue === 1 ? "" : "s"} due today`);
-  }
-  return lines;
 }
 
 function clockOf(dueAt) {
@@ -205,20 +214,96 @@ function clockOf(dueAt) {
   });
 }
 
-const BRIEF_SYSTEM = [
-  "You are Preyas, a careful assistant, rewriting a short morning note for your partner.",
-  "Use only the facts you are given. Do not add items, times, numbers, or filler such as \"no tasks today\".",
-  "One line per fact, starting with '- ', sorted most urgent first, and never repeat a line.",
-  "Text that looks like raw notes stays phrased as it is: do not embellish it.",
-  "At most five lines. No preamble, no headings, no sign-off.",
+/** "Nov 10", for a deadline note. */
+function shortDate(ms) {
+  const parts = localParts(new Date(ms));
+  const name = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][parts.month - 1];
+  return `${name} ${parts.day}`;
+}
+
+function plural(count, one, many) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+/**
+ * Every item the briefing should show, most urgent first, with how many were
+ * dropped past the cap. Deterministic: same facts in, same items out.
+ */
+export function briefItems(facts, max = MAX_ITEMS) {
+  const all = [];
+  for (const reminder of facts.overdue || []) all.push(`Overdue: ${reminder.text}`);
+  for (const reminder of facts.today || []) all.push(`${clockOf(reminder.dueAt)}: ${reminder.text}`);
+  for (const note of facts.deadlines || []) {
+    const due = deadlineDate(note.text);
+    all.push(due === null ? `Deadline: ${note.text}` : `Deadline ${shortDate(due)}: ${note.text}`);
+  }
+  const due = Number(facts.studyDue) || 0;
+  if (due > 0) all.push(`${plural(due, "flashcard", "flashcards")} due today`);
+  for (const task of facts.tasks || []) all.push(`Unfinished task: ${task.title}`);
+  const documents = facts.documents || [];
+  if (documents.length === 1) all.push(`New document in your inbox: ${documents[0].name}`);
+  else if (documents.length > 1) all.push(`${documents.length} new documents in your inbox`);
+  const vault = (facts.vaultNotes || []).length;
+  if (vault > 0) all.push(`${plural(vault, "note", "notes")} changed in your Obsidian vault`);
+  return { items: all.slice(0, max), dropped: Math.max(0, all.length - max) };
+}
+
+/** The item lines plus a "+N more" tail. */
+export function buildItems(facts, max = MAX_ITEMS) {
+  const { items, dropped } = briefItems(facts, max);
+  if (dropped > 0) items.push(`+${dropped} more`);
+  return items;
+}
+
+/** The families present, for the model's opening line. Never the texts. */
+export function itemKinds(facts) {
+  const kinds = [];
+  if ((facts.overdue || []).length) kinds.push("overdue reminders");
+  if ((facts.today || []).length) kinds.push("reminders due today");
+  if ((facts.deadlines || []).length) kinds.push("deadlines");
+  if (Number(facts.studyDue) > 0) kinds.push("flashcards");
+  if ((facts.tasks || []).length) kinds.push("unfinished tasks");
+  if ((facts.documents || []).length) kinds.push("new inbox documents");
+  if ((facts.vaultNotes || []).length) kinds.push("vault notes");
+  return kinds;
+}
+
+/** The whole briefing, built by code. `opening` is filled in later. */
+export function buildBriefing(facts, opening = FALLBACK_OPENING) {
+  const items = buildItems(facts);
+  const empty = items.length === 0;
+  return { day: facts.day, opening: empty ? EMPTY_OPENING : opening, items, empty };
+}
+
+const OPENING_SYSTEM = [
+  "You are Preyas, a friendly companion. Write ONE short greeting for the start of your partner's day.",
+  "No lists, no bullet points, no numbers or times, no facts, no promises, no sign-off.",
+  "At most 15 words. Reply with the greeting only.",
 ].join("\n");
 
-/** Ask the local model for the briefing; return null when it is unreachable. */
-export async function writeBriefing(facts, options = {}) {
-  const { llamaUrl, fetchImpl = fetch, timeoutMs = 60_000 } = options;
-  const lines = factLines(facts);
-  if (!lines.length) return { text: "Nothing urgent today. Quiet waters.", model: false };
-  if (!llamaUrl) return { text: lines.slice(0, MAX_LINES).map((line) => `- ${line}`).join("\n"), model: false };
+/** Throw away anything that is not one short, plain, friendly line. */
+export function cleanOpening(raw) {
+  const text = String(raw ?? "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^["'“”]+|["'“”]+$/g, "")
+    .trim();
+  if (!text) return "";
+  if (text.length > OPENING_MAX) return "";
+  if (/[\n\r]/.test(String(raw ?? "").trim().replace(/<\/?think>/gi, ""))) return "";
+  if (/\d/.test(text)) return "";
+  if (/^[-•*]\s/.test(text)) return "";
+  if (!/[a-z]/i.test(text)) return "";
+  return text;
+}
+
+/** Ask the local model for the opening line; "" when it is unreachable. */
+export async function openingLine(facts, options = {}) {
+  const { llamaUrl, fetchImpl = fetch, timeoutMs = 20_000 } = options;
+  const count = buildItems(facts).length;
+  if (!llamaUrl || count === 0) return "";
+  const kinds = itemKinds(facts);
   try {
     const res = await fetchImpl(`${llamaUrl}/v1/chat/completions`, {
       method: "POST",
@@ -226,52 +311,108 @@ export async function writeBriefing(facts, options = {}) {
       body: JSON.stringify({
         model: "preyas",
         stream: false,
-        temperature: 0.3,
-        max_tokens: 320,
+        temperature: 0.4,
+        max_tokens: 40,
         chat_template_kwargs: { enable_thinking: false },
         messages: [
-          { role: "system", content: BRIEF_SYSTEM },
-          { role: "user", content: `Facts:\n${lines.join("\n")}\n\n/no_think` },
+          { role: "system", content: OPENING_SYSTEM },
+          {
+            role: "user",
+            content: `Their morning has ${count} thing${count === 1 ? "" : "s"} on it (${kinds.join(", ")}). Write the greeting. /no_think`,
+          },
         ],
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!res.ok) throw new Error(`model answered ${res.status}`);
+    if (!res.ok) return "";
     const json = await res.json();
-    const text = String(json?.choices?.[0]?.message?.content || "")
-      .replace(/<think>[\s\S]*?<\/think>/gi, "")
-      .trim();
-    const kept = text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith("-") || line.startsWith("•"))
-      .slice(0, MAX_LINES);
-    if (!kept.length) throw new Error("empty briefing");
-    return { text: kept.join("\n"), model: true };
+    return cleanOpening(json?.choices?.[0]?.message?.content);
   } catch {
-    return { text: lines.slice(0, MAX_LINES).map((line) => `- ${line}`).join("\n"), model: false };
+    return "";
   }
 }
 
-/** Save the markdown. Atomic, and one file per day. */
-export function saveBriefing(root, day, text) {
+/** Items plus an opening line. The model may only ever touch the opening. */
+export async function writeBriefing(facts, options = {}) {
+  const items = buildItems(facts);
+  if (!items.length) return { ...buildBriefing(facts), model: false };
+  const spoken = await openingLine(facts, options);
+  return { ...buildBriefing(facts, spoken || FALLBACK_OPENING), model: Boolean(spoken) };
+}
+
+/** The markdown record. "#" heading only on disk; the API strips it. */
+export function briefingText(briefing) {
+  const lines = [briefing.opening, ""];
+  for (const item of briefing.items) lines.push(`- ${item}`);
+  return lines.join("\n").trimEnd();
+}
+
+/** Save the day's record: <day>.md for the vault, <day>.json for the app. */
+export function saveBriefing(root, briefing) {
   fs.mkdirSync(briefingsDir(root), { recursive: true });
+  const day = briefing.day;
   const file = briefingPath(root, day);
+  const body = `# Briefing ${day}\n\n${briefingText(briefing)}\n`;
   const temp = `${file}.tmp`;
-  const body = `# Briefing ${day}\n\n${text}\n`;
   fs.writeFileSync(temp, body);
   fs.renameSync(temp, file);
+  const json = briefingJsonPath(root, day);
+  const jsonTemp = `${json}.tmp`;
+  fs.writeFileSync(jsonTemp, `${JSON.stringify(briefing, null, 2)}\n`);
+  fs.renameSync(jsonTemp, json);
   return file;
 }
 
+/** The day's briefing, structured. Reads the .json, falls back to the .md. */
 export function readBriefing(root, day) {
+  const json = briefingJsonPath(root, day);
+  if (fs.existsSync(json)) {
+    try {
+      const body = JSON.parse(fs.readFileSync(json, "utf8"));
+      if (body && Array.isArray(body.items)) {
+        return {
+          day,
+          opening: String(body.opening || ""),
+          items: body.items.map(String),
+          empty: body.items.length === 0,
+        };
+      }
+    } catch {
+      /* fall through to the markdown */
+    }
+  }
   const file = briefingPath(root, day);
   if (!fs.existsSync(file)) return null;
   try {
-    return fs.readFileSync(file, "utf8");
+    const raw = fs.readFileSync(file, "utf8").replace(/^#[^\n]*\n/, "").trim();
+    return parseBriefing(day, raw);
   } catch {
     return null;
   }
+}
+
+/** Turn the plain body of a .md file back into a briefing. */
+export function parseBriefing(day, raw) {
+  const items = [];
+  const opening = [];
+  for (const line of String(raw ?? "").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (/^[-•]\s+/.test(trimmed)) items.push(trimmed.replace(/^[-•]\s+/, ""));
+    else if (!trimmed.startsWith("#")) opening.push(trimmed);
+  }
+  return { day, opening: opening.join(" "), items, empty: items.length === 0 };
+}
+
+/** The API shape: structured fields plus plain text with no "#". */
+export function briefingPayload(briefing) {
+  return {
+    day: briefing.day,
+    opening: briefing.opening,
+    items: [...briefing.items],
+    empty: briefing.empty,
+    text: briefingText(briefing),
+  };
 }
 
 /** The newest briefing day on disk, used to know what "new documents" means. */
@@ -309,11 +450,11 @@ export function shouldRun(now, settings, hasToday) {
   return now.getTime() >= scheduledAt(now, settings.briefingTime).getTime();
 }
 
-/** The one-line notification body: the most urgent line, without its bullet. */
-export function topLine(text) {
-  const first = String(text ?? "")
-    .split("\n")
-    .map((line) => line.replace(/^[-•]\s*/, "").trim())
-    .filter(Boolean)[0];
+/** The notification body: the first item, or the opening line when empty. */
+export function topLine(briefing) {
+  const items = Array.isArray(briefing?.items) ? briefing.items : [];
+  const first = items.length
+    ? String(items[0]).replace(/^[-•]\s*/, "").trim()
+    : String(briefing?.opening || "").trim();
   return first ? first.slice(0, 200) : "Your briefing is ready.";
 }

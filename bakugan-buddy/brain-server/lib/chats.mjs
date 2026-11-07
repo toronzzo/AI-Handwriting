@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { partnerFromTurns } from "../../packages/alive/src/chatTurn.ts";
-import { appendSummary, historyDir, normalizeEntry } from "./history.mjs";
+import { appendSummary, historyDir, normalizeEntry, writeTextAtomic } from "./history.mjs";
 
 export const NEW_CHAT_TITLE = "New chat";
 export const FIRST_CHAT_TITLE = "First chat";
@@ -215,6 +215,83 @@ export function appendMessage(root, id, entry) {
   });
   writeIndex(root, next);
   return { chat: next.find((row) => row.id === id), summary };
+}
+
+function readRows(file) {
+  const rows = [];
+  if (!fs.existsSync(file)) return rows;
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      rows.push(JSON.parse(line));
+    } catch {
+      /* skip a torn line */
+    }
+  }
+  return rows;
+}
+
+/**
+ * One message per day: drop any earlier message for `day` (tagged with
+ * briefingDay, or an old one starting "Briefing YYYY-MM-DD") and add the new
+ * one. Rewrites the chat file atomically.
+ */
+export function upsertDayMessage(root, id, day, entry) {
+  const chat = findChat(root, id);
+  if (!chat) return null;
+  const file = chatFile(root, id);
+  const rows = readRows(file);
+  const kept = rows.filter((row) => !isMessageForDay(row, day));
+  const line = { ...normalizeEntry(entry), briefingDay: day };
+  const removed = rows.length - kept.length;
+  fs.mkdirSync(chatsDir(root), { recursive: true });
+  writeTextAtomic(file, kept.map((row) => `${JSON.stringify(row)}\n`).join("") + `${JSON.stringify(line)}\n`);
+  const index = readIndex(root);
+  const stamp = nextStamp(index.chats, line.t);
+  const next = index.chats.map((row) => (row.id === id ? { ...row, updated: stamp } : row));
+  writeIndex(root, next);
+  return { chat: next.find((row) => row.id === id), removed };
+}
+
+function isMessageForDay(row, day) {
+  if (!row) return false;
+  if (row.briefingDay) return row.briefingDay === day;
+  return dayFromContent(row.content) === day;
+}
+
+/** "Briefing 2026-11-02 ..." -> "2026-11-02". */
+export function dayFromContent(content) {
+  const match = String(content ?? "").match(/^\s*Briefing\s+(\d{4}-\d{2}-\d{2})\b/);
+  return match ? match[1] : "";
+}
+
+/**
+ * One-time tidy for the reused "Daily briefing" chat: keep only the newest
+ * message per day. Copies the file to <name>.bak-<timestamp> first, and does
+ * nothing (no copy) when there is nothing to drop.
+ */
+export function collapseBriefingChat(root, id, now = Date.now()) {
+  const file = chatFile(root, id);
+  const rows = readRows(file);
+  const seen = new Set();
+  const keptIndexes = new Set();
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const day = rows[i].briefingDay || dayFromContent(rows[i].content);
+    if (!day) {
+      keptIndexes.add(i);
+      continue;
+    }
+    if (seen.has(day)) continue;
+    seen.add(day);
+    keptIndexes.add(i);
+  }
+  const removed = rows.length - keptIndexes.size;
+  if (removed === 0) return { removed: 0, backup: "" };
+  const backup = `${file}.bak-${now}`;
+  fs.copyFileSync(file, backup);
+  const kept = rows.filter((_, index) => keptIndexes.has(index));
+  writeTextAtomic(file, kept.map((row) => `${JSON.stringify(row)}\n`).join(""));
+  return { removed, backup };
 }
 
 export function renameChat(root, id, title) {
