@@ -38,7 +38,8 @@ import { matchDocuments, parseDocumentRequest } from "../../../../packages/alive
 import { formatDue, parseReminder, type Reminder } from "../../../../packages/alive/src/reminders.ts";
 import { isShortAffirmation, wantsThinking } from "../../../../packages/alive/src/chatTurn.ts";
 import {
-  needsWebSearch,
+  citedSourceEntries,
+  shouldWebSearch,
   searchQueryFrom,
   withSources,
   type SearchResult,
@@ -1422,7 +1423,7 @@ export function ChatScreen({
       if (!askPaid) {
         let sources: SearchResult[] = [];
         let searchQuery = "";
-        if (needsWebSearch(trimmed)) {
+        if (shouldWebSearch(trimmed)) {
           const found = await runWebSearch(trimmed);
           sources = found.results;
           searchQuery = found.query;
@@ -2094,15 +2095,15 @@ export function ChatScreen({
                       ) : null}
                       {message.sources?.length ? (
                         <View style={styles.sources}>
-                          {message.sources.map((source, sourceIndex) => (
+                          {citedSourceEntries(message.content, message.sources).map(({ n, source }) => (
                             <Pressable
-                              key={`${source.url}-${sourceIndex}`}
+                              key={`${source.url}-${n}`}
                               onPress={() => {
                                 if (typeof window !== "undefined" && window.open) window.open(source.url, "_blank", "noopener");
                               }}
                             >
                               <Text style={styles.sourceLink} numberOfLines={1}>
-                                [{sourceIndex + 1}] {source.title}
+                                [{n}] {source.title}
                               </Text>
                             </Pressable>
                           ))}
