@@ -181,6 +181,7 @@ export function ChatScreen({
   const [health, setHealth] = useState<Health | null>(null);
   const [briefing, setBriefing] = useState<string>("");
   const [vault, setVault] = useState<{ path: string; obsidianUrl: string; notes: number; lastSync: number } | null>(null);
+  const [driveMap, setDriveMap] = useState<{ scanned: number; files: number; folders: number; models: number } | null>(null);
   const [thinkForced, setThinkForced] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [needPair, setNeedPair] = useState(false);
@@ -716,6 +717,19 @@ export function ChatScreen({
       if (!res.ok) return null;
       const body = (await res.json()) as { path: string; obsidianUrl: string; notes: number; lastSync: number };
       setVault(body);
+      return body;
+    } catch {
+      return null;
+    }
+  }
+
+  async function refreshDriveMap() {
+    try {
+      const res = await brainFetch(`${bag.brainUrl}/v1/drive-map/status`);
+      if (!res.ok) return null;
+      const body = (await res.json()) as { ok: boolean; scanned: number; files: number; folders: number; models: number };
+      if (!body.ok) return null;
+      setDriveMap(body);
       return body;
     } catch {
       return null;
@@ -1322,6 +1336,7 @@ export function ChatScreen({
       void refreshHealth();
       void refreshPhone();
       void refreshBriefing();
+      void refreshDriveMap();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section]);
@@ -1819,12 +1834,19 @@ export function ChatScreen({
           ) : (
             <Text style={styles.dim}>Checking…</Text>
           )}
+          <Text style={styles.dim}>
+            Drive map:{" "}
+            {driveMap
+              ? `last scanned ${new Date(driveMap.scanned).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}, ${driveMap.files} files`
+              : "not scanned yet"}
+          </Text>
           <Pressable
             style={styles.profileBtn}
             onPress={() => {
               void refreshHealth();
               void refreshPhone();
               void refreshVault();
+              void refreshDriveMap();
             }}
           >
             <Text style={styles.profileText}>Refresh</Text>

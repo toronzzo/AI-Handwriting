@@ -5,6 +5,7 @@
  * network: the brain-server does the fetching, the app uses the same rules to
  * decide when to ask.
  */
+import { isDriveQuestion } from "./driveMap.ts";
 
 export type SearchResult = {
   title: string;
@@ -162,6 +163,7 @@ export function shouldWebSearch(raw: string): boolean {
   const longPastedBlock = text.length > 400 || lines > 2;
   if (longPastedBlock) return false;
   if (LOCAL_TOPICS.test(text)) return false;
+  if (isDriveQuestion(text)) return false;
   return FRESH_HINTS.some((pattern) => pattern.test(text));
 }
 
