@@ -18,6 +18,23 @@ export const theme = {
   space: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 },
   type: { label: 11, caption: 12, body: 14, input: 16, title: 18, hero: 24 },
   radius: { sm: 10, md: 14, lg: 20 },
+  /** Layout sizes shared by the shell and the chat screen. */
+  size: {
+    /** Width of the Mac icon rail. */
+    nav: 72,
+    /** Width of the chats list beside the thread on a Mac. */
+    list: 240,
+    /** Reading width of the chat column. */
+    maxChat: 760,
+    /** Header ball and the dot beside his bubbles. */
+    avatar: 40,
+    dot: 24,
+    header: 64,
+    bond: 160,
+    composer: 22,
+  },
+  /** Text line height for chat bubbles. */
+  lead: 21,
 } as const;
 
 export type Theme = typeof theme;

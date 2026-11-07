@@ -4,6 +4,7 @@ import { Box3, Vector3, type Group } from "three";
 import type { GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { Canvas, useFrame, useThree } from "../room/fiber";
 import { loadPreyasBall } from "../room/loadPreyas";
+import { theme } from "../theme";
 
 function Scene({ talking }: { talking: boolean }) {
   const rig = useRef<Group>(null);
@@ -64,10 +65,13 @@ function Scene({ talking }: { talking: boolean }) {
   );
 }
 
-/** The ball on a pedestal. One slow spin, no room simulation. */
-export function PreyasHero({ talking, short }: { talking: boolean; short: boolean }) {
+/**
+ * The ball on a pedestal. One slow spin, no room simulation.
+ * `fill` lets the frame take whatever height its parent gives it (the Profile panel).
+ */
+export function PreyasHero({ talking, short, fill }: { talking: boolean; short: boolean; fill?: boolean }) {
   return (
-    <View style={[styles.frame, short ? styles.short : styles.tall]}>
+    <View style={[styles.frame, fill ? styles.fill : short ? styles.short : styles.tall]}>
       <Canvas camera={{ position: [0.15, 1.7, 3.6], fov: 32 }} dpr={[1, 1.25]}>
         <Scene talking={talking} />
       </Canvas>
@@ -75,8 +79,13 @@ export function PreyasHero({ talking, short }: { talking: boolean; short: boolea
   );
 }
 
+const SHORT = theme.space.xl * 5;
+const TALL = theme.space.xl * 8;
+const HERO_MIN = theme.space.xl * 7;
+
 const styles = StyleSheet.create({
-  frame: { width: "100%", borderRadius: 18, overflow: "hidden", backgroundColor: "#071410" },
-  tall: { height: 280 },
-  short: { height: 168 },
+  frame: { width: "100%", borderRadius: theme.radius.md, overflow: "hidden", backgroundColor: "#071410" },
+  fill: { flex: 1, minHeight: HERO_MIN },
+  short: { height: SHORT },
+  tall: { height: TALL },
 });
