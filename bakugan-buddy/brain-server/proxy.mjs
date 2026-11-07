@@ -19,6 +19,7 @@ import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
 import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
 import { collectStatus, restartArgs } from "./lib/status.mjs";
+import { collectUserNotes, ensureObsidianConfig, exportVault, searchVault, saveToVault, VAULT_DIR } from "./lib/vault.mjs";
 import {
   buildDeck,
   buildQuiz,
@@ -307,6 +308,119 @@ function lanAddress() {
   return "";
 }
 
+/** Summaries the document route already produced, for the vault. */
+function documentSummaries() {
+  const out = [];
+  try {
+    const dir = path.join(dataDir, "memory", "docs");
+    if (!fs.existsSync(dir)) return out;
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.endsWith(".json")) continue;
+      try {
+        const row = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+        if (row && row.name && row.summary) out.push({ name: row.name, summary: row.summary, at: Number(row.at) || Date.now() });
+      } catch {
+        /* skip a broken summary */
+      }
+    }
+  } catch {
+    /* no summaries yet */
+  }
+  return out;
+}
+
+/** Files the user edited that we have already imported, by path -> fingerprint. */
+const vaultKnown = new Map();
+let vaultState = { lastSync: 0, notes: 0, imported: 0 };
+
+/** Chat highlights for a day, from that day's chat files. */
+function highlightsFor(day) {
+  const lines = [];
+  try {
+    const dir = path.join(dataDir, "history", "chats");
+    if (!fs.existsSync(dir)) return lines;
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.endsWith(".jsonl")) continue;
+      for (const raw of fs.readFileSync(path.join(dir, name), "utf8").split("\n")) {
+        if (!raw.trim()) continue;
+        try {
+          const row = JSON.parse(raw);
+          if (dayKey(new Date(row.t || 0)) !== day) continue;
+          const who = row.who === "user" ? "You" : "Preyas";
+          const text = String(row.content || "").replace(/\s+/g, " ").trim();
+          if (text) lines.push(`${who}: ${text.slice(0, 120)}`);
+        } catch {
+          /* skip a torn line */
+        }
+      }
+    }
+  } catch {
+    /* highlights are a bonus */
+  }
+  return lines.slice(-12);
+}
+
+/** Write the vault, then read back anything the user changed. */
+function syncVault() {
+  if (!dataDir) return vaultState;
+  try {
+    ensureObsidianConfig(VAULT_DIR);
+    const briefings = [];
+    const dir = path.join(dataDir, "memory", "briefings");
+    if (fs.existsSync(dir)) {
+      for (const name of fs.readdirSync(dir)) {
+        if (!name.endsWith(".md")) continue;
+        const day = name.slice(0, -3);
+        const text = fs.readFileSync(path.join(dir, name), "utf8").replace(/^#[^\n]*\n/, "").trim();
+        briefings.push({ day, text });
+      }
+    }
+    const decks = listDecks(dataDir).map((deck) => ({
+      id: deck.id,
+      title: deck.title,
+      language: deck.language,
+      createdAt: deck.createdAt,
+      cards: deck.cards.map((card) => ({ question: card.question, answer: card.answer })),
+    }));
+    const documents = documentSummaries();
+    const highlights = {};
+    for (const briefing of briefings) highlights[briefing.day] = highlightsFor(briefing.day);
+    exportVault(
+      {
+        notes: loadNotes(dataDir).map((note) => ({
+          id: note.id,
+          text: note.text,
+          kind: note.kind,
+          created: note.created,
+          updated: note.updated,
+        })),
+        reminders: loadReminders(dataDir),
+        decks,
+        documents,
+        briefings,
+        highlights,
+      },
+      { root: VAULT_DIR },
+    );
+    const imported = collectUserNotes({ root: VAULT_DIR, known: Object.fromEntries(vaultKnown) });
+    for (const note of imported) {
+      vaultKnown.set(note.path, note.fingerprint);
+      if (note.text.length >= 4) {
+        addNote(dataDir, { text: note.text.slice(0, 240), kind: "fact", sourceChatId: "obsidian" });
+      }
+      for (const task of note.tasks) addNote(dataDir, { text: task.slice(0, 240), kind: "todo", sourceChatId: "obsidian" });
+    }
+    vaultState = {
+      lastSync: Date.now(),
+      notes: listDecks(dataDir).length + loadNotes(dataDir).length,
+      imported: imported.length,
+    };
+  } catch {
+    /* the vault is a mirror, never critical */
+  }
+  return vaultState;
+}
+
 /** One long-lived "Daily briefing" chat, reused every day. */
 function briefingChatId() {
   const existing = listChats(dataDir).find((chat) => chat.title === BRIEFING_CHAT_TITLE);
@@ -588,6 +702,47 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }));
       }
+      return;
+    }
+
+    if (url.pathname === "/v1/vault/sync" && req.method === "POST") {
+      const state = syncVault();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, ...state }));
+      return;
+    }
+
+    if (url.pathname === "/v1/vault/status" && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          path: VAULT_DIR,
+          obsidianUrl: "obsidian://open?vault=vault",
+          ...vaultState,
+        }),
+      );
+      return;
+    }
+
+    if (url.pathname === "/v1/vault/search" && req.method === "GET") {
+      const query = (url.searchParams.get("q") || "").trim();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ query, results: searchVault(query, { root: VAULT_DIR }) }));
+      return;
+    }
+
+    if (url.pathname === "/v1/vault/save" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const title = String(body.title || "Chat note").slice(0, 80);
+      const text = String(body.text || "").slice(0, 20000);
+      if (!text.trim()) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "nothing to save" }));
+        return;
+      }
+      const saved = saveToVault(title, text, { root: VAULT_DIR });
+      res.writeHead(201, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, ...saved }));
       return;
     }
 
@@ -877,6 +1032,17 @@ const server = http.createServer(async (req, res) => {
             job.status = "done";
             job.summary = summary;
             job.points = keyPointsFrom(summary);
+            // Keep it for the vault, which mirrors summaries as Markdown.
+            try {
+              const dir = path.join(dataDir, "memory", "docs");
+              fs.mkdirSync(dir, { recursive: true });
+              fs.writeFileSync(
+                path.join(dir, `${name}.json`),
+                JSON.stringify({ name, summary, at: Date.now() }),
+              );
+            } catch {
+              /* the vault copy is a bonus */
+            }
           } catch (error) {
             job.status = "error";
             job.error = error instanceof Error ? error.message : String(error);
@@ -1288,6 +1454,7 @@ function startReminderLoop() {
         }
       }
       maybeBriefing();
+      syncVault();
     } catch {
       /* a bad reminder must not stop the loop */
     }

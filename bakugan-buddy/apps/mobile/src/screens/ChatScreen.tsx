@@ -180,6 +180,7 @@ export function ChatScreen({
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [briefing, setBriefing] = useState<string>("");
+  const [vault, setVault] = useState<{ path: string; obsidianUrl: string; notes: number; lastSync: number } | null>(null);
   const [thinkForced, setThinkForced] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [needPair, setNeedPair] = useState(false);
@@ -519,6 +520,58 @@ export function ChatScreen({
   function normalizeCompare(value: string): string {
     return String(value || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, "");
   }
+
+  /** "search my vault for X", "what did I write about X", "save this to Obsidian". */
+  async function handleVaultCommand(text: string, chatId: string | null): Promise<boolean> {
+    const lower = text.trim().toLowerCase();
+    const search = lower.match(/^(?:search|look in)\s+my\s+vault\s+(?:for\s+)?(.+)$/);
+    const wrote = lower.match(/^what did i write about\s+(.+)$/);
+    if (search || wrote) {
+      const query = (search?.[1] || wrote?.[1] || "").trim();
+      await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+      try {
+        const res = await brainFetch(`${bag.brainUrl}/v1/vault/search?q=${encodeURIComponent(query)}`);
+        const body = (await res.json()) as { results?: { title: string; excerpt: string }[] };
+        const hits = body.results || [];
+        const reply: Shown = {
+          t: Date.now(),
+          role: "assistant",
+          content: hits.length
+            ? hits.map((hit) => `From [[${hit.title}]]: ${hit.excerpt.slice(0, 160)}`).join("\n\n")
+            : `I could not find anything in the vault about "${query}".`,
+          who: "preyas",
+          model: "preyas",
+        };
+        messagesRef.current = [...messagesRef.current, reply];
+        setMessages(messagesRef.current);
+        void remember(reply, chatId);
+      } catch {
+        setChip("Could not search the vault");
+      }
+      return true;
+    }
+    if (/^save (?:this|that) to obsidian\b/.test(lower)) {
+      const last = [...messagesRef.current].reverse().find((row) => row.role === "assistant");
+      if (!last) {
+        setChip("Nothing to save yet");
+        return true;
+      }
+      try {
+        const res = await brainFetch(`${bag.brainUrl}/v1/vault/save`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: `Chat ${new Date().toISOString().slice(0, 10)}`, text: last.content }),
+        });
+        const body = (await res.json()) as { ok?: boolean; path?: string };
+        setChip(body.ok ? `Saved to ${body.path}` : "Could not save to the vault");
+      } catch {
+        setChip("Could not save to the vault");
+      }
+      return true;
+    }
+    return false;
+  }
+
   async function refreshDecks() {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/study/decks`);
@@ -656,6 +709,19 @@ export function ChatScreen({
       return null;
     }
   }
+
+  async function refreshVault() {
+    try {
+      const res = await brainFetch(`${bag.brainUrl}/v1/vault/status`);
+      if (!res.ok) return null;
+      const body = (await res.json()) as { path: string; obsidianUrl: string; notes: number; lastSync: number };
+      setVault(body);
+      return body;
+    } catch {
+      return null;
+    }
+  }
+
   async function refreshHealth() {
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/status`);
@@ -1362,6 +1428,7 @@ export function ChatScreen({
       const handled = await handleDocumentRequest(docRequest, trimmed, chatId);
       if (handled) return;
     }
+    if (!askPaid && !affirmation && (await handleVaultCommand(trimmed, chatId))) return;
     if (!askPaid && !affirmation && (await handleStudyCommand(trimmed, chatId))) return;
     if (!askPaid && !affirmation && (await handleBriefingCommand(trimmed, chatId))) return;
     if (!askPaid && !affirmation && (await handleReminderCommand(trimmed, chatId))) return;
@@ -1757,10 +1824,27 @@ export function ChatScreen({
             onPress={() => {
               void refreshHealth();
               void refreshPhone();
+              void refreshVault();
             }}
           >
             <Text style={styles.profileText}>Refresh</Text>
           </Pressable>
+          <View style={styles.phoneCard}>
+            <Text style={styles.kicker}>VAULT</Text>
+            <Text style={styles.dim}>
+              {vault ? `${vault.path}\n${vault.notes} notes · last sync ${vault.lastSync ? new Date(vault.lastSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "never"}` : "Checking…"}
+            </Text>
+            <Pressable
+              style={styles.docBtn}
+              onPress={() => {
+                const url = vault?.obsidianUrl || "obsidian://open?vault=vault";
+                if (typeof window !== "undefined" && window.open) window.open(url, "_blank");
+              }}
+            >
+              <Text style={styles.docBtnText}>Open in Obsidian</Text>
+            </Pressable>
+          </View>
+
           <View style={styles.phoneCard}>
             <Text style={styles.kicker}>OPEN ON IPHONE</Text>
             {phoneInfo?.phoneUrl ? (
