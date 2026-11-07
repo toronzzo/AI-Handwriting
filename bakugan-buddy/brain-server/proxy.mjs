@@ -14,12 +14,14 @@ import { mergeHistoryFiles, paidAvailability } from "./lib/history.mjs";
 import { appendMessage, createChat, deleteChat, listChats, newestChat, readChat, renameChat } from "./lib/chats.mjs";
 import { clipTooShort, isWhisperHallucination } from "../packages/alive/src/speech.ts";
 import { notesContext, queryForRetrieval } from "../packages/alive/src/notes.ts";
+import { driveMapPrompt, isDriveQuestion, isScanDriveCommand, whereIsQuery } from "../packages/alive/src/driveMap.ts";
 import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
 import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
 import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
 import { collectStatus, restartArgs } from "./lib/status.mjs";
 import { collectUserNotes, ensureObsidianConfig, exportVault, searchVault, saveToVault, VAULT_DIR } from "./lib/vault.mjs";
+import { buildDriveMap, loadDriveMap, DRIVE_ROOT } from "./lib/driveMap.mjs";
 import {
   buildDeck,
   buildQuiz,
@@ -261,6 +263,40 @@ function withNotes(raw) {
   return Buffer.from(JSON.stringify(json));
 }
 
+/**
+ * Put the drive map in front of the local model when the partner asks about
+ * the drive, files, folders, models or datasets. "scan my drive" re-scans
+ * first; "where is X" is answered with the matching names listed first.
+ */
+function withDriveMap(raw) {
+  if (!dataDir) return raw;
+  let json;
+  try {
+    json = JSON.parse(raw.toString("utf8"));
+  } catch {
+    return raw;
+  }
+  if (!json || !Array.isArray(json.messages)) return raw;
+  const lastUser = [...json.messages].reverse().find((message) => message && message.role === "user");
+  const content = typeof lastUser?.content === "string" ? lastUser.content : "";
+  if (!isDriveQuestion(content)) return raw;
+  if (isScanDriveCommand(content)) {
+    try {
+      rescanDrive();
+    } catch {
+      /* a failed scan still answers from the last map */
+    }
+  }
+  const map = currentDriveMap();
+  if (!map) return raw;
+  const prompt = driveMapPrompt(map, whereIsQuery(content) || undefined);
+  const messages = [...json.messages];
+  const firstSystem = messages.findIndex((message) => message && message.role === "system");
+  messages.splice(firstSystem >= 0 ? firstSystem + 1 : 0, 0, { role: "system", content: prompt });
+  json.messages = messages;
+  return Buffer.from(JSON.stringify(json));
+}
+
 /** Best-effort note extraction after a reply; never awaited by a request. */
 async function extractNotesForChat(chatId) {
   if (!dataDir) return;
@@ -332,6 +368,32 @@ function documentSummaries() {
 /** Files the user edited that we have already imported, by path -> fingerprint. */
 const vaultKnown = new Map();
 let vaultState = { lastSync: 0, notes: 0, imported: 0 };
+
+/** The drive map lives in memory after the first load or scan. */
+let driveMapCache = null;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function currentDriveMap() {
+  if (driveMapCache) return driveMapCache;
+  driveMapCache = loadDriveMap(dataDir);
+  return driveMapCache;
+}
+
+function rescanDrive() {
+  driveMapCache = buildDriveMap(DRIVE_ROOT, dataDir);
+  return driveMapCache;
+}
+
+/** Re-scan the drive once a day, riding the reminder tick. */
+function maybeScanDrive() {
+  if (!dataDir) return;
+  try {
+    const map = currentDriveMap();
+    if (!map || Date.now() - (map.scanned || 0) > DAY_MS) rescanDrive();
+  } catch {
+    /* the map is a convenience, never critical */
+  }
+}
 
 /** Chat highlights for a day, from that day's chat files. */
 function highlightsFor(day) {
@@ -688,6 +750,19 @@ const server = http.createServer(async (req, res) => {
       const status = await collectStatus({ drive: "/Volumes/Agent", buddy: buddyRoot });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(status));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/drive-map/status") {
+      const map = currentDriveMap();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify(
+          map
+            ? { ok: true, scanned: map.scanned, files: map.totalFiles, folders: map.folders.length, models: map.models.length, size: map.totalSize }
+            : { ok: false, scanned: 0, files: 0 },
+        ),
+      );
       return;
     }
 
@@ -1398,7 +1473,7 @@ const server = http.createServer(async (req, res) => {
         model = "";
       }
       const sampled = withSampling(raw);
-      const body = model === "paid" ? sampled : withNotes(sampled);
+      const body = model === "paid" ? sampled : withDriveMap(withNotes(sampled));
       const target =
         model === "paid"
           ? "http://127.0.0.1:4000/v1/chat/completions"
@@ -1455,6 +1530,7 @@ function startReminderLoop() {
       }
       maybeBriefing();
       syncVault();
+      maybeScanDrive();
     } catch {
       /* a bad reminder must not stop the loop */
     }
@@ -1486,4 +1562,11 @@ server.listen(port, host, () => {
   process.stdout.write(`brain proxy ${host}:${port} -> ${llamaUrl}\n`);
   startReminderLoop();
   missedAtStartup();
+  if (dataDir) {
+    try {
+      rescanDrive();
+    } catch {
+      /* the map will be built on the next tick */
+    }
+  }
 });
