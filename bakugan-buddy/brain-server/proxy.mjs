@@ -11,7 +11,17 @@ import { openMemory, parseExtractedFacts, relevantFacts, rememberFacts } from ".
 import { synthesizeFile, transcribeFile } from "./lib/speech.mjs";
 import { withSampling } from "./lib/sampling.mjs";
 import { mergeHistoryFiles, paidAvailability } from "./lib/history.mjs";
-import { appendMessage, createChat, deleteChat, listChats, newestChat, readChat, renameChat } from "./lib/chats.mjs";
+import {
+  appendMessage,
+  collapseBriefingChat,
+  createChat,
+  deleteChat,
+  listChats,
+  newestChat,
+  readChat,
+  renameChat,
+  upsertDayMessage,
+} from "./lib/chats.mjs";
 import { clipTooShort, isWhisperHallucination } from "../packages/alive/src/speech.ts";
 import { notesContext, queryForRetrieval } from "../packages/alive/src/notes.ts";
 import { driveMapPrompt, isDriveQuestion, isScanDriveCommand, whereIsQuery } from "../packages/alive/src/driveMap.ts";
@@ -47,6 +57,8 @@ import {
 } from "./lib/pairing.mjs";
 import {
   BRIEFING_CHAT_TITLE,
+  briefingPayload,
+  briefingText,
   dayKey,
   gatherFacts,
   hasBriefingToday,
@@ -490,7 +502,7 @@ function briefingChatId() {
   return createChat(dataDir, BRIEFING_CHAT_TITLE).id;
 }
 
-/** Build, save and deliver one briefing. Returns { day, text }. */
+/** Build, save and deliver one briefing. Returns the structured briefing. */
 async function runBriefing(options = {}) {
   const now = options.now || new Date();
   const day = dayKey(now);
@@ -500,21 +512,36 @@ async function runBriefing(options = {}) {
     lastBriefingDay: readLastBriefingDay(dataDir),
   });
   const written = await writeBriefing(facts, { llamaUrl, fetchImpl: options.fetchImpl });
-  saveBriefing(dataDir, day, written.text);
+  const briefing = { day: written.day, opening: written.opening, items: written.items, empty: written.empty };
+  saveBriefing(dataDir, briefing);
   if (options.deliver !== false) {
-    void notify("Preyas: your day", topLine(written.text));
+    void notify("Preyas: your day", topLine(briefing));
     try {
-      appendMessage(dataDir, briefingChatId(), {
+      // One message per day: asking again replaces today's, never appends.
+      upsertDayMessage(dataDir, briefingChatId(), day, {
+        t: now.getTime(),
         role: "assistant",
         who: "preyas",
         model: "preyas",
-        content: `Briefing ${day}\n\n${written.text}`,
+        content: briefingText(briefing),
       });
     } catch {
       /* the chat is a convenience; the file is the record */
     }
   }
-  return { day, text: written.text, model: written.model };
+  return { ...briefingPayload(briefing), model: written.model };
+}
+
+/** Once per start: keep only the newest "Briefing <day>" message per day. */
+function tidyBriefingChat() {
+  if (!dataDir) return;
+  try {
+    const chat = listChats(dataDir).find((row) => row.title === BRIEFING_CHAT_TITLE);
+    if (!chat) return;
+    collapseBriefingChat(dataDir, chat.id);
+  } catch {
+    /* tidying is a convenience */
+  }
 }
 
 /** Called from the reminder tick: no separate timer. */
@@ -705,8 +732,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const day = dayKey(new Date());
+      const briefing = readBriefing(dataDir, day);
+      const body = briefing ? { ...briefingPayload(briefing), settings: loadSettings(dataDir) } : { day, opening: "", items: [], empty: true, text: "", settings: loadSettings(dataDir) };
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ day, text: readBriefing(dataDir, day), settings: loadSettings(dataDir) }));
+      res.end(JSON.stringify(body));
       return;
     }
 
@@ -1561,6 +1590,7 @@ function missedAtStartup() {
 server.listen(port, host, () => {
   process.stdout.write(`brain proxy ${host}:${port} -> ${llamaUrl}\n`);
   startReminderLoop();
+  tidyBriefingChat();
   missedAtStartup();
   if (dataDir) {
     try {

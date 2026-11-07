@@ -53,8 +53,9 @@ type Shown = ChatMessage & {
   thinking?: string;
   sources?: SearchResult[];
   document?: { name: string; summary?: string; points?: { text: string; kind: NoteKind }[] };
-  briefing?: boolean;
+  briefingDay?: string;
 };
+type Briefing = { day: string; opening: string; items: string[]; empty: boolean };
 type InboxFile = { name: string; size: number; type: string; modified: number };
 type PendingReminder = { text: string; dueAt: string; repeat: "none" | "daily" | "weekly" | "weekdays"; label: string };
 type PartnerCard = { turns: number; level: number; bond: number; caption: string };
@@ -73,7 +74,40 @@ type ChatDialog =
   | { kind: "briefingTime"; time: string }
   | { kind: "briefingOff" }
   | { kind: "deleteDeck"; id: string; title: string };
-type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string };
+type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string; briefingDay?: string };
+/** "Briefing 2026-11-07" is how an old briefing message started. */
+function briefingDayOf(row: StoredRow): string {
+  if (row.briefingDay) return row.briefingDay;
+  const match = String(row.content || "").match(/^\s*Briefing\s+(\d{4}-\d{2}-\d{2})\b/);
+  return match ? match[1]! : "";
+}
+function toBriefing(day: string, text: string): Briefing {
+  const items: string[] = [];
+  const opening: string[] = [];
+  for (const line of String(text).split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (/^[-•]\s+/.test(trimmed)) items.push(trimmed.replace(/^[-•]\s+/, ""));
+    else if (!trimmed.startsWith("#") && !/^Briefing\s+\d{4}-\d{2}-\d{2}$/.test(trimmed)) opening.push(trimmed);
+  }
+  return { day, opening: opening.join(" "), items, empty: items.length === 0 };
+}
+const DAILY_BRIEFING_TITLE = "Daily briefing";
+function hasFlashcardsDue(briefing: Briefing): boolean {
+  return briefing.items.some((item) => /flashcard/i.test(item));
+}
+/** "YOUR DAY · Monday 2 November" */
+function briefingKicker(day: string): string {
+  const match = String(day).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const label = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).toLocaleDateString("en-GB", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      })
+    : day;
+  return `YOUR DAY · ${label}`;
+}
 function toShown(rows: StoredRow[]): Shown[] {
   return rows.map((row) => ({
     t: typeof row.t === "number" ? row.t : Date.now(),
@@ -83,6 +117,7 @@ function toShown(rows: StoredRow[]): Shown[] {
     model: row.model || undefined,
     costUsd: row.costUsd,
     thinking: typeof row.thinking === "string" ? row.thinking : undefined,
+    briefingDay: briefingDayOf(row) || undefined,
   }));
 }
 function dayLabel(t: number): string {
@@ -179,7 +214,7 @@ export function ChatScreen({
   const [docChoice, setDocChoice] = useState<{ name: string; matches: string[] } | null>(null);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
-  const [briefing, setBriefing] = useState<string>("");
+  const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [vault, setVault] = useState<{ path: string; obsidianUrl: string; notes: number; lastSync: number } | null>(null);
   const [driveMap, setDriveMap] = useState<{ scanned: number; files: number; folders: number; models: number } | null>(null);
   const [thinkForced, setThinkForced] = useState(false);
@@ -470,34 +505,39 @@ export function ChatScreen({
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/briefing/today`);
       if (!res.ok) return "";
-      const body = (await res.json()) as { text?: string | null; settings?: { briefingTime: string; briefingOn: boolean } };
-      const text = body.text || "";
-      setBriefing(text);
+      const body = (await res.json()) as {
+        day?: string;
+        opening?: string;
+        items?: string[];
+        text?: string | null;
+        settings?: { briefingTime: string; briefingOn: boolean };
+      };
+      const day = body.day || "";
+      const next: Briefing =
+        Array.isArray(body.items) && day
+          ? { day, opening: body.opening || "", items: body.items, empty: body.items.length === 0 }
+          : toBriefing(day, body.text || "");
+      const shown = next.opening || next.items.length ? next : null;
+      setBriefing(shown);
       if (body.settings) setBriefingSettings(body.settings);
-      return text;
+      return shown ? `${shown.opening}\n${shown.items.map((item) => `- ${item}`).join("\n")}` : "";
     } catch {
       return "";
     }
   }
+  /** The server owns the "Daily briefing" chat: here we only refresh the card. */
   async function runBriefingNow(chatId: string | null) {
     setChip("Building your briefing…");
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/briefing/run`, { method: "POST" });
-      const body = (await res.json()) as { ok?: boolean; text?: string; error?: string };
-      if (!body.ok || !body.text) throw new Error(body.error || "no briefing");
-      setBriefing(body.text);
+      const body = (await res.json()) as { ok?: boolean; day?: string; opening?: string; items?: string[]; error?: string };
+      if (!body.ok || !Array.isArray(body.items)) throw new Error(body.error || "no briefing");
+      const day = body.day || "";
+      setBriefing({ day, opening: body.opening || "", items: body.items, empty: body.items.length === 0 });
       setChip("Briefing ready");
-      const reply: Shown = {
-        t: Date.now(),
-        role: "assistant",
-        content: body.text,
-        who: "preyas",
-        model: "preyas",
-        briefing: true,
-      };
-      messagesRef.current = [...messagesRef.current, reply];
-      setMessages(messagesRef.current);
-      void remember(reply, chatId);
+      // A briefing in another chat would be a second copy: only reload Daily briefing.
+      const openChat = chatId ? chats.find((row) => row.id === chatId) : null;
+      if (openChat && openChat.title === DAILY_BRIEFING_TITLE) await loadChat(openChat.id);
     } catch {
       setChip("Could not build the briefing");
     }
@@ -2119,12 +2159,29 @@ export function ChatScreen({
             {briefing && !briefingDismissed ? (
               <View style={styles.briefingCard}>
                 <View style={styles.briefingCardHead}>
-                  <Text style={styles.briefingTitle}>Your day</Text>
+                  <Text style={styles.briefingTitle}>{briefingKicker(briefing.day)}</Text>
                   <Pressable onPress={() => setBriefingDismissed(true)} hitSlop={8} accessibilityLabel="Dismiss briefing">
                     <Text style={styles.sidebarClose}>✕</Text>
                   </Pressable>
                 </View>
-                <Text style={styles.bubbleText}>{briefing}</Text>
+                {briefing.opening ? <Text style={styles.briefingText}>{briefing.opening}</Text> : null}
+                {briefing.items.map((item, row) => (
+                  <View key={`${row}-${item}`} style={styles.briefingItemRow}>
+                    <Text style={styles.briefingBullet}>•</Text>
+                    <Text style={styles.briefingItem}>{item}</Text>
+                  </View>
+                ))}
+                {hasFlashcardsDue(briefing) ? (
+                  <Pressable
+                    style={styles.docBtn}
+                    onPress={() => {
+                      onSection?.("learn");
+                      void refreshDecks();
+                    }}
+                  >
+                    <Text style={styles.docBtnText}>Study now</Text>
+                  </Pressable>
+                ) : null}
               </View>
             ) : null}
             <View style={styles.logWrap}>
@@ -2151,6 +2208,7 @@ export function ChatScreen({
                 const mine = message.who === "user";
                 const read = mine && messages.slice(index + 1).some((row) => row.who !== "user");
                 const label = message.who === "paid" ? "deepseek-flash" : message.who === "preyas" ? "Preyas" : "You";
+                const asBriefing = message.briefingDay ? toBriefing(message.briefingDay, message.content) : null;
                 return (
                   <View key={`${message.t}-${index}`} style={[styles.bubbleWrap, mine ? styles.bubbleRight : styles.bubbleLeft]}>
                     {!mine ? <View style={styles.miniBall} /> : null}
@@ -2161,22 +2219,18 @@ export function ChatScreen({
                           {message.who === "paid" && message.costUsd != null ? ` · ~$${message.costUsd.toFixed(4)}` : ""}
                         </Text>
                       ) : null}
-                      <Text style={styles.bubbleText}>{message.content}</Text>
-                      {!mine && message.thinking ? (
-                        <Pressable onPress={() => setOpenThink((current) => ({ ...current, [index]: !current[index] }))}>
-                          <Text style={styles.thinkToggle}>{openThink[index] ? "Hide thinking" : "Show thinking"}</Text>
-                        </Pressable>
-                      ) : null}
-                      {openThink[index] && message.thinking ? <Text style={styles.thinkBody}>{message.thinking}</Text> : null}
-                      {message.briefing ? (
+                      {asBriefing ? (
                         <View style={styles.briefingCard}>
-                          <Text style={styles.briefingTitle}>Your day</Text>
-                          <Text style={styles.briefingText}>{message.content}</Text>
+                          <Text style={styles.briefingTitle}>{briefingKicker(asBriefing.day)}</Text>
+                          {asBriefing.opening ? <Text style={styles.briefingText}>{asBriefing.opening}</Text> : null}
+                          {asBriefing.items.map((item, row) => (
+                            <View key={`${row}-${item}`} style={styles.briefingItemRow}>
+                              <Text style={styles.briefingBullet}>•</Text>
+                              <Text style={styles.briefingItem}>{item}</Text>
+                            </View>
+                          ))}
                           <View style={styles.briefingActions}>
-                            <Pressable
-                              style={styles.docBtn}
-                              onPress={() => onSection?.("settings")}
-                            >
+                            <Pressable style={styles.docBtn} onPress={() => onSection?.("settings")}>
                               <Text style={styles.docBtnText}>Open settings</Text>
                             </Pressable>
                             <Pressable
@@ -2188,9 +2242,28 @@ export function ChatScreen({
                             >
                               <Text style={styles.docBtnText}>Open reminders</Text>
                             </Pressable>
+                            {hasFlashcardsDue(asBriefing) ? (
+                              <Pressable
+                                style={styles.docBtn}
+                                onPress={() => {
+                                  onSection?.("learn");
+                                  void refreshDecks();
+                                }}
+                              >
+                                <Text style={styles.docBtnText}>Study now</Text>
+                              </Pressable>
+                            ) : null}
                           </View>
                         </View>
+                      ) : (
+                        <Text style={styles.bubbleText}>{message.content}</Text>
+                      )}
+                      {!mine && message.thinking ? (
+                        <Pressable onPress={() => setOpenThink((current) => ({ ...current, [index]: !current[index] }))}>
+                          <Text style={styles.thinkToggle}>{openThink[index] ? "Hide thinking" : "Show thinking"}</Text>
+                        </Pressable>
                       ) : null}
+                      {openThink[index] && message.thinking ? <Text style={styles.thinkBody}>{message.thinking}</Text> : null}
                       {message.document?.summary ? (
                         <Pressable
                           style={styles.savePoints}
@@ -2658,6 +2731,9 @@ const styles = StyleSheet.create({
   briefingCard: { marginTop: 8, borderWidth: 1, borderColor: "rgba(67,217,173,0.35)", borderRadius: 12, backgroundColor: "#0c1613", padding: 10, gap: 6 },
   briefingTitle: { color: aqua, fontSize: 12, fontWeight: "700", letterSpacing: 1 },
   briefingText: { color: "#e2f4ea", fontSize: 13, lineHeight: 19 },
+  briefingItemRow: { flexDirection: "row", gap: 6, alignItems: "flex-start" },
+  briefingBullet: { color: aqua, fontSize: 13, lineHeight: 19 },
+  briefingItem: { color: "#e2f4ea", fontSize: 13, lineHeight: 19, flexShrink: 1 },
   briefingActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   healthRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   healthLabel: { color: "#e2f4ea", fontSize: 14, width: 120 },
