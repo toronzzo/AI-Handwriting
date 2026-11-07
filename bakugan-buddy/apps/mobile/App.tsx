@@ -14,6 +14,7 @@ import { RoomScreen } from "./src/room/RoomScreen";
 import { ChatScreen } from "./src/screens/ChatScreen";
 import { MAIN_TABS, SETTINGS_ENTRY, type Section } from "./src/nav";
 import { theme } from "./src/theme";
+import { isWide } from "./src/layout";
 
 /** Advanced/demo surfaces that live behind Settings, not the main tabs. */
 type Advanced = "room" | "body" | "bench";
@@ -22,19 +23,20 @@ export default function App() {
   const [section, setSection] = useState<Section>("chat");
   const [advanced, setAdvanced] = useState<Advanced | null>(null);
   const [metrics, setMetrics] = useState<BodyMetrics | null>(null);
-  const wide = useWindowDimensions().width >= 900;
+  const wide = isWide(useWindowDimensions().width);
 
   const openAdvanced = (tab: Advanced) => setAdvanced(tab);
 
-  const nav = (
+  // Mac: a slim icon rail with Settings pinned at the bottom.
+  const rails = (
     <>
-      <View style={wide ? styles.sideTabs : styles.barTabs}>
+      <View style={styles.rail}>
         {MAIN_TABS.map((tab) => {
           const on = section === tab.id && !advanced;
           return (
             <Pressable
               key={tab.id}
-              style={wide ? [styles.sideTab, on && styles.sideTabOn] : styles.barTab}
+              style={[styles.railItem, on && styles.railItemOn]}
               onPress={() => {
                 setAdvanced(null);
                 setSection(tab.id);
@@ -42,16 +44,56 @@ export default function App() {
               accessibilityRole="button"
               accessibilityLabel={tab.label}
             >
-              <Text style={[styles.tabIcon, !wide && on && styles.tabIconOn]}>{tab.icon}</Text>
-              <Text style={wide ? [styles.sideLabel, on && styles.sideLabelOn] : [styles.barLabel, on && styles.barLabelOn]}>
-                {tab.label}
-              </Text>
+              <Text style={styles.railIcon}>{tab.icon}</Text>
+              <Text style={[styles.railLabel, on && styles.railLabelOn]}>{tab.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <View style={styles.railFoot}>
+        <Pressable
+          style={[styles.railItem, section === "settings" && !advanced && styles.railItemOn]}
+          onPress={() => {
+            setAdvanced(null);
+            setSection("settings");
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={SETTINGS_ENTRY.label}
+        >
+          <Text style={styles.railIcon}>{SETTINGS_ENTRY.icon}</Text>
+          <Text style={[styles.railLabel, section === "settings" && !advanced && styles.railLabelOn]}>
+            {SETTINGS_ENTRY.label}
+          </Text>
+        </Pressable>
+      </View>
+    </>
+  );
+
+  // iPhone: the same entries in a bottom bar.
+  const bar = (
+    <>
+      <View style={styles.barTabs}>
+        {MAIN_TABS.map((tab) => {
+          const on = section === tab.id && !advanced;
+          return (
+            <Pressable
+              key={tab.id}
+              style={styles.barTab}
+              onPress={() => {
+                setAdvanced(null);
+                setSection(tab.id);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={tab.label}
+            >
+              <Text style={[styles.tabIcon, on && styles.tabIconOn]}>{tab.icon}</Text>
+              <Text style={[styles.barLabel, on && styles.barLabelOn]}>{tab.label}</Text>
             </Pressable>
           );
         })}
       </View>
       <Pressable
-        style={wide ? [styles.sideTab, section === "settings" && !advanced && styles.sideTabOn] : styles.barGear}
+        style={styles.barGear}
         onPress={() => {
           setAdvanced(null);
           setSection("settings");
@@ -59,10 +101,7 @@ export default function App() {
         accessibilityRole="button"
         accessibilityLabel={SETTINGS_ENTRY.label}
       >
-        <Text style={[styles.tabIcon, !wide && section === "settings" && !advanced && styles.tabIconOn]}>{SETTINGS_ENTRY.icon}</Text>
-        {wide ? (
-          <Text style={[styles.sideLabel, section === "settings" && !advanced && styles.sideLabelOn]}>{SETTINGS_ENTRY.label}</Text>
-        ) : null}
+        <Text style={[styles.tabIcon, section === "settings" && !advanced && styles.tabIconOn]}>{SETTINGS_ENTRY.icon}</Text>
       </Pressable>
     </>
   );
@@ -71,15 +110,7 @@ export default function App() {
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
       <View style={styles.shell}>
-        {wide ? (
-          <View style={styles.sidebar}>
-            <View style={styles.sideBrand}>
-              <View style={styles.mark} />
-              <Text style={styles.sideName}>PREYAS</Text>
-            </View>
-            {nav}
-          </View>
-        ) : null}
+        {wide ? <View style={styles.sidebar}>{rails}</View> : null}
 
         <View style={styles.stage}>
           {advanced === "room" ? (
@@ -121,7 +152,7 @@ export default function App() {
         </View>
       </View>
 
-      {!wide ? <View style={styles.tabbar}>{nav}</View> : null}
+      {!wide ? <View style={styles.tabbar}>{bar}</View> : null}
     </SafeAreaView>
   );
 }
@@ -147,31 +178,31 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   hidden: { height: 0, overflow: "hidden", flex: 0 },
 
-  // Mac: calm left rail.
+  // Mac: a slim icon rail, Settings at the bottom.
   sidebar: {
-    width: 184,
+    width: theme.size.nav,
     backgroundColor: theme.cardSoft,
     borderRightWidth: 1,
     borderRightColor: theme.accentLine,
     paddingVertical: theme.space.md,
-    paddingHorizontal: theme.space.sm,
-    gap: theme.space.lg,
-  },
-  sideBrand: { flexDirection: "row", alignItems: "center", gap: theme.space.sm, paddingHorizontal: theme.space.sm },
-  mark: { width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: theme.accent },
-  sideName: { color: theme.text, fontSize: theme.type.caption, fontWeight: "800", letterSpacing: 2 },
-  sideTabs: { gap: theme.space.xs },
-  sideTab: {
-    flexDirection: "row",
+    paddingHorizontal: theme.space.xs,
     alignItems: "center",
-    gap: theme.space.sm,
-    paddingVertical: 10,
-    paddingHorizontal: theme.space.sm,
+    justifyContent: "space-between",
+  },
+  rail: { alignItems: "center", gap: theme.space.sm, width: "100%" },
+  railFoot: { alignItems: "center", width: "100%" },
+  railItem: {
+    width: theme.size.nav - theme.space.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: theme.space.xs,
+    paddingVertical: theme.space.sm,
     borderRadius: theme.radius.sm,
   },
-  sideTabOn: { backgroundColor: theme.accentSoft },
-  sideLabel: { color: theme.dim, fontSize: theme.type.body, fontWeight: "600" },
-  sideLabelOn: { color: theme.text },
+  railItemOn: { backgroundColor: theme.accentSoft },
+  railIcon: { fontSize: theme.type.title },
+  railLabel: { color: theme.faint, fontSize: theme.type.label, fontWeight: "600" },
+  railLabelOn: { color: theme.accent },
 
   // iPhone: bottom bar.
   tabbar: {
@@ -179,14 +210,14 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: theme.accentLine,
     backgroundColor: theme.cardSoft,
-    paddingTop: 6,
-    paddingBottom: 10,
+    paddingTop: theme.space.xs,
+    paddingBottom: theme.space.sm,
     paddingHorizontal: theme.space.sm,
   },
   barTabs: { flex: 1, flexDirection: "row" },
-  barTab: { flex: 1, alignItems: "center", gap: 2, paddingVertical: 2 },
-  barGear: { alignItems: "center", justifyContent: "center", paddingHorizontal: theme.space.md, paddingVertical: 2 },
-  tabIcon: { fontSize: 20, opacity: 0.55 },
+  barTab: { flex: 1, alignItems: "center", gap: theme.space.xs / 2, paddingVertical: theme.space.xs / 2 },
+  barGear: { alignItems: "center", justifyContent: "center", paddingHorizontal: theme.space.md, paddingVertical: theme.space.xs / 2 },
+  tabIcon: { fontSize: theme.type.title, opacity: 0.55 },
   tabIconOn: { opacity: 1 },
   barLabel: { color: theme.faint, fontSize: theme.type.label, fontWeight: "600" },
   barLabelOn: { color: theme.accent },

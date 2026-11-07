@@ -47,7 +47,15 @@ import {
 import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "../room/voice/VoiceSession";
 import { PreyasHero } from "./PreyasHero";
 import { MAIN_TABS, type Section } from "../nav";
+import { chatColumn, isPhone, isWide } from "../layout";
 import { theme } from "../theme";
+
+/** A short face for each microphone phase. */
+const MIC_ICON: Record<string, string> = {
+  listening: "🎤",
+  speaking: "🔊",
+  thinking: "…",
+};
 type Shown = ChatMessage & {
   t: number;
   thinking?: string;
@@ -199,6 +207,8 @@ export function ChatScreen({
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /** Mac: the chats list beside the thread; remembered while the app runs. */
+  const [listOpen, setListOpen] = useState(true);
   const [dialog, setDialog] = useState<ChatDialog | null>(null);
   const [notesList, setNotesList] = useState<Note[]>([]);
   const [notesQuery, setNotesQuery] = useState("");
@@ -235,7 +245,7 @@ export function ChatScreen({
   const [briefingDismissed, setBriefingDismissed] = useState(false);
   const [profile, setProfile] = useState(false);
   const { width, height } = useWindowDimensions();
-  const wide = width >= 900;
+  const wide = isWide(width);
   const micOk =
     typeof window === "undefined" ||
     microphoneAvailable({
@@ -243,7 +253,8 @@ export function ChatScreen({
       hostname: window.location.hostname,
       isSecureContext: window.isSecureContext,
     });
-  const phone = !wide && Math.min(width, height) < 600;
+  const phone = isPhone(width, height);
+  const column = chatColumn(width);
   const setActiveChat = (id: string | null) => {
     activeIdRef.current = id;
     setActiveChatId(id);
@@ -1848,6 +1859,11 @@ export function ChatScreen({
         ))}
         {chats.length === 0 ? <Text style={styles.chatEmpty}>No chats yet.</Text> : null}
       </ScrollView>
+      {withClose ? null : (
+        <Pressable style={styles.listHide} onPress={() => setListOpen(false)} accessibilityLabel="Hide chats list">
+          <Text style={styles.listHideText}>« Hide</Text>
+        </Pressable>
+      )}
     </View>
   );
   return (
@@ -1938,6 +1954,17 @@ export function ChatScreen({
               <Text style={styles.profileText}>Send it now</Text>
             </Pressable>
             <Text style={styles.dim}>To change the time, tell Preyas: "briefing at 7:30".</Text>
+          </View>
+          <View style={styles.phoneCard}>
+            <Text style={styles.kicker}>HARDER QUESTIONS</Text>
+            <View style={styles.switchRow}>
+              <Text style={styles.dim}>Timeout → DeepSeek</Text>
+              <Switch value={escalate} onValueChange={setEscalate} />
+            </View>
+            <Text style={styles.dim}>
+              If the local model is taking too long, this one question is sent to DeepSeek.
+            </Text>
+            <Text style={styles.dim}>Preyas is a great listener.</Text>
           </View>
           <Pressable
             style={[styles.profileBtn, styles.restartBtn]}
@@ -2108,56 +2135,47 @@ export function ChatScreen({
         </View>
       ) : (
         <View style={[styles.split, !wide && styles.stack]}>
-          {wide ? (
-          <View style={styles.left}>
-            <PreyasHero talking={phase === "speaking"} short={false} />
-            <Text style={styles.kicker}>YOUR PARTNER</Text>
-            <Text style={styles.bigName}>PREYAS</Text>
-            <Text style={styles.tagline}>Playful in the room. Loyal at heart.</Text>
-            <View style={styles.pills}>
-              <Text style={styles.pill}>Attribute: Aquos</Text>
-              <Text style={styles.pill}>Type: Ball</Text>
-              <Text style={styles.pill}>Level: {partner.level}</Text>
-            </View>
-            <View style={styles.bondCard}>
-              <View style={styles.bondHead}>
-                <Text style={styles.bondTitle}>Bond Level</Text>
-                <Text style={styles.bondPct}>{partner.bond}%</Text>
-              </View>
-              <View style={styles.track}><View style={[styles.fillBar, { width: `${partner.bond}%` }]} /></View>
-              <Text style={styles.caption}>{partner.caption}</Text>
-            </View>
-            <Pressable style={styles.profileBtn} onPress={() => setProfile(true)}>
-              <Text style={styles.profileText}>View Profile  →</Text>
-            </Pressable>
-          </View>
-          ) : null}
+          {wide && listOpen ? <View style={styles.sidebar}>{chatList(false)}</View> : null}
           <View style={styles.chatCard}>
-            {wide ? <View style={styles.sidebar}>{chatList(false)}</View> : null}
             <View style={styles.thread}>
             <View style={styles.chatHead}>
-              {!wide ? (
-                <Pressable style={styles.drawerBtn} onPress={() => setDrawerOpen(true)} hitSlop={8}>
-                  <Text style={styles.drawerBtnText}>☰</Text>
-                </Pressable>
-              ) : null}
+              <Pressable
+                style={styles.drawerBtn}
+                onPress={() => (wide ? setListOpen(!listOpen) : setDrawerOpen(true))}
+                hitSlop={8}
+                accessibilityLabel={wide && listOpen ? "Hide chats" : "Show chats"}
+              >
+                <Text style={styles.drawerBtnText}>☰</Text>
+              </Pressable>
               <Pressable onPress={() => setProfile(true)} hitSlop={6} accessibilityLabel="Preyas profile">
-                <View style={styles.miniBall} />
+                <View style={styles.ball}>
+                  <View style={styles.ballCore} />
+                </View>
               </Pressable>
               <View style={styles.chatHeadText}>
                 <Text style={styles.chatName}>Preyas</Text>
-                <Text style={styles.subtitle}>{online ? "Here with you" : "Offline"} · level {partner.level}</Text>
+                <Text style={styles.subtitle}>Aquos · level {partner.level}</Text>
               </View>
+              {wide ? (
+                <View style={styles.bondInline}>
+                  <View style={styles.track}><View style={[styles.fillBar, { width: `${partner.bond}%` }]} /></View>
+                  <Text style={styles.bondInlineText}>Bond {partner.bond}%</Text>
+                </View>
+              ) : null}
               <View style={styles.onlineRow}>
                 <View style={[styles.dot, online ? styles.dotOn : styles.dotOff]} />
-                <Text style={styles.online}>{online ? "Online" : "Offline"}</Text>
+                <Text style={[styles.online, !wide && styles.onlineCompact]}>{online ? "Online" : "Offline"}</Text>
               </View>
+              <Pressable style={styles.profileBtnHead} onPress={() => setProfile(true)} accessibilityLabel="View profile">
+                <Text style={styles.profileText}>View profile</Text>
+              </Pressable>
               <Pressable style={styles.gearBtn} onPress={() => onSection?.("settings")} hitSlop={8} accessibilityLabel="Settings">
                 <Text style={styles.gearText}>⚙</Text>
               </Pressable>
             </View>
+            <View style={[styles.column, column]}>
             {briefing && !briefingDismissed ? (
-              <View style={styles.briefingCard}>
+              <View style={[styles.briefingCard, styles.briefingTop]}>
                 <View style={styles.briefingCardHead}>
                   <Text style={styles.briefingTitle}>{briefingKicker(briefing.day)}</Text>
                   <Pressable onPress={() => setBriefingDismissed(true)} hitSlop={8} accessibilityLabel="Dismiss briefing">
@@ -2352,7 +2370,7 @@ export function ChatScreen({
                 <Text style={styles.chipSavedText}>✓ {chip}</Text>
               </View>
             ) : null}
-            <View style={styles.composer}>
+            <View style={styles.composerBox}>
               <TextInput
                 value={draft}
                 onChangeText={setDraft}
@@ -2361,15 +2379,15 @@ export function ChatScreen({
                 style={styles.input}
                 onSubmitEditing={submitDraft}
               />
-              <Pressable onPress={() => setDraft((value) => `${value}💧 `)}><Text style={styles.emoji}>☺</Text></Pressable>
               {micOk ? (
                 <Pressable
-                  style={styles.mic}
+                  style={styles.composerBtn}
                   onPress={() => {
                     if (bag.playing) interruptTalk(bag);
                   }}
+                  accessibilityLabel={`Microphone ${phase}`}
                 >
-                  <Text style={styles.micText}>{phase}</Text>
+                  <Text style={styles.composerBtnText}>{MIC_ICON[phase] ?? "🎤"}</Text>
                 </Pressable>
               ) : null}
               <Pressable
@@ -2403,12 +2421,6 @@ export function ChatScreen({
                 <Text style={styles.chipText}>{button.enabled ? "Ask a paid model" : button.reason}</Text>
               </Pressable>
             </View>
-            <View style={styles.footerRow}>
-              <Text style={styles.footer}>Preyas is a great listener.</Text>
-              <View style={styles.switchRow}>
-                <Text style={styles.switchLabel}>Timeout → DeepSeek</Text>
-                <Switch value={escalate} onValueChange={setEscalate} />
-              </View>
             </View>
             </View>
           </View>
@@ -2595,12 +2607,38 @@ export function ChatScreen({
         </View>
       ) : null}
       {profile ? (
-        <View style={styles.sheet}>
-          <Text style={styles.bigName}>PREYAS</Text>
-          <Text style={styles.tagline}>Aquos · ball form · level {partner.level} · bond {partner.bond}%</Text>
-          <Text style={styles.caption}>{partner.caption}</Text>
-          <Text style={styles.dim}>{via === "gateway" ? "Talking through the gateway." : "Talking to the local brain."}</Text>
-          <Pressable onPress={() => setProfile(false)}><Text style={styles.profileText}>Close</Text></Pressable>
+        <View style={styles.profileWrap}>
+          <Pressable style={styles.scrim} onPress={() => setProfile(false)} accessibilityLabel="Close profile" />
+          <View style={styles.profilePanel}>
+            <View style={styles.profileHead}>
+              <Text style={styles.sectionTitle}>Profile</Text>
+              <Pressable style={styles.profileBtn} onPress={() => setProfile(false)} accessibilityLabel="Close profile">
+                <Text style={styles.profileText}>Close ✕</Text>
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.profileBody}>
+              <View style={styles.profileHero}>
+                <PreyasHero talking={phase === "speaking"} short={false} fill />
+              </View>
+              <Text style={styles.kicker}>YOUR PARTNER</Text>
+              <Text style={styles.bigName}>PREYAS</Text>
+              <Text style={styles.tagline}>Playful in the room. Loyal at heart.</Text>
+              <View style={styles.pills}>
+                <Text style={styles.pill}>Attribute: Aquos</Text>
+                <Text style={styles.pill}>Type: Ball</Text>
+                <Text style={styles.pill}>Level: {partner.level}</Text>
+              </View>
+              <View style={styles.bondCard}>
+                <View style={styles.bondHead}>
+                  <Text style={styles.bondTitle}>Bond Level</Text>
+                  <Text style={styles.bondPct}>{partner.bond}%</Text>
+                </View>
+                <View style={styles.track}><View style={[styles.fillBar, { width: `${partner.bond}%` }]} /></View>
+                <Text style={styles.caption}>{partner.caption}</Text>
+              </View>
+              <Text style={styles.dim}>{via === "gateway" ? "Talking through the gateway." : "Talking to the local brain."}</Text>
+            </ScrollView>
+          </View>
         </View>
       ) : null}
     </View>
@@ -2619,26 +2657,35 @@ const styles = StyleSheet.create({
   },
   voiceHint: { color: "#8aa89b", fontSize: 11, marginTop: 6, textAlign: "center", width: "100%" },
   pairInput: { fontSize: 24, letterSpacing: 6, textAlign: "center" },
-  split: { flex: 1, flexDirection: "row", padding: 16, gap: 16, minWidth: 0, maxWidth: "100%" },
-  stack: { flexDirection: "column" },
-  left: { flex: 1, gap: 8 },
-  kicker: { color: "#8aa89b", fontSize: 11, letterSpacing: 1.6, marginTop: 8 },
-  bigName: { color: "#eaf7f1", fontSize: 36, fontWeight: "800", letterSpacing: 1 },
-  tagline: { color: "#b3c8bf", fontSize: 14 },
-  pills: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
-  pill: { color: "#d2efe2", borderWidth: 1, borderColor: "rgba(67,217,173,0.35)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6, fontSize: 12 },
-  bondCard: { marginTop: 8, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: "rgba(67,217,173,0.28)", backgroundColor: "#0c1613" },
+  // Phone: one column with 16px side padding. Mac: chats list + the thread.
+  split: { flex: 1, flexDirection: "row", padding: theme.space.md, gap: theme.space.md, minWidth: 0, maxWidth: "100%" },
+  stack: { flexDirection: "column", padding: 0, gap: 0 },
+  kicker: { color: theme.dim, fontSize: theme.type.label, letterSpacing: 1.6, marginTop: theme.space.sm },
+  bigName: { color: theme.text, fontSize: theme.type.hero * 1.5, fontWeight: "800", letterSpacing: 1 },
+  tagline: { color: theme.dim, fontSize: theme.type.body },
+  pills: { flexDirection: "row", flexWrap: "wrap", gap: theme.space.sm, marginTop: theme.space.xs },
+  pill: { color: theme.text, borderWidth: 1, borderColor: theme.accentLine, borderRadius: theme.radius.md, paddingHorizontal: theme.space.sm + 2, paddingVertical: theme.space.xs + 2, fontSize: theme.type.caption },
+  bondCard: { marginTop: theme.space.sm, padding: theme.space.md - 4, borderRadius: theme.radius.md, borderWidth: 1, borderColor: theme.accentLine, backgroundColor: theme.cardSoft },
   bondHead: { flexDirection: "row", justifyContent: "space-between" },
-  bondTitle: { color: "#e4f5ec", fontWeight: "700" },
-  bondPct: { color: aqua, fontWeight: "700" },
-  track: { height: 8, borderRadius: 4, backgroundColor: "#18251f", marginTop: 8, overflow: "hidden" },
-  fillBar: { height: 8, backgroundColor: aqua },
-  caption: { color: "#8aa89b", fontSize: 12, marginTop: 6 },
-  profileBtn: { marginTop: 8, alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(67,217,173,0.4)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
-  profileText: { color: aqua, fontWeight: "700" },
-  chatCard: { flex: 1.2, flexDirection: "row", gap: 12, borderWidth: 1, borderColor: "rgba(67,217,173,0.22)", borderRadius: 18, backgroundColor: "#0a1310", padding: 12, minHeight: 320, minWidth: 0, maxWidth: "100%" },
+  bondTitle: { color: theme.text, fontWeight: "700", fontSize: theme.type.body },
+  bondPct: { color: aqua, fontWeight: "700", fontSize: theme.type.body },
+  track: { height: theme.space.sm, borderRadius: theme.space.xs, backgroundColor: "#18251f", marginTop: theme.space.sm, overflow: "hidden" },
+  fillBar: { height: theme.space.sm, backgroundColor: aqua },
+  caption: { color: theme.dim, fontSize: theme.type.caption, marginTop: theme.space.xs + 2 },
+  profileBtn: { alignSelf: "flex-start", borderWidth: 1, borderColor: theme.accentDim, borderRadius: theme.radius.sm, paddingHorizontal: theme.space.md - 4, paddingVertical: theme.space.sm },
+  profileText: { color: aqua, fontWeight: "700", fontSize: theme.type.caption },
+  profileBtnHead: {
+    borderWidth: 1,
+    borderColor: theme.accentLine,
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: theme.space.sm + 2,
+    paddingVertical: theme.space.xs + 2,
+  },
+  chatCard: { flex: 1, flexDirection: "row", borderWidth: 1, borderColor: theme.accentLine, borderRadius: theme.radius.md, backgroundColor: theme.cardSoft, padding: theme.space.sm, minHeight: theme.space.xl * 10, minWidth: 0, maxWidth: "100%" },
   thread: { flex: 1, minWidth: 0 },
-  sidebar: { width: 210, borderRightWidth: 1, borderRightColor: "rgba(67,217,173,0.16)", paddingRight: 10 },
+  /** The reading column: messages, briefing and composer, centred on a Mac. */
+  column: { flex: 1, alignSelf: "center", minWidth: 0, paddingHorizontal: theme.space.md },
+  sidebar: { width: theme.size.list, borderRightWidth: 1, borderRightColor: theme.accentLine, paddingRight: theme.space.sm, marginRight: theme.space.sm },
   sidebarInner: { flex: 1, gap: 8 },
   sidebarHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sidebarTitle: { color: "#8aa89b", fontSize: 11, letterSpacing: 1.6 },
@@ -2646,7 +2693,9 @@ const styles = StyleSheet.create({
   newChat: { borderWidth: 1, borderColor: "rgba(67,217,173,0.45)", borderRadius: 12, paddingVertical: 8, alignItems: "center" },
   newChatText: { color: aqua, fontSize: 13, fontWeight: "700" },
   chatList: { flex: 1 },
-  chatListInner: { gap: 4, paddingBottom: 8 },
+  chatListInner: { gap: theme.space.xs, paddingBottom: theme.space.sm },
+  listHide: { borderTopWidth: 1, borderTopColor: theme.accentLine, paddingTop: theme.space.sm, alignItems: "flex-start" },
+  listHideText: { color: theme.dim, fontSize: theme.type.caption, fontWeight: "600" },
   chatRow: { flexDirection: "row", alignItems: "center", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 6, gap: 2 },
   chatRowOn: { backgroundColor: "rgba(67,217,173,0.12)" },
   chatRowMain: { flex: 1, minWidth: 0 },
@@ -2658,7 +2707,7 @@ const styles = StyleSheet.create({
   emptyChat: { alignItems: "center", paddingVertical: 36, paddingHorizontal: 20, gap: 6 },
   emptyTitle: { color: "#e4f5ec", fontSize: 16, fontWeight: "800" },
   emptyText: { color: "#8aa89b", fontSize: 13, lineHeight: 19, textAlign: "center" },
-  chipSaved: { alignSelf: "flex-start", borderWidth: 1, borderColor: "rgba(61,222,138,0.5)", backgroundColor: "rgba(61,222,138,0.12)", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 6 },
+  chipSaved: { alignSelf: "center", borderWidth: 1, borderColor: "rgba(61,222,138,0.5)", backgroundColor: "rgba(61,222,138,0.12)", borderRadius: theme.radius.md, paddingHorizontal: theme.space.sm + 2, paddingVertical: theme.space.xs, marginBottom: theme.space.xs },
   chipSavedText: { color: "#8ff0bd", fontSize: 12, fontWeight: "700" },
   noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, borderWidth: 1, borderColor: "rgba(67,217,173,0.18)", borderRadius: 10, padding: 8 },
   noteEditing: { flex: 1, gap: 6 },
@@ -2691,16 +2740,40 @@ const styles = StyleSheet.create({
   modalCancel: { color: "#93aca2", fontWeight: "700" },
   modalOk: { color: aqua, fontWeight: "800" },
   modalDanger: { color: "#ff8a8a" },
-  chatHead: { flexDirection: "row", alignItems: "center", gap: 10, paddingBottom: 8 },
-  chatHeadText: { flex: 1 },
-  chatName: { color: "#eaf7f1", fontWeight: "800", fontSize: 16 },
-  subtitle: { color: "#8aa89b", fontSize: 12 },
-  onlineRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  dotOn: { backgroundColor: "#3dde8a" },
+  chatHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.space.sm,
+    minHeight: theme.size.header,
+    paddingHorizontal: theme.space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.accentLine,
+    minWidth: 0,
+  },
+  chatHeadText: { flex: 1, minWidth: 0 },
+  chatName: { color: theme.text, fontWeight: "800", fontSize: theme.type.body + 1 },
+  subtitle: { color: theme.dim, fontSize: theme.type.caption },
+  onlineRow: { flexDirection: "row", alignItems: "center", gap: theme.space.xs },
+  onlineCompact: { display: "none" },
+  dot: { width: theme.space.sm, height: theme.space.sm, borderRadius: theme.space.xs },
+  dotOn: { backgroundColor: theme.good },
   dotOff: { backgroundColor: "#5c7269" },
-  online: { color: "#c5d8cf", fontSize: 12 },
-  miniBall: { width: 28, height: 28, borderRadius: 14, backgroundColor: "#174033", borderWidth: 1, borderColor: aqua },
+  online: { color: theme.text, fontSize: theme.type.caption },
+  /** The 40px ball in the header: a ring, no 3D canvas. */
+  ball: {
+    width: theme.size.avatar,
+    height: theme.size.avatar,
+    borderRadius: theme.size.avatar / 2,
+    borderWidth: 2,
+    borderColor: aqua,
+    backgroundColor: "#174033",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ballCore: { width: theme.space.md, height: theme.space.md, borderRadius: theme.space.sm, backgroundColor: theme.accentSoft, borderWidth: 2, borderColor: aqua },
+  bondInline: { width: theme.size.bond, gap: theme.space.xs },
+  bondInlineText: { color: theme.dim, fontSize: theme.type.label },
+  miniBall: { width: theme.size.dot, height: theme.size.dot, borderRadius: theme.size.dot / 2, backgroundColor: "#174033", borderWidth: 1, borderColor: aqua },
   log: { flex: 1, width: "100%" },
   logWrap: { flex: 1, position: "relative" },
   jumpWrap: { position: "absolute", left: 0, right: 0, bottom: 6, alignItems: "center" },
@@ -2716,19 +2789,20 @@ const styles = StyleSheet.create({
   logInner: { gap: 10, paddingVertical: 8, width: "100%" },
   // A bubble is capped by the screen, never by a pixel width: 420px overflowed a
   // 390px phone. flexShrink lets the row give way instead of pushing sideways.
-  bubbleWrap: { flexDirection: "row", alignItems: "flex-end", gap: 8, maxWidth: "82%", flexShrink: 1 },
+  bubbleWrap: { flexDirection: "row", alignItems: "flex-end", gap: theme.space.sm, maxWidth: "75%", flexShrink: 1 },
   bubbleLeft: { alignSelf: "flex-start" },
   bubbleRight: { alignSelf: "flex-end" },
-  bubble: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8, maxWidth: "100%", flexShrink: 1 },
-  bubbleHis: { backgroundColor: "#111c18", borderWidth: 1, borderColor: "rgba(67,217,173,0.18)" },
-  bubbleMine: { backgroundColor: "#143b30" },
-  bubbleWho: { color: aqua, fontSize: 11, fontWeight: "700", marginBottom: 2 },
-  bubbleText: { color: "#e2f4ea", fontSize: 15, lineHeight: 21, flexShrink: 1 },
-  time: { color: "#7e988d", fontSize: 11, marginTop: 4, textAlign: "right" },
+  bubble: { borderRadius: theme.radius.md, paddingHorizontal: theme.type.body, paddingVertical: theme.space.sm + 2, maxWidth: "100%", flexShrink: 1 },
+  bubbleHis: { backgroundColor: "#111c18", borderWidth: 1, borderColor: theme.accentLine },
+  bubbleMine: { backgroundColor: "#143b30", borderWidth: 0 },
+  bubbleWho: { color: aqua, fontSize: theme.type.label, fontWeight: "700", marginBottom: theme.space.xs / 2 },
+  bubbleText: { color: theme.text, fontSize: theme.type.input - 1, lineHeight: theme.lead, flexShrink: 1 },
+  time: { color: theme.faint, fontSize: theme.type.label, marginTop: theme.space.xs, textAlign: "right" },
   typing: { color: aqua, fontSize: 13, marginTop: 4 },
   sources: { marginTop: 6, gap: 2 },
   healthList: { gap: 8, marginVertical: 10 },
-  briefingCard: { marginTop: 8, borderWidth: 1, borderColor: "rgba(67,217,173,0.35)", borderRadius: 12, backgroundColor: "#0c1613", padding: 10, gap: 6 },
+  briefingTop: { marginTop: theme.space.sm },
+  briefingCard: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: theme.radius.md, backgroundColor: theme.cardSoft, padding: theme.space.sm + 2, gap: theme.space.xs + 2, width: "100%" },
   briefingTitle: { color: aqua, fontSize: 12, fontWeight: "700", letterSpacing: 1 },
   briefingText: { color: "#e2f4ea", fontSize: 13, lineHeight: 19 },
   briefingItemRow: { flexDirection: "row", gap: 6, alignItems: "flex-start" },
@@ -2757,29 +2831,67 @@ const styles = StyleSheet.create({
   thinkToggle: { color: "#7e988d", fontSize: 11, marginTop: 6 },
   thinkBody: { color: "#8aa89b", fontSize: 12, marginTop: 4 },
   note: { color: "#e2c27a", fontSize: 13 },
-  composer: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "rgba(67,217,173,0.25)", borderRadius: 22, paddingHorizontal: 10, paddingVertical: 6 },
-  input: { flex: 1, color: "#eaf7f1", paddingVertical: 8, fontSize: 16 },
-  emoji: { color: aqua, fontSize: 18 },
-  mic: { borderWidth: 1, borderColor: aqua, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, minWidth: 72, minHeight: 44, justifyContent: "center" },
-  micText: { color: "#d2efe2", fontSize: 11, textAlign: "center", textTransform: "capitalize" },
-  thinkBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: "rgba(67,217,173,0.35)", alignItems: "center", justifyContent: "center" },
-  thinkBtnOn: { backgroundColor: "rgba(67,217,173,0.25)", borderColor: aqua },
-  thinkBtnText: { fontSize: 15 },
-  send: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#1a7a63", alignItems: "center", justifyContent: "center" },
-  sendText: { color: "#eaf7f1", fontSize: 16 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  chip: { borderWidth: 1, borderColor: "rgba(67,217,173,0.35)", borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
+  /** One rounded box: text, mic, brain and the teal send. */
+  composerBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.space.sm,
+    borderWidth: 1,
+    borderColor: theme.accentLine,
+    borderRadius: theme.size.composer,
+    paddingLeft: theme.space.md,
+    paddingRight: theme.space.xs,
+    paddingVertical: theme.space.xs,
+    backgroundColor: theme.cardSoft,
+    marginTop: theme.space.sm,
+  },
+  input: { flex: 1, minWidth: 0, color: theme.text, paddingVertical: theme.space.sm, fontSize: theme.type.input },
+  composerBtn: {
+    width: theme.space.xl + theme.space.xs,
+    height: theme.space.xl + theme.space.xs,
+    borderRadius: (theme.space.xl + theme.space.xs) / 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  composerBtnText: { fontSize: theme.type.title },
+  thinkBtn: {
+    width: theme.space.xl + theme.space.xs,
+    height: theme.space.xl + theme.space.xs,
+    borderRadius: (theme.space.xl + theme.space.xs) / 2,
+    borderWidth: 1,
+    borderColor: theme.accentLine,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  thinkBtnOn: { backgroundColor: theme.accentSoft, borderColor: aqua },
+  thinkBtnText: { fontSize: theme.type.body },
+  send: { width: theme.space.xl + theme.space.sm, height: theme.space.xl + theme.space.sm, borderRadius: (theme.space.xl + theme.space.sm) / 2, backgroundColor: aqua, alignItems: "center", justifyContent: "center" },
+  sendText: { color: theme.bg, fontSize: theme.type.body },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: theme.space.xs + 2, marginTop: theme.space.sm },
+  chip: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: theme.radius.md, paddingHorizontal: theme.space.sm + 2, paddingVertical: theme.space.xs + 2 },
   chipOff: { opacity: 0.45 },
   chipHint: { backgroundColor: "rgba(67,217,173,0.15)" },
   chipText: { color: "#d2efe2", fontSize: 12 },
-  footerRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", marginTop: 8, gap: 8 },
-  footer: { color: "#8aa89b", fontSize: 12, flexShrink: 1 },
-  switchRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  switchLabel: { color: "#8aa89b", fontSize: 11 },
+  switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space.sm },
   fill: { flex: 1 },
   pad: { padding: 20, gap: 8 },
   dim: { color: "#93aca2", fontSize: 14 },
-  sheet: { position: "absolute", left: 24, right: 24, bottom: 24, backgroundColor: "#0e1a16", borderWidth: 1, borderColor: aqua, borderRadius: 16, padding: 16, gap: 8 },
+  // Profile: a centred panel that holds the hero, pills and Bond card.
+  profileWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 25, alignItems: "center", justifyContent: "center", padding: theme.space.md },
+  profilePanel: {
+    width: "100%",
+    maxWidth: theme.size.maxChat / 2,
+    maxHeight: "100%",
+    backgroundColor: theme.card,
+    borderWidth: 1,
+    borderColor: aqua,
+    borderRadius: theme.radius.lg,
+    padding: theme.space.md,
+    gap: theme.space.sm,
+  },
+  profileHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  profileBody: { gap: theme.space.xs, paddingBottom: theme.space.sm },
+  profileHero: { height: theme.space.xl * 8 },
   // One header per tab, one gear in the chat header.
   sectionTitle: { color: "#eaf7f1", fontSize: 18, fontWeight: "800" },
   gearBtn: { padding: 4 },
