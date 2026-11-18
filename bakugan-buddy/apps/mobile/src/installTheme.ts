@@ -5,6 +5,7 @@
  * theme-color meta tag in step with the local clock. A no-op outside the web.
  */
 import { DAY, NIGHT, cssVars, isNight } from "./palette.ts";
+import { installSky } from "./skyCss.ts";
 
 function installTheme(): void {
   if (typeof document === "undefined") return;
@@ -25,6 +26,9 @@ function installTheme(): void {
     document.head.appendChild(el);
   }
   el.textContent = css;
+
+  // The sky gradient and clouds live in their own style + a static div.
+  installSky();
 
   function apply(): void {
     const night = isNight(new Date());
