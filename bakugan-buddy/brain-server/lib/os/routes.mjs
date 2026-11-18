@@ -7,7 +7,10 @@ import { PREYAS_CHAT_PERSONA } from "../../../packages/alive/src/persona.ts";
 import { asMs, crisisLine, dayKey, readEvents, readSettings, summarizeDay } from "./events.mjs";
 import { createSendMemory, confirmLine, logParsedEvents, normalizeSentence, undoEvents } from "./eventsConfirm.mjs";
 import { parseEvents } from "./eventsParse.mjs";
+import { reviewAction } from "./guard.mjs";
+import { readGuardLog } from "./guardLog.mjs";
 import { listVersions, loadPersona } from "./persona.mjs";
+import { allowPaid } from "../coach/spendGate.mjs";
 
 function sendJson(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -130,6 +133,28 @@ export async function handleOsRoute(ctx) {
     const settings = readSettings(dataDir);
     const day = url.searchParams.get("day") || dayKey(nowMs, settings.tz);
     return answered(res, 200, summarizeDay(dataDir, day, { tz: settings.tz }));
+  }
+
+  if (url.pathname === "/v1/guard/review" && req.method === "POST") {
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    const action = body.action && typeof body.action === "object" ? body.action : null;
+    if (!action || typeof action.kind !== "string") {
+      return answered(res, 400, { error: "action.kind is required" });
+    }
+    // Dry run: nothing executes; the audit line is still written.
+    const review = await reviewAction(action, {
+      dataDir,
+      now: () => nowMs,
+      allowPaid: dataDir ? allowPaid : null,
+    });
+    return answered(res, 200, review);
+  }
+
+  if (url.pathname === "/v1/guard/log" && req.method === "GET") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const day = url.searchParams.get("day") || null;
+    return answered(res, 200, { lines: readGuardLog(dataDir, day) });
   }
 
   return false;
