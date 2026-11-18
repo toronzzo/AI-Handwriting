@@ -114,21 +114,32 @@ function tokenize(text: string): string[] {
 }
 
 /**
- * BM25 over note text. No embeddings, no network: a handful of notes rank fine
- * and the score is deterministic, which keeps the tests boring.
+ * BM25 over item text. No embeddings, no network: a handful of documents rank
+ * fine and the score is deterministic, which keeps the tests boring.
+ * Returns { item, score } rows ordered best first; items that share no term
+ * with the query come back with score 0 (before `limit`).
+ * `tuning` changes the saturation/width constants; the defaults are the
+ * classic values and keep rankNotes byte-for-byte compatible with before.
  */
-export function rankNotes<T extends { text: string }>(notes: readonly T[], query: string, limit = NOTE_LIMIT): T[] {
+export function scoreNotes<T extends { text: string }>(
+  items: readonly T[],
+  query: string,
+  limit = 200,
+  tuning: { k1?: number; b?: number } = {},
+): { item: T; score: number }[] {
   const terms = [...new Set(tokenize(query))];
-  if (!notes.length || !terms.length) return notes.slice(0, limit);
-  const docs = notes.map((note) => tokenize(note.text));
+  if (!items.length || !terms.length) {
+    return items.slice(0, limit).map((item) => ({ item, score: 0 }));
+  }
+  const docs = items.map((item) => tokenize(item.text));
   const total = docs.length;
   const average = docs.reduce((sum, doc) => sum + doc.length, 0) / Math.max(1, total);
   const seen = new Map<string, number>();
   for (const term of terms) seen.set(term, docs.filter((doc) => doc.includes(term)).length);
-  const k1 = 1.2;
-  const b = 0.75;
-  const scored = notes
-    .map((note, index) => {
+  const k1 = tuning.k1 ?? 1.2;
+  const b = tuning.b ?? 0.75;
+  const scored = items
+    .map((item, index) => {
       const doc = docs[index]!;
       const length = doc.length || 1;
       let score = 0;
@@ -139,11 +150,16 @@ export function rankNotes<T extends { text: string }>(notes: readonly T[], query
         const idf = Math.log(1 + (total - df + 0.5) / (df + 0.5));
         score += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + (b * length) / average)));
       }
-      return { note, score, index };
+      return { item, score, index };
     })
     .filter((row) => row.score > 0);
   scored.sort((left, right) => right.score - left.score || left.index - right.index);
-  return scored.slice(0, limit).map((row) => row.note);
+  return scored.slice(0, limit).map((row) => ({ item: row.item, score: row.score }));
+}
+
+/** Rank notes by BM25 and return the items; same results as always. */
+export function rankNotes<T extends { text: string }>(notes: readonly T[], query: string, limit = NOTE_LIMIT): T[] {
+  return scoreNotes(notes, query, limit).map((row) => row.item);
 }
 
 /** The `memory/notes.md` mirror that other tools read. Grouped by kind. */

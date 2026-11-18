@@ -84,6 +84,9 @@ import {
 import { answerFromDocument, keyPointsFrom, summarizeDocument } from "./lib/docSummary.mjs";
 import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./lib/tasks.mjs";
 import { launchTaskRun, planTask, taskRunActive } from "./lib/taskRunner.mjs";
+import { createCoach } from "./lib/coach/engine.mjs";
+import { capUsd, spentTodayUsd } from "./lib/coach/spendGate.mjs";
+import { fileURLToPath } from "node:url";
 import os from "node:os";
 
 const llamaUrl = (process.env.LLAMA_URL || "http://127.0.0.1:8790").replace(/\/$/, "");
@@ -100,6 +103,62 @@ function syncHistory() {
 }
 const label = process.env.BRAIN_LABEL || "preyas";
 const warn = process.env.BRAIN_WARN === "1";
+
+/**
+ * Coach: the local llama judges a pasted result for steps that have a Check
+ * but no Expect/Bad patterns. Strict JSON only; anything unparsable is
+ * "unsure" and unsure never advances. Under 1500 characters of context.
+ */
+async function judgeCoachStep(step, snippet) {
+  try {
+    const res = await fetch(`${llamaUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [
+          {
+            role: "system",
+            content:
+              'You check whether a pasted result matches one instruction. Reply with one JSON object and nothing else: {"verdict":"ok"} for a match, {"verdict":"bad"} for a clear failure, {"verdict":"unsure"} otherwise.',
+          },
+          {
+            role: "user",
+            content:
+              `Instruction: ${String(step.do || "").slice(0, 600)}\n` +
+              `Check: ${String(step.check || "").slice(0, 400)}\n` +
+              `Result: ${String(snippet || "").slice(0, 200)}`,
+          },
+        ],
+        temperature: 0,
+        max_tokens: 32,
+        stream: false,
+        chat_template_kwargs: { enable_thinking: false },
+      }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    const data = await res.json();
+    const content = String(data?.choices?.[0]?.message?.content || "");
+    const match = content.match(/\{\s*"verdict"\s*:\s*"(ok|bad|unsure)"\s*\}/i);
+    return match ? match[1].toLowerCase() : "unsure";
+  } catch {
+    return "unsure";
+  }
+}
+
+const coach =
+  dataDir
+    ? createCoach({
+        dataDir,
+        skillsDir: path.join(dataDir, "coach", "skills"),
+        seedDir: fileURLToPath(new URL("./coach-seed", import.meta.url)),
+        judge: judgeCoachStep,
+      })
+    : null;
+
+function coachUnavailable(res) {
+  res.writeHead(503, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: "drive_missing" }));
+}
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -1490,6 +1549,43 @@ const server = http.createServer(async (req, res) => {
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(status));
+      return;
+    }
+
+    if (url.pathname === "/v1/coach/turn" && req.method === "POST") {
+      if (!coach) return coachUnavailable(res);
+      const body = JSON.parse((await readBody(req)).toString("utf8") || "{}");
+      const result = await coach.turn(String(body.text || ""));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+      return;
+    }
+
+    if (url.pathname === "/v1/coach/state" && req.method === "GET") {
+      if (!coach) return coachUnavailable(res);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(coach.state()));
+      return;
+    }
+
+    if (url.pathname === "/v1/coach/skills" && req.method === "GET") {
+      if (!coach) return coachUnavailable(res);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ skills: coach.skills() }));
+      return;
+    }
+
+    if (url.pathname === "/v1/coach/escalate" && req.method === "POST") {
+      if (!coach) return coachUnavailable(res);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(coach.escalate()));
+      return;
+    }
+
+    if (url.pathname === "/v1/spend" && req.method === "GET") {
+      if (!dataDir) return coachUnavailable(res);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ spentTodayUsd: spentTodayUsd(dataDir), capUsd: capUsd(dataDir) }));
       return;
     }
 

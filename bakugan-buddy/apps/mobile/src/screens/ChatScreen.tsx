@@ -34,6 +34,9 @@ import { isWhisperHallucination, resetSpeech } from "../../../../packages/alive/
 import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../../../packages/alive/src/notes.ts";
 import { looksLikeTask, taskStatusLine, type TaskRecord } from "../../../../packages/alive/src/tasks.ts";
 import { confirmFor } from "../../../../packages/alive/src/confirm.ts";
+import { isSessionWord, parseCoachIntent } from "../../../../packages/alive/src/coach.ts";
+import { CoachChip, CoachPanel } from "../coach/CoachChip";
+import { useCoach } from "../coach/useCoach";
 import { matchDocuments, parseDocumentRequest } from "../../../../packages/alive/src/documents.ts";
 import { formatDue, parseReminder, type Reminder } from "../../../../packages/alive/src/reminders.ts";
 import { isShortAffirmation, wantsThinking } from "../../../../packages/alive/src/chatTurn.ts";
@@ -213,6 +216,8 @@ export function ChatScreen({
   /** Mac: the chats list beside the thread; remembered while the app runs. */
   const [listOpen, setListOpen] = useState(true);
   const [dialog, setDialog] = useState<ChatDialog | null>(null);
+  const [coachPanel, setCoachPanel] = useState(false);
+  const coach = useCoach(() => bag.brainUrl || null);
   const [notesList, setNotesList] = useState<Note[]>([]);
   const [notesQuery, setNotesQuery] = useState("");
   const [editing, setEditing] = useState<{ id: string; text: string; kind: NoteKind } | null>(null);
@@ -576,6 +581,55 @@ export function ChatScreen({
     return String(value || "").toLowerCase().replace(/\.[a-z0-9]+$/, "").replace(/[^a-z0-9]+/g, "");
   }
 
+  /** Coach playbooks: "coach <topic>", or any text while a session runs. */
+  async function handleCoachCommand(text: string, chatId: string | null): Promise<boolean> {
+    const intent = parseCoachIntent(text);
+    const active = (coach.stateRef.current?.mode ?? "off") !== "off";
+    // Only coach commands or (in a session) any text open the coach flow;
+    // in-session words alone never do.
+    if (!active && (!intent || isSessionWord(intent.kind))) return false;
+    busy.current = true;
+    try {
+      const data = await coach.turn(text);
+      if (!data || !data.handled) return false;
+      await addLocal({ t: Date.now(), role: "user", content: text, who: "user" });
+      await addLocal({ t: Date.now(), role: "assistant", content: data.reply, who: "preyas", model: "preyas" });
+      if (data.escalate) {
+        try {
+          const escRes = await brainFetch(`${bag.brainUrl}/v1/coach/escalate`, { method: "POST" });
+          const esc = await escRes.json();
+          if (esc.allowed) {
+            setDialog({ kind: "paid", text: esc.prompt });
+          } else {
+            await addLocal({
+              t: Date.now(),
+              role: "assistant",
+              content: `Daily limit reached (today: $${Number(esc.spentTodayUsd || 0).toFixed(2)} of $${Number(esc.capUsd || 0).toFixed(2)}), so the paid ask stays blocked.`,
+              who: "preyas",
+              model: "preyas",
+            });
+          }
+          if (esc.grokBotText) {
+            await addLocal({
+              t: Date.now(),
+              role: "assistant",
+              content: `For Grok Bot:\n\n${esc.grokBotText}`,
+              who: "preyas",
+              model: "preyas",
+            });
+          }
+        } catch {
+          /* the escalate card is a nicety, the honest reply already landed */
+        }
+      }
+      void coach.refresh();
+      return true;
+    } catch {
+      return false;
+    } finally {
+      busy.current = false;
+    }
+  }
   /** "search my vault for X", "what did I write about X", "save this to Obsidian". */
   async function handleVaultCommand(text: string, chatId: string | null): Promise<boolean> {
     const lower = text.trim().toLowerCase();
@@ -1302,6 +1356,7 @@ export function ChatScreen({
       const endpoint = await resolveChatBase(bag.brainUrl);
       if (cancel) return;
       setVia(endpoint.via);
+      void coach.refresh();
       try {
         const res = await brainFetch(`${bag.brainUrl}/v1/chats`);
         if (isUnauthorized(res.status)) {
@@ -1497,6 +1552,7 @@ export function ChatScreen({
       const handled = await handleDocumentRequest(docRequest, trimmed, chatId);
       if (handled) return;
     }
+    if (!askPaid && !affirmation && !dialog && (await handleCoachCommand(trimmed, chatId))) return;
     if (!askPaid && !affirmation && (await handleVaultCommand(trimmed, chatId))) return;
     if (!askPaid && !affirmation && (await handleStudyCommand(trimmed, chatId))) return;
     if (!askPaid && !affirmation && (await handleBriefingCommand(trimmed, chatId))) return;
@@ -2159,6 +2215,7 @@ export function ChatScreen({
                 <Text style={styles.chatName}>Preyas</Text>
                 <Text style={styles.subtitle}>Aquos · level {partner.level}</Text>
               </View>
+              <CoachChip state={coach.state} compact={!wide} onPress={() => setCoachPanel(true)} />
               {wide ? (
                 <View style={styles.bondInline}>
                   <View style={styles.track}><View style={[styles.fillBar, { width: `${partner.bond}%` }]} /></View>
@@ -2550,6 +2607,21 @@ export function ChatScreen({
             </View>
           </View>
         </View>
+      ) : null}
+      {coachPanel ? (
+        <CoachPanel
+          state={coach.state}
+          skills={coach.skills}
+          onClose={() => setCoachPanel(false)}
+          onStop={() => {
+            setCoachPanel(false);
+            void coach.turn("stop");
+          }}
+          onHint={(text) => {
+            setCoachPanel(false);
+            setNote(text);
+          }}
+        />
       ) : null}
       {confirmDialog ? (
         <View style={styles.modalWrap}>
