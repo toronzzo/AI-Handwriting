@@ -36,6 +36,7 @@ Use only what matches personal / eventual Play Store distribution. **Re-verify**
 - **Bakugan** names, designs, and show voices: © Spin Master / Sega. Personal fan build: inspired OK. **Public release: original packs only** unless licensed.
 - Character content lives in `packages/character-packs/` so swapping is one folder.
 - Do **not** ship cloned voices from the anime.
+- **Inter** and **Oswald** fonts, SIL Open Font License 1.1, embedded in `public/fonts`.
 
 ## One-time model download
 
