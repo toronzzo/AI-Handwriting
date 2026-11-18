@@ -83,3 +83,18 @@ test("a broken dataDir never throws", async () => {
   assert.equal(body.usedDefault, true);
   assert.ok(body.warnings.length > 0);
 });
+
+test("GET /v1/persona works when ctx.now returns a number (as proxy.mjs passes)", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "os-routes-now-"));
+  try {
+    let status = 0;
+    let body = "";
+    const res = { writeHead(code) { status = code; }, end(text) { body = text; } };
+    const handled = await handleOsRoute({ req: { method: "GET" }, res, url: new URL("http://x/v1/persona"), dataDir, now: () => Date.now() });
+    assert.equal(handled, true);
+    assert.equal(status, 200);
+    assert.equal(JSON.parse(body).rev, 1);
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
