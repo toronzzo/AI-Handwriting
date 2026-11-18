@@ -1,22 +1,63 @@
 /**
- * One calm theme for the whole app: a dark room with a teal Preyas accent.
+ * One Pajero theme for the whole app, with automatic day/night colours.
  * 8px spacing grid, one type scale. Every screen reads from here.
+ *
+ * On the web every colour is the string `var(--pz-<key>)` so the injected
+ * stylesheet can flip day/night live; on the iPhone and under node tests it
+ * is a fixed hex taken from the palette at launch.
  */
+import { paletteFor, type PaletteKey } from "./palette.ts";
+
+const isWeb = typeof document !== "undefined";
+const launch = paletteFor(new Date());
+
+function colour(key: PaletteKey): string {
+  return isWeb ? `var(--pz-${key})` : launch[key];
+}
+
 export const theme = {
-  bg: "#07100d",
-  card: "#0e1a16",
-  cardSoft: "#0c1613",
-  accent: "#43d9ad",
-  accentDim: "rgba(67,217,173,0.55)",
-  accentSoft: "rgba(67,217,173,0.14)",
-  accentLine: "rgba(67,217,173,0.28)",
-  text: "#eaf7f1",
-  dim: "#93aca2",
-  faint: "#6d857c",
-  danger: "#ff8a8a",
-  good: "#3dde8a",
+  bg: colour("bg"),
+  card: colour("card"),
+  cardSoft: colour("cardSoft"),
+  accent: colour("accent"),
+  accentDim: colour("accentDim"),
+  accentSoft: colour("accentSoft"),
+  accentLine: colour("accentLine"),
+  text: colour("text"),
+  dim: colour("dim"),
+  faint: colour("faint"),
+  danger: colour("danger"),
+  good: colour("good"),
+  /** New palette colours added for the Retro RPG redesign. */
+  skyTop: colour("skyTop"),
+  skyMid: colour("skyMid"),
+  skyBottom: colour("skyBottom"),
+  accentText: colour("accentText"),
+  onAccent: colour("onAccent"),
+  lineStrong: colour("lineStrong"),
+  track: colour("track"),
+  off: colour("off"),
+  stripeYellow: colour("stripeYellow"),
+  stripeOrange: colour("stripeOrange"),
+  stripeRed: colour("stripeRed"),
+  shadow: colour("shadow"),
+  scrim: colour("scrim"),
+  /** Font stacks; only the web has named fonts loaded. */
+  font: {
+    body: isWeb ? "Inter, system-ui, -apple-system, sans-serif" : undefined,
+    display: isWeb ? "Oswald, 'Arial Narrow', Impact, sans-serif" : undefined,
+  },
   space: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 },
-  type: { label: 11, caption: 12, body: 14, input: 16, title: 18, hero: 24 },
+  type: {
+    label: 11,
+    caption: 12,
+    body: 14,
+    input: 16,
+    title: 18,
+    hero: 24,
+    /** Display sizes for the RPG headings, clock and timer. */
+    display: { title: 32, level: 32, section: 26, clock: 24, timer: 20 },
+  },
   radius: { sm: 10, md: 14, lg: 20 },
   /** Layout sizes shared by the shell and the chat screen. */
   size: {
@@ -35,6 +76,6 @@ export const theme = {
   },
   /** Text line height for chat bubbles. */
   lead: 21,
-} as const;
+};
 
 export type Theme = typeof theme;
