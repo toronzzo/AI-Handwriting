@@ -237,8 +237,7 @@ test("judge verdicts: unsure never advances, ok advances, two bads escalate", as
   assert.equal(second.escalate, true, "two bad judge verdicts escalate");
 });
 
-test("B4: every reply carries speak, lastSpeak.id grows, danger follows the step", async () => {
-  const { coach } = makeCoach();
+test("B4: every reply carries speak, lastSpeak.id grows, danger follows the step", async () => {  const { coach } = makeCoach();
   const start = await coach.turn("coach merge the pr");
   assert.ok(start.speak && typeof start.speak.text === "string" && (start.speak.lang === "en" || start.speak.lang === "ru"));
   assert.ok(!start.speak.text.includes("`"), "spoken text has no backticks");
@@ -256,4 +255,42 @@ test("B4: every reply carries speak, lastSpeak.id grows, danger follows the step
   // A voice-style "done" on the danger step stays spoken through the engine reply too.
   const word = await coach.turn("why");
   assert.ok(word.speak && word.speak.text.includes("One commit per slice"));
+});
+
+test("B5: saveExample works with no session and does not disturb a running one", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "coach-example-"));
+  try {
+    const skillsDir = path.join(dir, "coach", "skills");
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.writeFileSync(path.join(skillsDir, "test-merge.md"), MERGE_SKILL);
+    const coach = createCoach({ dataDir: dir, skillsDir, seedDir: null, judge: async () => "unsure" });
+
+    // No chat yet -> honest refusal.
+    const none = await coach.turn("👍");
+    assert.equal(none.handled, true);
+    assert.match(none.reply, /Not saved:/);
+
+    // A real model pair in the newest chat.
+    const { createChat, appendMessage } = await import("../chats.mjs");
+    const chat = createChat(dir, "gold chat");
+    appendMessage(dir, chat.id, { role: "user", content: "how do I merge a PR", who: "user", model: "" });
+    appendMessage(dir, chat.id, { role: "assistant", content: "Open the PR, check the checks, squash merge into main.", who: "preyas", model: "preyas" });
+
+    // No session: save works.
+    const saved = await coach.turn("save as example");
+    assert.equal(saved.handled, true);
+    assert.match(saved.reply, /Saved as example #1/);
+
+    // With a running session: save works and the step is undisturbed.
+    const start = await coach.turn("coach merge the pr");
+    assert.equal(start.state.step, 1);
+    appendMessage(dir, chat.id, { role: "user", content: "how do I sleep better", who: "user", model: "" });
+    appendMessage(dir, chat.id, { role: "assistant", content: "A cool dark room and a fixed wake-up time.", who: "preyas", model: "preyas" });
+    const during = await coach.turn("👍");
+    assert.match(during.reply, /Saved as example #2/);
+    assert.equal(during.state.mode, "skill", "the session keeps running");
+    assert.equal(during.state.step, 1, "the step did not advance");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

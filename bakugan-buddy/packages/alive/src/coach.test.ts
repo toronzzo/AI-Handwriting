@@ -30,6 +30,15 @@ test("stop, status, learned, save lesson", () => {
   assert.deepEqual(parseCoachIntent("запомни урок"), { kind: "saveLesson" });
 });
 
+test("save example: whole-message phrases, and non-triggers", () => {
+  for (const phrase of ["👍", "save example", "save as example", "сохрани как пример", "запомни ответ"]) {
+    assert.deepEqual(parseCoachIntent(phrase), { kind: "saveExample" }, phrase);
+  }
+  assert.equal(parseCoachIntent("I like the example"), null);
+  assert.equal(parseCoachIntent("👍 great job"), null, "extra text after the emoji is not a save");
+  assert.equal(parseCoachIntent("save examples please"), null);
+});
+
 test("in-session words and the session-word flag", () => {
   for (const word of ["done", "готово", "ok", "дальше", "next"]) {
     assert.deepEqual(parseCoachIntent(word), { kind: "done" }, word);

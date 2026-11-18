@@ -17,6 +17,7 @@ import { redactSecrets } from "./redact.mjs";
 import { estimatePaidCostUsd } from "../../../packages/alive/src/confirm.ts";
 import { allowPaid } from "./spendGate.mjs";
 import { speakableStep } from "../os/speakable.mjs";
+import { saveLastPair } from "../os/gold.mjs";
 
 function writeJsonAtomic(file, value) {
   try {
@@ -132,6 +133,12 @@ export function createCoach({ dataDir, skillsDir, seedDir, now = () => Date.now(
     return done([head, lesson, step].filter(Boolean).join("\n\n"));
   }
 
+  function doneSaveExample() {
+    const result = saveLastPair(dataDir, now);
+    if (result.saved) return done(`Saved as example #${result.active}.`);
+    return done(`Not saved: ${result.reason}.`);
+  }
+
   function handleStart(topic) {
     if (/^(skills|навыки)$/iu.test(topic)) {
       const names = skills()
@@ -211,6 +218,9 @@ export function createCoach({ dataDir, skillsDir, seedDir, now = () => Date.now(
       if (intent?.kind === "saveLesson") {
         lessonCapture = { stage: "situation", skill: session.skillName };
         return done("What situation are we saving? (One short sentence.)");
+      }
+      if (intent?.kind === "saveExample") {
+        return doneSaveExample();
       }
 
       const { action } = await handleSession(session, skill, safe, judge);
@@ -297,6 +307,9 @@ export function createCoach({ dataDir, skillsDir, seedDir, now = () => Date.now(
     if (intent?.kind === "saveLesson") {
       lessonCapture = { stage: "situation", skill: "" };
       return done("What situation are we saving? (One short sentence.)");
+    }
+    if (intent?.kind === "saveExample") {
+      return doneSaveExample();
     }
     if (isSessionWord(intent?.kind)) {
       return { handled: false, reply: "", state: stateView(), escalate: false, speak: speakableStep("") };

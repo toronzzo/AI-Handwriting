@@ -10,6 +10,7 @@ export type CoachIntent =
   | { kind: "status" }
   | { kind: "learned" }
   | { kind: "saveLesson"; text?: string }
+  | { kind: "saveExample" }
   | { kind: "done" }
   | { kind: "back" }
   | { kind: "skip" }
@@ -24,6 +25,7 @@ const COACH_LEARNED = /^(?:what\s+have\s+i\s+learned|skills\s+learned)\??$/iu;
 const COACH_LEARNED_RU = /^чему\s+я\s+научился\??$/iu;
 const COACH_SAVE_LESSON = /^save\s+lesson(?:\s+([\s\S]+))?$/iu;
 const COACH_SAVE_LESSON_RU = /^запомни\s+урок(?:\s+([\s\S]+))?$/iu;
+const SAVE_EXAMPLE = /^(?:👍|save\s+example|save\s+as\s+example|сохрани\s+как\s+пример|запомни\s+ответ)$/iu;
 const SESSION_DONE = /^(?:done|готово|ok|дальше|next)$/iu;
 const SESSION_BACK = /^(?:back|назад)$/iu;
 const SESSION_SKIP = /^(?:skip|пропустить|пропусти)$/iu;
@@ -34,7 +36,7 @@ export function isSessionWord(kind: CoachIntent["kind"]): boolean {
   return kind === "done" || kind === "back" || kind === "skip" || kind === "why";
 }
 
-/** "coach …" / "коуч …" / in-session words / "save lesson" … — or null. */
+/** "coach …" / "коуч …" / "👍" / in-session words / "save lesson" … — or null. */
 export function parseCoachIntent(raw: string): CoachIntent | null {
   const text = String(raw ?? "").trim();
   if (!text) return null;
@@ -46,6 +48,7 @@ export function parseCoachIntent(raw: string): CoachIntent | null {
     const body = save[1]?.trim();
     return body ? { kind: "saveLesson", text: body } : { kind: "saveLesson" };
   }
+  if (SAVE_EXAMPLE.test(text)) return { kind: "saveExample" };
   const start = text.match(COACH_START);
   if (start) {
     const topic = start[1]?.trim();

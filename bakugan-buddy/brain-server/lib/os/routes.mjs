@@ -11,6 +11,7 @@ import { createSendMemory, confirmLine, logParsedEvents, normalizeSentence, undo
 import { parseEvents } from "./eventsParse.mjs";
 import { reviewAction } from "./guard.mjs";
 import { readGuardLog } from "./guardLog.mjs";
+import { exampleStats, listExamples, removeExample, saveLastPair, savePair } from "./gold.mjs";
 import { listVersions, loadPersona } from "./persona.mjs";
 import { allowPaid } from "../coach/spendGate.mjs";
 import { loadSkills } from "../coach/skills.mjs";
@@ -158,6 +159,33 @@ export async function handleOsRoute(ctx) {
     if (!dataDir) return answered(res, 503, { error: "drive_missing" });
     const day = url.searchParams.get("day") || null;
     return answered(res, 200, { lines: readGuardLog(dataDir, day) });
+  }
+
+  if (url.pathname === "/v1/examples" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    const q = typeof body.q === "string" ? body.q : null;
+    const a = typeof body.a === "string" ? body.a : null;
+    const result = q && a ? savePair(dataDir, { q, a, source: "manual", now }) : saveLastPair(dataDir, now);
+    return answered(res, 200, result);
+  }
+
+  if (url.pathname === "/v1/examples" && req.method === "GET") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const limit = Math.min(300, Math.max(1, Number(url.searchParams.get("limit")) || 300));
+    return answered(res, 200, { examples: listExamples(dataDir, { limit }) });
+  }
+
+  if (url.pathname === "/v1/examples/stats" && req.method === "GET") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    return answered(res, 200, exampleStats(dataDir));
+  }
+
+  const exampleRoute = url.pathname.match(/^\/v1\/examples\/([^/]+)$/);
+  if (exampleRoute && req.method === "DELETE") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    return answered(res, 200, removeExample(dataDir, exampleRoute[1], now));
   }
 
   if (url.pathname === "/v1/coach/voice-intent" && req.method === "POST") {
