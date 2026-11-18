@@ -1,0 +1,147 @@
+Lab2:
+
+AS-IS situation of the IT function (Temirlan Ospanov)
+
+Purpose
+This section describes how IT works at Netflix today: organisation and competences, technology architecture, security and resilience, and communication with stakeholders. It is the baseline for Lab 3 TO-BE and for the group SWOT. It is consistent with Zinchenko’s SAM conclusion that IT drives change and organisational development.
+
+1. Organisation and competences (AS-IS)
+Netflix does not run IT as a classic cost-centre support department. Technology is the delivery system for the product. About 3,000 of ~16,000 employees work in product and engineering. Co-CEO Greg Peters owns product and technology; CTO Elizabeth Stone leads engineering. Culture: Freedom & Responsibility, “context not control,” continuous A/B testing and chaos engineering.
+
+Current competence areas:
+• Streaming / playback / Open Connect CDN — High (core competitive capability)
+• Personalisation / ML recommendations — High (~80% of viewing driven by recommendations)
+• Cloud microservices on AWS — High (high deploy frequency, regional rollout)
+• Media encode / multi-language packaging — High
+• Advertising technology (SSAI, Ads Suite) — Medium–high / growing
+• Live events infrastructure & ops — Medium / building
+• Cloud gaming / interactive — Medium
+• Enterprise IT (billing, finance, HR) — Adequate / functional support
+• Continuity (backup / DR) — Incomplete (Board signal for Lab 3)
+
+Skill level (AS-IS): very high for distributed systems, CDN, ML and experimentation; rising for live SRE and ad-tech; weaker institutional continuity (documented succession, tested restore) relative to product velocity.
+
+2. IT architecture (AS-IS)
+Architectural style: cloud-native microservices on AWS plus proprietary edge CDN (Open Connect). Not an on-prem ERP-centric estate. Thousands of independently deployable services support continuous delivery.
+
+Main layers:
+1. Edge / delivery — Open Connect appliances inside ISP networks; adaptive bitrate; custom codecs for 4K HDR and extreme concurrency.
+2. Product control plane — catalogue, membership, playback authorisation, profiles, household controls, search, UI configuration.
+3. Data & ML platform — behavioural and content metadata pipelines feeding recommendations and A/B experimentation.
+4. Media processing — ingest, encode/transcode, packaging, DRM for global device and language coverage.
+5. Live path (emerging) — real-time origin, encoding, graphics, low-latency delivery; less mature than VOD.
+6. Advertising path — SSAI, targeting, measurement, Netflix Ads Suite / programmatic.
+7. Games path — low-latency streamed games reusing much of the video infrastructure.
+8. Enterprise systems — billing for 325M+ memberships, finance, HR, internal tools.
+
+Implication: AS-IS architecture already matches “IT making change and development.” Main tension: stretching one platform across VOD + live + ads + games without losing reliability.
+
+3. Security, resilience and risk (AS-IS)
+Strengths: Open Connect + AWS elasticity for VOD; chaos engineering; DRM/content protection; device/household/network signals for account integrity.
+
+Residual / disclosed risks: AWS concentration; live raises availability/latency stakes; large personal/viewing datasets (privacy/regulation); piracy and account abuse. Management Board news: inadequate backup and disaster recovery for most critical systems; IT Architect long-term absence = key-person risk.
+
+Summary: strong at keeping the stream running under normal failure; weaker at recovering critical systems after major loss and at architecture succession.
+
+4. Processes, governance and stakeholder communication (AS-IS)
+• Decentralised product teams with “informed captain” decision rights
+• Continuous delivery
+• Data-driven product decisions
+• Technology spend ~8% of revenue (group notes)
+• Public engineering knowledge sharing (Tech Blog / OSS)
+
+Stakeholders today:
+• Members — UX, playback quality, recommendations
+• Content / studio partners — encoding, rights packaging, delivery readiness
+• Advertisers — Ads Suite, measurement, inventory
+• Business leadership — metrics, experimentation, platform capability for new formats
+• ISPs — Open Connect partnership
+• Internal product teams — APIs, platforms, shared data/ML services
+
+Formal RTO/RPO commitments and restore drills are not a visible AS-IS strength (Board news).
+
+5. AS-IS summary (for Final Report)
+As of 2025–2026, Netflix’s IT function is a product-engineering organisation: AWS microservices, Open Connect CDN, mature VOD and personalisation, and growing live, advertising and gaming stacks. Security practices are advanced for large-scale streaming, but backup/DR completeness and architecture key-person coverage are weaker than the product narrative suggests. The AS-IS state supports the SAM conclusion that IT drives organisational change, while exposing continuity gaps that Lab 3 TO-BE must close.
+
+— Temirlan Ospanov —
+
+
+Lab3:
+
+IT TO-BE analysis (Temirlan Ospanov)
+Alignment between business goals and IT goals. Business direction: global entertainment platform — live events/sports, ads growth, games, IP franchises, personalisation at scale. SAM: remain at “IT making change and development,” with stronger resilience. Board news folded in: cheaper storage → analytics; sales-support system opportunity; fix backup/DR; cover Architect absence.
+
+1. Target vision of the IT organisation
+Vision: IT remains the engine of business-model change (live, ads, games, analytics-led decisions) while becoming a continuously recoverable and succession-safe platform — no single outage mode and no single person can stop strategic delivery.
+
+Competences to keep: Open Connect; personalisation and A/B; AWS microservices velocity; media encode/multi-language packaging; chaos engineering culture.
+
+New / upgraded competences (18–24 months):
+• Live SRE & real-time media ops — High (live sports/events pillar)
+• Backup, DR & continuity engineering — High (tested restores, clear RTO/RPO)
+• Advanced analytics / historical data platform — High (cheaper storage enables deep history)
+• Ads & commercial systems (incl. sales-support) — Medium–high
+• Architecture succession & documentation — Medium–high (≥2 people can decide on critical designs)
+• Privacy / regulatory engineering — High
+
+Organisation shape: keep decentralised product teams; add a thin platform continuity capability (DR + architecture deputies). Hire/train live SRE, analytics engineers, continuity specialists; pair with existing CDN/ML experts.
+
+Alignment: business wants multi-format growth and monetisation; IT TO-BE supplies people and skills for live reliability, ads/sales tooling and analytics without abandoning the change-driver culture.
+
+2. IT architecture (TO-BE)
+Principles:
+1. Keep AWS microservices + Open Connect as the core.
+2. Treat live, ads and games as first-class paths with explicit SLOs.
+3. Add a resilience tier: backup, restore automation, multi-AZ/region for critical systems.
+4. Expand analytics lake/warehouse for longer history (lower storage cost).
+5. Introduce sales-support / commercial systems layer (buy or build-equivalent) integrated with ads and membership data.
+6. Reduce key-person risk: ADRs, diagrams, dual ownership for critical domains.
+
+Target systems by domain:
+• Delivery — Open Connect + adaptive bitrate + live low-latency origin
+• Application — AWS microservices; independent deploy; regional feature flags
+• Data / ML — extended historical store; feature store; recommendation + ads models; analytics workbench
+• Live — dedicated live encode/switch/graphics pipeline; live ops centres tooling
+• Advertising — Ads Suite, SSAI, measurement; optional new sales-support system
+• Continuity — automated backups, tested restore, RTO/RPO per critical service; chaos and restore drills
+• Enterprise — reliable billing/finance/HR
+• Governance — ADR repo; architecture deputies; critical-system register
+
+Business goal → architecture:
+• Live sports/events → mature live path + ops centres + live SLOs
+• Ad revenue growth → ads stack scale + sales-support decision/implementation
+• Better content & retention decisions → longer historical analytics + ML
+• Margin / efficiency → keep Open Connect and automation
+• Trust / continuity → DR tier closes Board-identified gap
+
+3. IT service parameters (TO-BE)
+Member-facing:
+• VOD playback startup — keep sub-3-second class experience for majority of sessions
+• VOD availability (tier-1 regions) — ≥ 99.9% monthly
+• Live tier-1 events — published latency/availability SLO per event class; rebuffer and failed-start budgets
+• Personalisation — maintain high recommendation take-rate; monitor churn contribution
+• Incident communication — status page + mitigation playbooks for major outages
+
+Continuity (new emphasis):
+• Critical-system inventory — 100% classified within 3 months
+• Backup coverage — 100% of critical systems
+• RPO (tier-1) — ≤ 1 hour
+• RTO (tier-1) — ≤ 4 hours
+• Restore drills — ≥ quarterly, success logged
+• Architecture coverage — ≥ 2 named owners per critical domain
+
+Stakeholder communication:
+• Members — in-app quality; status page on major incidents
+• Content / studio — operational dashboards; release calendars
+• Advertisers / sales — Ads Suite portals; sales ops reviews; sales-support tooling SLA
+• Business leadership — monthly IT–business review; Board risk register updates
+• Product engineering — internal SLOs; ADR reviews
+• ISPs — partner engineering forums
+
+Alignment note: service parameters turn strategy into measurable IT commitments — growth formats get quality targets; Board risks (DR, Architect absence) get continuity and ownership parameters.
+
+4. TO-BE conclusion (for Final Report)
+The TO-BE IT organisation keeps Netflix’s change-driving strengths (CDN, ML, microservices) and adds live reliability, advanced analytics, commercial/sales-support capability, and tested disaster recovery with architecture succession. Target architecture stays AWS + Open Connect–centred but adds resilience and analytics tiers. Service parameters give members, advertisers, content partners and leadership clear quality and continuity commitments aligned with the 2025–2026 business strategy.
+
+— Temirlan Ospanov —
+(Note: security policy depth and IT budget = Mykyta Dovhaliuk; SWOT/action plan = Matias; SAM/BSC = Zinchenko.)
