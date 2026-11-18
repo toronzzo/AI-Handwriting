@@ -39,17 +39,16 @@ function Scene({ talking }: { talking: boolean }) {
   }, [camera, scene]);
   return (
     <>
-      <color attach="background" args={["#071410"]} />
-      <ambientLight intensity={0.62} color="#d7f6ff" />
-      <directionalLight position={[2.4, 3.6, 2.2]} intensity={1.7} color="#f7fcff" />
-      <directionalLight position={[-2.2, 1.1, -1.2]} intensity={0.4} color="#43d9ad" />
+      <ambientLight intensity={0.62} color="#d7f6ff" /> {/* 3d-colour */}
+      <directionalLight position={[2.4, 3.6, 2.2]} intensity={1.7} color="#f7fcff" /> {/* 3d-colour */}
+      <directionalLight position={[-2.2, 1.1, -1.2]} intensity={0.4} color="#43d9ad" /> {/* 3d-colour */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.78, 0]}>
         <ringGeometry args={[0.72, 0.98, 40]} />
-        <meshBasicMaterial color="#43d9ad" transparent opacity={0.5} />
+        <meshBasicMaterial color="#43d9ad" transparent opacity={0.5} /> {/* 3d-colour */}
       </mesh>
       <mesh position={[0, -0.86, 0]}>
         <cylinderGeometry args={[0.58, 0.78, 0.12, 28]} />
-        <meshStandardMaterial color="#101820" roughness={0.9} />
+        <meshStandardMaterial color="#101820" roughness={0.9} /> {/* 3d-colour */}
       </mesh>
       <group ref={rig} scale={0.26} position={[0, 0.1, 0]}>
         {scene ? (
@@ -57,7 +56,7 @@ function Scene({ talking }: { talking: boolean }) {
         ) : (
           <mesh>
             <sphereGeometry args={[0.72, 28, 18]} />
-            <meshStandardMaterial color="#d5dde6" metalness={0.5} roughness={0.34} emissive="#164858" emissiveIntensity={0.3} />
+            <meshStandardMaterial color="#d5dde6" metalness={0.5} roughness={0.34} emissive="#164858" emissiveIntensity={0.3} /> {/* 3d-colour */}
           </mesh>
         )}
       </group>
@@ -84,7 +83,7 @@ const TALL = theme.space.xl * 8;
 const HERO_MIN = theme.space.xl * 7;
 
 const styles = StyleSheet.create({
-  frame: { width: "100%", borderRadius: theme.radius.md, overflow: "hidden", backgroundColor: "#071410" },
+  frame: { width: "100%", borderRadius: theme.radius.md, overflow: "hidden", backgroundColor: "transparent" },
   fill: { flex: 1, minHeight: HERO_MIN },
   short: { height: SHORT },
   tall: { height: TALL },

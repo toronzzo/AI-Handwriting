@@ -30,6 +30,7 @@ export type PaletteKey =
   | "stripeYellow"
   | "stripeOrange"
   | "stripeRed"
+  | "note"
   | "shadow"
   | "scrim";
 
@@ -60,6 +61,7 @@ const KEYS: readonly PaletteKey[] = [
   "stripeYellow",
   "stripeOrange",
   "stripeRed",
+  "note",
   "shadow",
   "scrim",
 ];
@@ -88,6 +90,7 @@ export const DAY: Palette = {
   stripeYellow: "#F6C02C",
   stripeOrange: "#F07F1E",
   stripeRed: "#D8262B",
+  note: "#6A4D00",
   shadow: "rgba(14,34,66,0.20)",
   scrim: "rgba(10,24,50,0.45)",
 };
@@ -116,6 +119,7 @@ export const NIGHT: Palette = {
   stripeYellow: "#F6C02C",
   stripeOrange: "#F07F1E",
   stripeRed: "#D8262B",
+  note: "#6A4D00",
   shadow: "rgba(14,34,66,0.20)",
   scrim: "rgba(10,24,50,0.45)",
 };

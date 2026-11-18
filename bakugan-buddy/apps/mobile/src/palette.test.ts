@@ -31,7 +31,7 @@ function contrast(a: string, b: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-const TEXT_COLOURS = ["text", "dim", "faint", "accentText", "danger"] as const;
+const TEXT_COLOURS = ["text", "dim", "faint", "accentText", "danger", "note"] as const;
 const PANELS = ["card", "cardSoft"] as const;
 
 for (const [label, palette] of [
@@ -54,7 +54,7 @@ for (const [label, palette] of [
 }
 
 /** Every palette key that the contrast tests rely on is a hex colour. */
-const HEX_COLOURS = ["text", "dim", "faint", "accentText", "accent", "onAccent", "card", "cardSoft"] as const;
+const HEX_COLOURS = ["text", "dim", "faint", "accentText", "accent", "onAccent", "card", "cardSoft", "note"] as const;
 
 test("contrast-checked colours are plain hex", () => {
   for (const palette of [DAY, NIGHT]) {

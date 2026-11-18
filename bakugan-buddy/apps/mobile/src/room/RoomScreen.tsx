@@ -37,6 +37,7 @@ import { applyAxis, closingHinge, floorLift, measureFootRadius, POSE_FADE_SEC } 
 import { readAliveMemory, writeAliveMemory } from "./persist";
 import { applyMood, loadCompanionState } from "../state/emotionStore";
 import { probeStudio, speakLine } from "./voice";
+import { theme } from "../theme";
 
 const MODEL_SCALE = 0.52;
 const ROOM = 4.7;
@@ -198,7 +199,7 @@ function propFor(id: string) {
     return (
       <mesh position={[0, 0.75, 0]}>
         <boxGeometry args={[0.95, 1.15, 0.05]} />
-        <meshStandardMaterial color="#b7dff2" emissive="#7eb4cc" emissiveIntensity={0.45} />
+        <meshStandardMaterial color="#b7dff2" emissive="#7eb4cc" emissiveIntensity={0.45} /> {/* 3d-colour */}
       </mesh>
     );
   }
@@ -206,7 +207,7 @@ function propFor(id: string) {
     return (
       <mesh position={[0, 0.42, 0]}>
         <boxGeometry args={[0.7, 0.7, 0.28]} />
-        <meshStandardMaterial color="#8d8680" />
+        <meshStandardMaterial color="#8d8680" /> {/* 3d-colour */}
       </mesh>
     );
   }
@@ -215,11 +216,11 @@ function propFor(id: string) {
       <group>
         <mesh position={[0, 0.22, 0]}>
           <cylinderGeometry args={[0.08, 0.1, 0.4, 10]} />
-          <meshStandardMaterial color="#6d6258" />
+          <meshStandardMaterial color="#6d6258" /> {/* 3d-colour */}
         </mesh>
         <mesh position={[0, 0.55, 0]}>
           <sphereGeometry args={[0.22, 16, 12]} />
-          <meshStandardMaterial color="#9aa8a0" />
+          <meshStandardMaterial color="#9aa8a0" /> {/* 3d-colour */}
         </mesh>
       </group>
     );
@@ -228,14 +229,14 @@ function propFor(id: string) {
     return (
       <mesh position={[0, 0.7, 0]}>
         <boxGeometry args={[0.55, 1.3, 0.06]} />
-        <meshStandardMaterial color="#5c656e" />
+        <meshStandardMaterial color="#5c656e" /> {/* 3d-colour */}
       </mesh>
     );
   }
   return (
     <mesh position={[0, 0.08, 0]}>
       <sphereGeometry args={[0.22, 16, 10]} />
-      <meshStandardMaterial color="#6f7c88" />
+      <meshStandardMaterial color="#6f7c88" /> {/* 3d-colour */}
     </mesh>
   );
 }
@@ -245,31 +246,31 @@ function RoomDressing() {
     <group>
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[12.6, 12.6]} />
-        <meshStandardMaterial color="#3c4a58" />
+        <meshStandardMaterial color="#3c4a58" /> {/* 3d-colour */}
       </mesh>
-      <gridHelper args={[12, 12, "#445266", "#2c3642"]} position={[0, 0.01, 0]} />
+      <gridHelper args={[12, 12, "#445266", "#2c3642"]} position={[0, 0.01, 0]} /> {/* 3d-colour */}
       <mesh position={[0, 1.2, -5.9]}>
         <boxGeometry args={[12.4, 2.6, 0.16]} />
-        <meshStandardMaterial color="#14181e" />
+        <meshStandardMaterial color="#14181e" /> {/* 3d-colour */}
       </mesh>
       <mesh position={[0, 1.2, 5.9]}>
         <boxGeometry args={[12.4, 2.6, 0.16]} />
-        <meshStandardMaterial color="#14181e" />
+        <meshStandardMaterial color="#14181e" /> {/* 3d-colour */}
       </mesh>
       <mesh position={[-5.9, 1.2, 0]}>
         <boxGeometry args={[0.16, 2.6, 12.4]} />
-        <meshStandardMaterial color="#12161b" />
+        <meshStandardMaterial color="#12161b" /> {/* 3d-colour */}
       </mesh>
       <mesh position={[5.9, 1.2, 0]}>
         <boxGeometry args={[0.16, 2.6, 12.4]} />
-        <meshStandardMaterial color="#12161b" />
+        <meshStandardMaterial color="#12161b" /> {/* 3d-colour */}
       </mesh>
       {EXPLORE_POINTS.map((point) => (
         <group key={point.id} position={[point.x, 0, point.z]}>
           {propFor(point.id)}
           <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <circleGeometry args={[0.28, 18]} />
-            <meshBasicMaterial color="#9ec4d6" transparent opacity={0.35} />
+            <meshBasicMaterial color="#9ec4d6" transparent opacity={0.35} /> {/* 3d-colour */}
           </mesh>
         </group>
       ))}
@@ -414,7 +415,7 @@ const World = memo(function World({ sinks }: { sinks: Sinks }) {
         if (skinned) footRadius.current = measureFootRadius(skinned, POSE_LIMITS.rollMax);
         const head = loaded.scene.getObjectByName("head");
         if (head && !head.getObjectByName("eye-glow")) {
-          const light = new PointLight("#d5f3ff", 0.8, 2.4, 2);
+          const light = new PointLight("#d5f3ff", 0.8, 2.4, 2); // 3d-colour
           light.name = "eye-glow";
           light.position.set(0, 0.02, 0.18);
           head.add(light);
@@ -572,23 +573,23 @@ const World = memo(function World({ sinks }: { sinks: Sinks }) {
 
   return (
     <group>
-      <color attach="background" args={["#24303c"]} />
-      <hemisphereLight args={["#f4f7fb", "#2a3844", 0.95]} />
-      <ambientLight intensity={0.45} color="#e7eef5" />
-      <directionalLight position={[3.4, 6.2, 2.6]} intensity={2.2} color="#ffffff" />
-      <directionalLight position={[-4.2, 2.4, -1.6]} intensity={0.55} color="#b7d7ee" />
+      <color attach="background" args={["#24303c"]} /> {/* 3d-colour */}
+      <hemisphereLight args={["#f4f7fb", "#2a3844", 0.95]} /> {/* 3d-colour */}
+      <ambientLight intensity={0.45} color="#e7eef5" /> {/* 3d-colour */}
+      <directionalLight position={[3.4, 6.2, 2.6]} intensity={2.2} color="#ffffff" /> {/* 3d-colour */}
+      <directionalLight position={[-4.2, 2.4, -1.6]} intensity={0.55} color="#b7d7ee" /> {/* 3d-colour */}
       <RoomDressing />
       <mesh ref={ring} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.025, 0]}>
         <ringGeometry args={[FOLLOW_RING_RADIUS - 0.045, FOLLOW_RING_RADIUS + 0.045, 56]} />
-        <meshBasicMaterial color="#8ec8ff" transparent opacity={0.5} />
+        <meshBasicMaterial color="#8ec8ff" transparent opacity={0.5} /> {/* 3d-colour */}
       </mesh>
       <mesh ref={puck} position={[0, 0.16, 0]}>
         <sphereGeometry args={[0.16, 18, 14]} />
-        <meshStandardMaterial color="#f4f7fb" emissive="#9eb0c4" emissiveIntensity={0.35} />
+        <meshStandardMaterial color="#f4f7fb" emissive="#9eb0c4" emissiveIntensity={0.35} /> {/* 3d-colour */}
       </mesh>
       <mesh ref={blob} rotation={[-Math.PI / 2, 0, 0]} position={[1.7, 0.012, 0.5]}>
         <circleGeometry args={[0.46, 24]} />
-        <meshBasicMaterial color="#05070a" transparent opacity={0.38} />
+        <meshBasicMaterial color="#05070a" transparent opacity={0.38} /> {/* 3d-colour */}
       </mesh>
       <group ref={rig} position={[0.85, 0, 0.35]} scale={MODEL_SCALE}>
         {gltf ? (
@@ -596,7 +597,7 @@ const World = memo(function World({ sinks }: { sinks: Sinks }) {
         ) : (
           <mesh>
             <sphereGeometry args={[1.55, 28, 18]} />
-            <meshStandardMaterial color="#c4c4c4" roughness={0.7} />
+            <meshStandardMaterial color="#c4c4c4" roughness={0.7} /> {/* 3d-colour */}
           </mesh>
         )}
       </group>
@@ -918,7 +919,7 @@ export function RoomScreen() {
           autoCapitalize="none"
           autoCorrect={false}
           placeholder="Mac :8788 or LiteLLM :4000"
-          placeholderTextColor="#7d8792"
+          placeholderTextColor={theme.faint}
           style={styles.brainInput}
         />
         <Pressable
@@ -1055,7 +1056,7 @@ export function RoomScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#10141a" },
+  root: { flex: 1, backgroundColor: theme.bg },
   stage: { flex: 1 },
   canvas: { flex: 1 },
   debugHit: { position: "absolute", top: 0, right: 0, width: 56, height: 56 },
@@ -1065,68 +1066,68 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: "#10141a",
+    backgroundColor: theme.bg,
   },
   brainInput: {
     flex: 1,
-    color: "#e8e8e8",
+    color: theme.text,
     fontSize: 12,
     paddingVertical: 6,
     paddingHorizontal: 8,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: theme.cardSoft,
     borderWidth: 1,
-    borderColor: "rgba(200,200,200,0.28)",
+    borderColor: theme.accentLine,
   },
-  brainStatus: { color: "#8b97a3", fontSize: 11, width: 92 },
+  brainStatus: { color: theme.dim, fontSize: 11, width: 92 },
   readout: {
     position: "absolute",
     top: 8,
     left: 10,
     maxWidth: 280,
-    backgroundColor: "rgba(8,12,16,0.82)",
+    backgroundColor: theme.scrim,
     paddingVertical: 8,
     paddingHorizontal: 10,
   },
-  name: { color: "#f2f2f2", fontWeight: "800", letterSpacing: 1.5, fontSize: 13 },
-  meta: { color: "#d5dde6", fontSize: 13, marginTop: 2 },
-  advice: { color: "#9ec4d6", fontSize: 12, marginTop: 2 },
-  memory: { color: "#8b97a3", fontSize: 11, marginTop: 2 },
-  log: { color: "#aeb8c2", fontSize: 11, marginTop: 1 },
+  name: { color: theme.text, fontWeight: "800", letterSpacing: 1.5, fontSize: 13 },
+  meta: { color: theme.text, fontSize: 13, marginTop: 2 },
+  advice: { color: theme.accentText, fontSize: 12, marginTop: 2 },
+  memory: { color: theme.dim, fontSize: 11, marginTop: 2 },
+  log: { color: theme.dim, fontSize: 11, marginTop: 1 },
   noticeTrack: {
     marginTop: 6,
     height: 4,
     width: 120,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    backgroundColor: theme.track,
   },
-  noticeFill: { height: 4, backgroundColor: "#d5f3ff" },
+  noticeFill: { height: 4, backgroundColor: theme.accent },
   bubble: {
     position: "absolute",
     left: 16,
     right: 16,
     bottom: 12,
-    backgroundColor: "rgba(12,16,20,0.88)",
-    borderColor: "rgba(200,220,230,0.35)",
+    backgroundColor: theme.scrim,
+    borderColor: theme.accentLine,
     borderWidth: 1,
     paddingVertical: 8,
     paddingHorizontal: 12,
   },
-  bubbleText: { color: "#f4f7fb", fontSize: 14, lineHeight: 19 },
+  bubbleText: { color: theme.text, fontSize: 14, lineHeight: 19 },
   controls: {
     paddingHorizontal: 8,
     paddingTop: 6,
     paddingBottom: 8,
     gap: 6,
     borderTopWidth: 1,
-    borderTopColor: "rgba(200,200,200,0.18)",
+    borderTopColor: theme.accentLine,
   },
   row: { flexDirection: "row", flexWrap: "wrap", gap: 6, justifyContent: "center" },
   pad: {
     paddingVertical: 7,
     paddingHorizontal: 9,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: theme.cardSoft,
     borderWidth: 1,
-    borderColor: "rgba(200,200,200,0.28)",
+    borderColor: theme.accentLine,
   },
-  padOn: { borderColor: "#f2f2f2", backgroundColor: "rgba(255,255,255,0.14)" },
-  padText: { color: "#e8e8e8", fontSize: 12, fontWeight: "600" },
+  padOn: { borderColor: theme.accent, backgroundColor: theme.accentSoft },
+  padText: { color: theme.text, fontSize: 12, fontWeight: "600" },
 });

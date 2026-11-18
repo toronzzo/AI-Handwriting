@@ -40,6 +40,7 @@ export const theme = {
   stripeYellow: colour("stripeYellow"),
   stripeOrange: colour("stripeOrange"),
   stripeRed: colour("stripeRed"),
+  note: colour("note"),
   shadow: colour("shadow"),
   scrim: colour("scrim"),
   /** Font stacks; only the web has named fonts loaded. */
