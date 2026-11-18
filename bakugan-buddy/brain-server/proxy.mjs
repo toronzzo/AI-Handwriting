@@ -86,6 +86,7 @@ import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./lib/
 import { launchTaskRun, planTask, taskRunActive } from "./lib/taskRunner.mjs";
 import { createCoach } from "./lib/coach/engine.mjs";
 import { capUsd, spentTodayUsd } from "./lib/coach/spendGate.mjs";
+import { handleOsRoute } from "./lib/os/routes.mjs";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 
@@ -646,6 +647,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    if (await handleOsRoute({ req, res, url, dataDir, readJson, readBody, now: () => Date.now() })) return;
     if (req.method === "GET" && url.pathname === "/v1/health") {
       let llama = false;
       try {
