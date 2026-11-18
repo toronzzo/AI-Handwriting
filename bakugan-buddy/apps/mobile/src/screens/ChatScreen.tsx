@@ -50,6 +50,9 @@ import { MAIN_TABS, type Section } from "../nav";
 import { chatColumn, isPhone, isWide } from "../layout";
 import { theme } from "../theme";
 
+/** Web lets the sky show through the shell; the iPhone paints the page colour. */
+const isWeb = typeof document !== "undefined";
+
 /** A short face for each microphone phase. */
 const MIC_ICON: Record<string, string> = {
   listening: "🎤",
@@ -2648,7 +2651,7 @@ const aqua = theme.accent;
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: theme.bg,
+    backgroundColor: isWeb ? "transparent" : theme.bg,
     // Belt and braces: no child may widen the page, so it never scrolls sideways.
     overflow: "hidden",
     maxWidth: "100%",
@@ -2681,11 +2684,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.space.sm + 2,
     paddingVertical: theme.space.xs + 2,
   },
-  chatCard: { flex: 1, flexDirection: "row", borderWidth: 1, borderColor: theme.accentLine, borderRadius: theme.radius.md, backgroundColor: theme.cardSoft, padding: theme.space.sm, minHeight: theme.space.xl * 10, minWidth: 0, maxWidth: "100%" },
+  chatCard: { flex: 1, flexDirection: "row", borderWidth: 1, borderColor: theme.accentLine, borderRadius: 16, backgroundColor: theme.card, padding: theme.space.sm, minHeight: theme.space.xl * 10, minWidth: 0, maxWidth: "100%", shadowColor: theme.shadow, shadowOpacity: 1, shadowRadius: 8, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
   thread: { flex: 1, minWidth: 0 },
   /** The reading column: messages, briefing and composer, centred on a Mac. */
   column: { flex: 1, alignSelf: "center", minWidth: 0, paddingHorizontal: theme.space.md },
-  sidebar: { width: theme.size.list, borderRightWidth: 1, borderRightColor: theme.accentLine, paddingRight: theme.space.sm, marginRight: theme.space.sm },
+  sidebar: { width: theme.size.list, borderRadius: 16, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.accentLine, padding: theme.space.sm, marginRight: theme.space.sm, shadowColor: theme.shadow, shadowOpacity: 1, shadowRadius: 8, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
   sidebarInner: { flex: 1, gap: 8 },
   sidebarHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sidebarTitle: { color: theme.dim, fontSize: 11, letterSpacing: 1.6 },

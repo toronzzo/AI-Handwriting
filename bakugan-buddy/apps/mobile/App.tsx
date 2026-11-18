@@ -15,6 +15,10 @@ import { ChatScreen } from "./src/screens/ChatScreen";
 import { MAIN_TABS, SETTINGS_ENTRY, type Section } from "./src/nav";
 import { theme } from "./src/theme";
 import { isWide } from "./src/layout";
+import { Stripe } from "./src/ui/Stripe";
+
+/** Web lets the sky show through; the iPhone paints the page colour. */
+const isWeb = typeof document !== "undefined";
 
 /** Advanced/demo surfaces that live behind Settings, not the main tabs. */
 type Advanced = "room" | "body" | "bench";
@@ -31,6 +35,10 @@ export default function App() {
   const rails = (
     <>
       <View style={styles.rail}>
+        <View style={styles.brand}>
+          <View style={styles.brandBall} />
+          <Stripe height={4} width={40} />
+        </View>
         {MAIN_TABS.map((tab) => {
           const on = section === tab.id && !advanced;
           return (
@@ -44,7 +52,7 @@ export default function App() {
               accessibilityRole="button"
               accessibilityLabel={tab.label}
             >
-              <Text style={styles.railIcon}>{tab.icon}</Text>
+              <Text style={[styles.railIcon, on && styles.railIconOn]}>{tab.icon}</Text>
               <Text style={[styles.railLabel, on && styles.railLabelOn]}>{tab.label}</Text>
             </Pressable>
           );
@@ -60,7 +68,7 @@ export default function App() {
           accessibilityRole="button"
           accessibilityLabel={SETTINGS_ENTRY.label}
         >
-          <Text style={styles.railIcon}>{SETTINGS_ENTRY.icon}</Text>
+          <Text style={[styles.railIcon, section === "settings" && !advanced && styles.railIconOn]}>{SETTINGS_ENTRY.icon}</Text>
           <Text style={[styles.railLabel, section === "settings" && !advanced && styles.railLabelOn]}>
             {SETTINGS_ENTRY.label}
           </Text>
@@ -78,7 +86,7 @@ export default function App() {
           return (
             <Pressable
               key={tab.id}
-              style={styles.barTab}
+              style={[styles.barTab, on && styles.barTabOn]}
               onPress={() => {
                 setAdvanced(null);
                 setSection(tab.id);
@@ -93,7 +101,7 @@ export default function App() {
         })}
       </View>
       <Pressable
-        style={styles.barGear}
+        style={[styles.barGear, section === "settings" && !advanced && styles.barGearOn]}
         onPress={() => {
           setAdvanced(null);
           setSection("settings");
@@ -172,65 +180,89 @@ function AdvancedWrap({ title, onBack, children }: { title: string; onBack: () =
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.bg },
+  root: { flex: 1, backgroundColor: isWeb ? "transparent" : theme.bg },
   shell: { flex: 1, flexDirection: "row" },
-  stage: { flex: 1 },
+  stage: { flex: 1, backgroundColor: isWeb ? "transparent" : theme.bg },
   fill: { flex: 1 },
   hidden: { height: 0, overflow: "hidden", flex: 0 },
 
   // Mac: a slim icon rail, Settings at the bottom.
   sidebar: {
     width: theme.size.nav,
-    backgroundColor: theme.cardSoft,
+    backgroundColor: theme.card,
     borderRightWidth: 1,
     borderRightColor: theme.accentLine,
     paddingVertical: theme.space.md,
     paddingHorizontal: theme.space.xs,
     alignItems: "center",
     justifyContent: "space-between",
+    shadowColor: theme.shadow,
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
   },
   rail: { alignItems: "center", gap: theme.space.sm, width: "100%" },
   railFoot: { alignItems: "center", width: "100%" },
+  brand: { alignItems: "center", gap: theme.space.xs + 2, marginBottom: theme.space.sm },
+  brandBall: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: theme.accent,
+    borderWidth: 1,
+    borderColor: theme.lineStrong,
+  },
   railItem: {
     width: theme.size.nav - theme.space.sm,
+    minHeight: 44,
     alignItems: "center",
     justifyContent: "center",
     gap: theme.space.xs,
     paddingVertical: theme.space.sm,
     borderRadius: theme.radius.sm,
   },
-  railItemOn: { backgroundColor: theme.accentSoft },
-  railIcon: { fontSize: theme.type.title },
-  railLabel: { color: theme.faint, fontSize: theme.type.label, fontWeight: "600" },
-  railLabelOn: { color: theme.accent },
+  railItemOn: { backgroundColor: theme.accent },
+  railIcon: { fontSize: theme.type.title, color: theme.dim },
+  railIconOn: { color: theme.onAccent },
+  railLabel: { color: theme.dim, fontSize: theme.type.label, fontWeight: "600" },
+  railLabelOn: { color: theme.onAccent },
 
   // iPhone: bottom bar.
   tabbar: {
     flexDirection: "row",
     borderTopWidth: 1,
     borderTopColor: theme.accentLine,
-    backgroundColor: theme.cardSoft,
+    backgroundColor: theme.card,
     paddingTop: theme.space.xs,
     paddingBottom: theme.space.sm,
     paddingHorizontal: theme.space.sm,
   },
   barTabs: { flex: 1, flexDirection: "row" },
-  barTab: { flex: 1, alignItems: "center", gap: theme.space.xs / 2, paddingVertical: theme.space.xs / 2 },
-  barGear: { alignItems: "center", justifyContent: "center", paddingHorizontal: theme.space.md, paddingVertical: theme.space.xs / 2 },
-  tabIcon: { fontSize: theme.type.title, opacity: 0.55 },
-  tabIconOn: { opacity: 1 },
-  barLabel: { color: theme.faint, fontSize: theme.type.label, fontWeight: "600" },
-  barLabelOn: { color: theme.accent },
+  barTab: { flex: 1, alignItems: "center", justifyContent: "center", gap: theme.space.xs / 2, minHeight: 44, paddingVertical: theme.space.xs / 2, borderRadius: theme.radius.sm },
+  barTabOn: { backgroundColor: theme.accent },
+  barGear: { alignItems: "center", justifyContent: "center", minHeight: 44, paddingHorizontal: theme.space.md, paddingVertical: theme.space.xs / 2, borderRadius: theme.radius.sm },
+  barGearOn: { backgroundColor: theme.accent },
+  tabIcon: { fontSize: theme.type.title, color: theme.dim },
+  tabIconOn: { color: theme.onAccent },
+  barLabel: { color: theme.dim, fontSize: theme.type.label, fontWeight: "600" },
+  barLabelOn: { color: theme.onAccent },
 
-  // Advanced screens keep a plain header with a way back.
+  // Advanced screens keep a plain paper header with a way back.
   advHead: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.space.md,
     paddingHorizontal: theme.space.md,
     paddingVertical: 10,
+    backgroundColor: theme.card,
     borderBottomWidth: 1,
     borderBottomColor: theme.accentLine,
+    shadowColor: theme.shadow,
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
   },
   advBack: { color: theme.accent, fontSize: theme.type.body, fontWeight: "700" },
   advTitle: { color: theme.text, fontSize: theme.type.body, fontWeight: "800" },
