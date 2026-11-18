@@ -17,7 +17,11 @@ function sendJson(res, status, body) {
  */
 export async function handleOsRoute(ctx) {
   const { req, res, url, dataDir } = ctx;
-  const now = typeof ctx.now === "function" ? ctx.now : () => new Date();
+  // ctx.now may return a Date or a number (proxy passes Date.now()); always hand out a Date.
+  const now = () => {
+    const value = typeof ctx.now === "function" ? ctx.now() : Date.now();
+    return value instanceof Date ? value : new Date(value);
+  };
 
   if (url.pathname === "/v1/persona" && req.method === "GET") {
     const persona = loadPersona(dataDir, { defaultText: PREYAS_CHAT_PERSONA, now });
