@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BodyWebViewAPI, type BodyMetrics } from "../body/BodyWebView";
+import { theme } from "../theme";
 
 const LOG_KEY = "bakugan-buddy/metrics-v1";
 
@@ -91,18 +92,18 @@ function wait(ms: number) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: "#050505" },
+  wrap: { flex: 1, backgroundColor: theme.bg },
   pad: { padding: 16, paddingBottom: 40 },
-  h: { color: "#f2f2f2", fontSize: 20, fontWeight: "800", marginBottom: 8 },
-  p: { color: "#b0b0b0", marginBottom: 12, lineHeight: 20 },
+  h: { color: theme.text, fontSize: 20, fontWeight: "800", marginBottom: 8 },
+  p: { color: theme.dim, marginBottom: 12, lineHeight: 20 },
   mono: {
-    color: "#e8e8e8",
+    color: theme.text,
     fontFamily: "monospace",
     marginBottom: 16,
     fontSize: 12,
   },
   btn: {
-    backgroundColor: "#c8c8c8",
+    backgroundColor: theme.cardSoft,
     padding: 14,
     alignItems: "center",
     marginBottom: 8,
@@ -110,15 +111,15 @@ const styles = StyleSheet.create({
   btnOff: { opacity: 0.5 },
   btnGhost: {
     borderWidth: 1,
-    borderColor: "rgba(200,200,200,0.35)",
+    borderColor: theme.accentLine,
     padding: 12,
     alignItems: "center",
     marginBottom: 16,
   },
-  btnT: { color: "#0a0a0a", fontWeight: "700" },
-  btnGhostT: { color: "#e8e8e8", fontWeight: "700" },
+  btnT: { color: theme.text, fontWeight: "700" },
+  btnGhostT: { color: theme.text, fontWeight: "700" },
   log: {
-    color: "#c8c8c8",
+    color: theme.dim,
     fontFamily: "monospace",
     fontSize: 11,
     lineHeight: 16,
