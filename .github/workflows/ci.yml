@@ -112,6 +112,9 @@ jobs:
           node --check bakugan-buddy/brain-server/lib/speech.mjs
           node --experimental-strip-types --disable-warning=ExperimentalWarning --test bakugan-buddy/brain-server/lib/memory.test.mjs bakugan-buddy/brain-server/lib/sampling.test.mjs bakugan-buddy/brain-server/lib/history.test.mjs bakugan-buddy/brain-server/lib/import-paths.test.mjs bakugan-buddy/brain-server/lib/coach/skills.test.mjs bakugan-buddy/brain-server/lib/coach/retrieve.test.mjs bakugan-buddy/brain-server/lib/coach/session.test.mjs bakugan-buddy/brain-server/lib/coach/lessons.test.mjs bakugan-buddy/brain-server/lib/coach/escalate.test.mjs bakugan-buddy/brain-server/lib/coach/safety.test.mjs
 
+      - name: Brain OS tests
+        run: npm run test:os
+
       - name: Install studio (lockfile)
         run: npm ci
         working-directory: bakugan-buddy/studio

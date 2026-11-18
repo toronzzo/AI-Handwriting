@@ -1,4 +1,5 @@
 import "./src/installTheme";
+import "./src/persona/installPersona";
 import "./src/room/brain/token";
 import { registerRootComponent } from 'expo';
 
