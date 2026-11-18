@@ -236,3 +236,24 @@ test("judge verdicts: unsure never advances, ok advances, two bads escalate", as
   const second = await bad.coach.turn("two");
   assert.equal(second.escalate, true, "two bad judge verdicts escalate");
 });
+
+test("B4: every reply carries speak, lastSpeak.id grows, danger follows the step", async () => {
+  const { coach } = makeCoach();
+  const start = await coach.turn("coach merge the pr");
+  assert.ok(start.speak && typeof start.speak.text === "string" && (start.speak.lang === "en" || start.speak.lang === "ru"));
+  assert.ok(!start.speak.text.includes("`"), "spoken text has no backticks");
+  assert.equal(start.state.lastSpeak.id, 1);
+  assert.equal(start.state.danger, false);
+  // Advance to the Danger step (step 5).
+  await coach.turn("wants to merge into main");
+  await coach.turn("all checks passed");
+  await coach.turn("files look fine");
+  const atDanger = await coach.turn("no conflicts here");
+  assert.equal(atDanger.state.danger, true, "state().danger follows the Danger step flag");
+  assert.ok(atDanger.state.lastSpeak.id > start.state.lastSpeak.id, "lastSpeak.id increases with every coach message");
+  assert.match(atDanger.state.lastSpeak.text, /Squash and merge/);
+  assert.ok(!atDanger.state.lastSpeak.text.includes("gh pr merge"), "the command is never in lastSpeak.text");
+  // A voice-style "done" on the danger step stays spoken through the engine reply too.
+  const word = await coach.turn("why");
+  assert.ok(word.speak && word.speak.text.includes("One commit per slice"));
+});

@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { theme } from "../theme";
+import { CoachVoice } from "./CoachVoice";
 import type { CoachSkill, CoachState } from "./useCoach";
 
 type ChipProps = {
@@ -67,6 +68,7 @@ export function CoachPanel({ state, skills, onClose, onStop, onHint }: PanelProp
             <Text style={styles.buttonText}>Start coach</Text>
           </Pressable>
         )}
+        <CoachVoice />
         <Pressable style={styles.ghostButton} onPress={onClose} accessibilityLabel="Close">
           <Text style={styles.ghostText}>Close</Text>
         </Pressable>
