@@ -112,7 +112,7 @@ test("lesson line appears before the first step of a skill", async () => {
     await coach.turn("skip");
     await coach.turn("wait for CI and refresh");
     const reply = await coach.turn("coach merge the pr");
-    assert.match(reply.reply, /I remember a lesson from 2026-11-18/);
+    assert.match(reply.reply, new RegExp(`I remember a lesson from ${localDay(new Date())}`));
     assert.match(reply.reply, /merge button was grey/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
