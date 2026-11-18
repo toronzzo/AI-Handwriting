@@ -16,6 +16,7 @@ import { escalateReply, buildGrokBotText, buildPaidPrompt } from "./escalate.mjs
 import { redactSecrets } from "./redact.mjs";
 import { estimatePaidCostUsd } from "../../../packages/alive/src/confirm.ts";
 import { allowPaid } from "./spendGate.mjs";
+import { speakableStep } from "../os/speakable.mjs";
 
 function writeJsonAtomic(file, value) {
   try {
@@ -39,6 +40,7 @@ export function createCoach({ dataDir, skillsDir, seedDir, now = () => Date.now(
   let lessonCapture = null; // { stage, situation?, cause?, skill }
   let store = {}; // learned counts by skill name
   let lessons = []; // in-memory lessons log
+  let lastSpeak = { id: 0, text: "", lang: "en" }; // the latest spoken coach message
 
   const lessonsFile = dataDir ? path.join(dataDir, "coach", "lessons.jsonl") : null;
   const sessionFile = dataDir ? path.join(dataDir, "coach", "session.json") : null;
@@ -92,6 +94,8 @@ export function createCoach({ dataDir, skillsDir, seedDir, now = () => Date.now(
       of: 0,
       startedAt: null,
       learnedCount: learnedList(store).length,
+      lastSpeak: { ...lastSpeak },
+      danger: false,
     };
     if (lessonCapture) return { ...base, mode: "lesson", skillName: lessonCapture.skill || null };
     if (pendingSkill) return { ...base, mode: "pending", skillName: pendingSkill.name };
@@ -104,14 +108,19 @@ export function createCoach({ dataDir, skillsDir, seedDir, now = () => Date.now(
         step: session.step,
         of: skill ? skill.steps.length : 0,
         startedAt: session.startedAt,
+        danger: Boolean(skill?.steps[session.step - 1]?.danger),
       };
     }
     return base;
   }
 
   function done(reply, extra = {}) {
+    const speak = speakableStep(reply);
+    if (reply) {
+      lastSpeak = { id: lastSpeak.id + 1, text: speak.text, lang: speak.lang };
+    }
     persistSession();
-    return { handled: true, reply, state: stateView(), escalate: false, ...extra };
+    return { handled: true, reply, state: stateView(), escalate: false, speak, ...extra };
   }
 
   function beginSkill(skill) {
@@ -262,7 +271,7 @@ export function createCoach({ dataDir, skillsDir, seedDir, now = () => Date.now(
         return done("Coach stopped.");
       }
       pendingSkill = null;
-      return { handled: false, reply: "", state: stateView(), escalate: false };
+      return { handled: false, reply: "", state: stateView(), escalate: false, speak: speakableStep("") };
     }
 
     // No session: coach commands only.
@@ -290,9 +299,9 @@ export function createCoach({ dataDir, skillsDir, seedDir, now = () => Date.now(
       return done("What situation are we saving? (One short sentence.)");
     }
     if (isSessionWord(intent?.kind)) {
-      return { handled: false, reply: "", state: stateView(), escalate: false };
+      return { handled: false, reply: "", state: stateView(), escalate: false, speak: speakableStep("") };
     }
-    return { handled: false, reply: "", state: stateView(), escalate: false };
+    return { handled: false, reply: "", state: stateView(), escalate: false, speak: speakableStep("") };
   }
 
   function skills() {

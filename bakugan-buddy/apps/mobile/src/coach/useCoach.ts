@@ -8,6 +8,8 @@ export type CoachState = {
   of: number;
   startedAt: number | null;
   learnedCount: number;
+  lastSpeak: { id: number; text: string; lang: string } | null;
+  danger: boolean;
 };
 
 export type CoachSkill = { name: string; when: string[]; valid: boolean; learned: boolean };

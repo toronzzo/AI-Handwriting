@@ -4,6 +4,8 @@
  * another change: later slices only add routes inside this file.
  */
 import { PREYAS_CHAT_PERSONA } from "../../../packages/alive/src/persona.ts";
+import fs from "node:fs";
+import path from "node:path";
 import { asMs, crisisLine, dayKey, readEvents, readSettings, summarizeDay } from "./events.mjs";
 import { createSendMemory, confirmLine, logParsedEvents, normalizeSentence, undoEvents } from "./eventsConfirm.mjs";
 import { parseEvents } from "./eventsParse.mjs";
@@ -11,6 +13,7 @@ import { reviewAction } from "./guard.mjs";
 import { readGuardLog } from "./guardLog.mjs";
 import { listVersions, loadPersona } from "./persona.mjs";
 import { allowPaid } from "../coach/spendGate.mjs";
+import { loadSkills } from "../coach/skills.mjs";
 
 function sendJson(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -157,5 +160,53 @@ export async function handleOsRoute(ctx) {
     return answered(res, 200, { lines: readGuardLog(dataDir, day) });
   }
 
+  if (url.pathname === "/v1/coach/voice-intent" && req.method === "POST") {
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    const normalized = String(body.text || "")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const WORDS = new Set([
+      "done",
+      "ok",
+      "next",
+      "back",
+      "why",
+      "where am i",
+      "stop",
+      "готово",
+      "дальше",
+      "назад",
+      "почему",
+      "где я",
+      "стоп",
+    ]);
+    let autoSend = WORDS.has(normalized);
+    // On a Danger step only why/back may auto-send; nothing else goes by voice alone.
+    if (autoSend && !["why", "почему", "back", "назад"].includes(normalized) && dangerOfCurrentStep(dataDir)) {
+      autoSend = false;
+    }
+    return answered(res, 200, { autoSend, normalized });
+  }
+
   return false;
+}
+
+/** Reads the persisted coach session and tells whether the current step is Danger. */
+function dangerOfCurrentStep(dataDir) {
+  if (!dataDir) return false;
+  try {
+    const saved = JSON.parse(fs.readFileSync(path.join(dataDir, "coach", "session.json"), "utf8"));
+    if (!saved || !saved.session || saved.session.mode !== "skill") return false;
+    const entry = loadSkills(path.join(dataDir, "coach", "skills")).find(
+      (row) => row.ok && row.skill.name === saved.session.skillName,
+    );
+    if (!entry) return false;
+    const step = entry.skill.steps[saved.session.step - 1];
+    return Boolean(step && step.danger);
+  } catch {
+    return false;
+  }
 }
