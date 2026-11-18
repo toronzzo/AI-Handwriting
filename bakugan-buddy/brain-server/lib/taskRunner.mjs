@@ -7,6 +7,7 @@ import { parsePlan } from "../../packages/alive/src/tasks.ts";
 import { searchNotes } from "./notes.mjs";
 import { listDir, readTextFile } from "./safeFs.mjs";
 import { saveTask } from "./tasks.mjs";
+import { llamaJudge, reviewAction } from "./os/guard.mjs";
 
 const PLAN_SYSTEM = [
   "You plan small tasks for Preyas, a careful assistant.",
@@ -115,13 +116,50 @@ export function launchTaskRun(root, task, options = {}) {
 }
 
 export async function runTask(root, task, options = {}) {
-  const { llamaUrl, fetchImpl = fetch, fsRoot, searchNotesImpl } = options;
+  const { llamaUrl, fetchImpl = fetch, fsRoot, searchNotesImpl, guard = reviewAction, judge } = options;
+  const modelJudge =
+    judge !== undefined
+      ? judge
+      : llamaUrl
+        ? llamaJudge({ llamaUrl, fetchImpl })
+        : null;
   task.status = "running";
   for (const step of task.steps) {
     if (step.status === "done") continue;
     step.status = "running";
     task.updated = Date.now();
     saveTask(root, task);
+
+    // Сторож: every tool call is reviewed before it runs. A block (or an
+    // "ask" without a confirm card in tasks) ends the step with an
+    // explanation; the task goes on.
+    if (step.tool && step.tool.name) {
+      const action = {
+        kind: String(step.tool.name),
+        args:
+          step.tool.name === "search_notes"
+            ? { query: String(step.tool.query || "") }
+            : { path: String(step.tool.path || "") },
+        userRequest: String(task.title || "").slice(0, 500),
+        origin: "user",
+        source: "task",
+      };
+      const review = await guard(action, {
+        dataDir: root,
+        fsRoot,
+        judge: modelJudge,
+        now: () => Date.now(),
+      });
+      if (review.verdict !== "allow") {
+        step.result =
+          review.verdict === "block" ? `Blocked by the guard: ${review.why}` : "Blocked by the guard: needs your OK";
+        step.status = "done";
+        task.updated = Date.now();
+        saveTask(root, task);
+        continue;
+      }
+    }
+
     try {
       const context = stepContext(root, task, step, { fsRoot, searchNotesImpl });
       const result = await askLlama(
