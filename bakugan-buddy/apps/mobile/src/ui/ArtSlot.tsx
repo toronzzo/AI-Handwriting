@@ -1,6 +1,7 @@
-import { StyleSheet, View, type StyleProp, type ViewStyle, Image } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Image, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
-import { useArt, type SlotId } from "../art/slots.ts";
+import { uploadArt, useArt, type SlotId } from "../art/slots.ts";
 import { mixHex } from "../palette.ts";
 import { theme } from "../theme";
 import { usePalette } from "../usePalette";
@@ -12,6 +13,9 @@ import { usePalette } from "../usePalette";
  * placeholder follows day and night like everything else.
  */
 const BANDS = 12;
+
+/** How long "Couldn't save the photo" stays on screen after a failed upload. */
+const ERROR_MS = 4_000;
 
 /** The quiet picture glyph shown while a slot has no picture. */
 function PictureIcon({ colour }: { colour: string }) {
@@ -36,25 +40,126 @@ function PictureIcon({ colour }: { colour: string }) {
   );
 }
 
+/** A short human name for a slot, used in the button's screen-reader label. */
+const SLOT_NAMES: Record<SlotId, string> = {
+  hero: "hero",
+  bg: "background",
+  house: "house",
+  car: "car",
+  study: "study",
+  "bakugan-buddy": "Bakugan Buddy",
+  studio: "studio",
+};
+
+/** How a change of picture ended: saved, or the picture was not taken. */
+export type PhotoOutcome = "saved" | "failed";
+
+/**
+ * The "Change photo" button and the picker behind it (slice 10b).
+ *
+ * A press opens the system image picker with images only and no editing. The
+ * picked picture is read as bytes and POSTed to the brain, which saves it and
+ * moves the old one to art/old/. While that happens the button says "Saving…"
+ * and ignores more presses; when it ends, `onSaved` is told which way. The
+ * rest of the screen is never covered or blocked: this is a small button in a
+ * corner, not a dialog.
+ */
+export function useChangePhoto(slot: SlotId, onSaved: (outcome: PhotoOutcome) => void) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  const busyRef = useRef(false);
+  const alive = useRef(true);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+
+  const change = async () => {
+    if (busyRef.current) return;
+    if (timer.current) clearTimeout(timer.current);
+    setError(false);
+    let picked: { canceled: boolean; assets?: { uri: string }[] | null } | null = null;
+    try {
+      const ImagePicker = await import("expo-image-picker");
+      picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 0.9,
+      });
+    } catch {
+      // No picker on this platform, or the user changed their mind: no fuss.
+      return;
+    }
+    if (!picked || picked.canceled) return;
+    const uri = picked.assets?.[0]?.uri;
+    if (!uri) return;
+    busyRef.current = true;
+    setBusy(true);
+    let outcome: PhotoOutcome = "failed";
+    try {
+      await uploadArt(slot, uri);
+      outcome = "saved";
+    } catch {
+      // A plain "it did not work": the brain's own words are not shown.
+      outcome = "failed";
+    }
+    busyRef.current = false;
+    if (!alive.current) return;
+    setBusy(false);
+    onSaved(outcome);
+    if (outcome === "saved") return;
+    setError(true);
+    timer.current = setTimeout(() => {
+      if (alive.current) setError(false);
+    }, ERROR_MS);
+  };
+
+  return { busy, error, change };
+}
+
+/**
+ * The same picker the slot's button uses, and the same success and failure
+ * handling, but driven by any control the caller renders itself (the
+ * Settings panel's "Change background" button).
+ */
+export function usePhotoSwitcher(slot: SlotId, onSaved: (outcome: PhotoOutcome) => void) {
+  return useChangePhoto(slot, onSaved);
+}
+
 /**
  * One of the user's pictures, in a rounded box. With an image it fills the box
  * (cover, decorative: it says nothing a screen reader needs). Without one, a
  * soft cardSoft-to-slotPlaceholder gradient with a small line picture glyph in
- * theme.faint. A missing picture is normal, never an error, so no danger colour.
+ * theme.faint. A missing picture is normal, never an error, so no danger colour
+ * is used here; only the failed-save note appears, and it is plain dim text.
+ *
+ * With `editable` the user can change the picture from inside the app.
  */
 export function ArtSlot({
   slot,
   aspectRatio,
   radius = 12,
   style,
+  editable = false,
 }: {
   slot: SlotId;
   aspectRatio?: number;
   radius?: number;
   style?: StyleProp<ViewStyle>;
+  /** Show the small "Change photo" button in the bottom-left corner. */
+  editable?: boolean;
 }) {
   const art = useArt(slot);
   const palette = usePalette();
+  // A saved picture loads straight away; a failure shows a short note below.
+  const { busy, error, change } = useChangePhoto(slot, (outcome) => {
+    if (outcome === "saved") art.reload();
+  });
 
   const box: StyleProp<ViewStyle> = [
     styles.box,
@@ -63,13 +168,7 @@ export function ArtSlot({
     style,
   ];
 
-  if (art.status === "ready" && art.url) {
-    return (
-      <View style={box} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Image source={{ uri: art.url }} style={styles.image} resizeMode="cover" alt="" />
-      </View>
-    );
-  }
+  const hasPicture = art.status === "ready" && Boolean(art.url);
 
   const bands: string[] = [];
   for (let i = 0; i < BANDS; i++) {
@@ -77,17 +176,44 @@ export function ArtSlot({
   }
 
   return (
-    <View style={box} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      {bands.map((colour, index) => (
-        <View
-          key={index}
-          style={[styles.band, { backgroundColor: colour, height: `${100 / BANDS}%` }]}
-          pointerEvents="none"
-        />
-      ))}
-      <View style={styles.icon} pointerEvents="none">
-        <PictureIcon colour={palette.faint} />
-      </View>
+    <View style={box}>
+      {hasPicture ? (
+        <Image source={{ uri: art.url }} style={styles.image} resizeMode="cover" alt="" />
+      ) : (
+        <View style={styles.placeholder} pointerEvents="none">
+          {bands.map((colour, index) => (
+            <View
+              key={index}
+              style={[styles.band, { backgroundColor: colour, height: `${100 / BANDS}%` }]}
+            />
+          ))}
+          <View style={styles.icon}>
+            <PictureIcon colour={palette.faint} />
+          </View>
+        </View>
+      )}
+
+      {editable ? (
+        <View style={styles.editor} pointerEvents="box-none">
+          {error ? (
+            <View style={styles.errorNote} pointerEvents="none">
+              <Text style={styles.errorText}>Couldn't save the photo</Text>
+            </View>
+          ) : null}
+          <Pressable
+            onPress={() => void change()}
+            disabled={busy}
+            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`Change ${SLOT_NAMES[slot]} photo`}
+            accessibilityState={{ disabled: busy }}
+          >
+            <Text style={styles.buttonText} numberOfLines={1}>
+              {busy ? "Saving…" : "Change photo"}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -102,6 +228,39 @@ const styles = StyleSheet.create({
     borderColor: theme.accentLine,
   },
   image: { width: "100%", height: "100%" },
+  placeholder: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center" },
   band: { width: "100%" },
   icon: { position: "absolute", alignItems: "center", justifyContent: "center" },
+  /** The button sits in the bottom-left corner; nothing else moves for it. */
+  editor: {
+    position: "absolute",
+    left: 8,
+    bottom: 8,
+    right: 8,
+    alignItems: "flex-start",
+    gap: 6,
+  },
+  button: {
+    minHeight: 36,
+    minWidth: 36,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.accentLine,
+    backgroundColor: theme.card,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  buttonPressed: { opacity: 0.85 },
+  buttonText: { color: theme.text, fontSize: 13, fontWeight: "600" },
+  errorNote: {
+    maxWidth: 220,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: theme.cardSoft,
+    borderWidth: 1,
+    borderColor: theme.accentLine,
+  },
+  errorText: { color: theme.dim, fontSize: 12.5 },
 });

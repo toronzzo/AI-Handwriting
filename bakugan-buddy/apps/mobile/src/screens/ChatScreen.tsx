@@ -52,6 +52,8 @@ import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "..
 import { PreyasHero } from "./PreyasHero";
 import { tabById, type Section } from "../nav";
 import { chatColumn, isPhone, isWide } from "../layout";
+import { useArt } from "../art/slots.ts";
+import { usePhotoSwitcher } from "../ui/ArtSlot";
 import { theme } from "../theme";
 
 /** Web lets the sky show through the shell; the iPhone paints the page colour. */
@@ -178,6 +180,61 @@ function blankSinks(): TalkSinks {
     phase: "listening",
   };
 }
+/**
+ * "Change background" for the `bg` picture (slice 10b), in the existing
+ * Settings panel next to the other small cards. It is the same picker and the
+ * same brain route as the slot buttons; this card only owns the two short
+ * notes: "Saved, Preyas uses it right away" and, for four seconds,
+ * "Couldn't save the photo".
+ */
+function BackgroundPhotoCard() {
+  const bg = useArt("bg");
+  const [note, setNote] = useState<"none" | "saved" | "failed">("none");
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearSoon = () => {
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => setNote("none"), 4000);
+  };
+  useEffect(
+    () => () => {
+      if (noteTimer.current) clearTimeout(noteTimer.current);
+    },
+    [],
+  );
+  const photo = usePhotoSwitcher("bg", (outcome) => {
+    if (outcome === "saved") {
+      bg.reload();
+      setNote("saved");
+      clearSoon();
+    } else {
+      setNote("failed");
+      clearSoon();
+    }
+  });
+
+  return (
+    <View style={styles.phoneCard}>
+      <Text style={styles.kicker}>BACKGROUND PICTURE</Text>
+      <Pressable
+        style={styles.profileBtn}
+        onPress={() => void photo.change()}
+        disabled={photo.busy}
+        accessibilityRole="button"
+        accessibilityLabel="Change background photo"
+        accessibilityState={{ disabled: photo.busy }}
+      >
+        <Text style={styles.profileText}>{photo.busy ? "Saving…" : "Change background"}</Text>
+      </Pressable>
+      {note === "failed" ? <Text style={styles.dim}>Couldn't save the photo</Text> : null}
+      <Text style={styles.dim}>
+        {note === "saved"
+          ? "Saved. Preyas uses it right away."
+          : "The sky picture behind the app. The old picture is kept in the art folder's old/ subfolder."}
+      </Text>
+    </View>
+  );
+}
+
 export function ChatScreen({
   section,
   onSection,
@@ -1929,6 +1986,7 @@ export function ChatScreen({
   return (
     <View style={styles.root}>
       <VoiceSession sinks={bag} />
+      <BackgroundPhotoCard />
       {section === "settings" ? (
         <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
           <Text style={styles.sectionTitle}>Settings</Text>

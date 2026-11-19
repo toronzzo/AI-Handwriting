@@ -87,7 +87,9 @@ import { launchTaskRun, planTask, taskRunActive } from "./lib/taskRunner.mjs";
 import { createCoach } from "./lib/coach/engine.mjs";
 import { capUsd, spentTodayUsd } from "./lib/coach/spendGate.mjs";
 import { handleOsRoute } from "./lib/os/routes.mjs";
-import { findArt, isSlot } from "./lib/art.mjs";
+import { ART_WRITE_DIR, MAX_ART_BYTES, findArt, isSlot, saveArt } from "./lib/art.mjs";
+import { resolveSafePath } from "./lib/safeFs.mjs";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 
@@ -202,6 +204,87 @@ async function readJson(req, limit = 64_000) {
     return JSON.parse(body.toString("utf8") || "{}");
   } catch {
     throw new HttpError(400, "bad json");
+  }
+}
+
+/** Where a picture in flight is parked until saveArt takes it. One folder
+ *  next to art/, so the only new place the app ever writes is
+ *  /Volumes/Agent/agent/art/incoming (and art/old for the backups). */
+const ART_INCOMING_DIR = path.join(ART_WRITE_DIR, "incoming");
+
+/**
+ * Read a raw picture off the wire into a temp file, stopping the moment the
+ * body passes the 8 MB cap, then hand it to saveArt.
+ *
+ * Answering 413 early means not trusting the read: nothing more is kept, so a
+ * client that keeps sending cannot pile up bytes in memory.
+ */
+async function receiveArt(req, slot) {
+  fs.mkdirSync(ART_INCOMING_DIR, { recursive: true });
+  const stem = resolveSafePath(path.join("incoming", `${slot}.${randomUUID()}`), ART_WRITE_DIR);
+  const out = fs.openSync(stem, "w");
+  let size = 0;
+  try {
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      // On a refusal nobody waits for the rest of the body any more: the small
+      // remainder is discarded and the socket is closed rather than left open.
+      const stopReading = () => {
+        req.removeAllListeners("data");
+        req.on("error", () => {});
+        req.resume();
+        const socket = req.socket;
+        if (socket) setTimeout(() => socket.destroy(), 1000).unref();
+      };
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        stopReading();
+        reject(error);
+      };
+      req.on("data", (chunk) => {
+        if (settled) return;
+        size += chunk.length;
+        if (size > MAX_ART_BYTES) {
+          fail(new HttpError(413, "picture too large"));
+          return;
+        }
+        try {
+          fs.writeSync(out, chunk);
+        } catch (error) {
+          fail(error);
+        }
+      });
+      req.on("end", () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      });
+      req.on("error", fail);
+      req.on("aborted", () => fail(new HttpError(400, "upload interrupted")));
+    });
+    if (size === 0) throw new HttpError(400, "picture is empty");
+    const bytes = fs.readFileSync(stem);
+    try {
+      return saveArt(slot, bytes);
+    } catch (error) {
+      if (error instanceof TypeError && /not a jpeg|picture bytes/.test(error.message)) {
+        throw new HttpError(400, "bad picture type");
+      }
+      if (error instanceof RangeError) throw new HttpError(400, error.message);
+      throw error;
+    }
+  } finally {
+    try {
+      fs.closeSync(out);
+    } catch {
+      /* already closed */
+    }
+    try {
+      fs.unlinkSync(stem);
+    } catch {
+      /* the rename in saveArt may have taken it, or the upload failed early */
+    }
   }
 }
 
@@ -1616,6 +1699,25 @@ const server = http.createServer(async (req, res) => {
       }
       res.writeHead(200, { "Content-Type": found.type, "Cache-Control": "no-cache" });
       res.end(fs.readFileSync(found.path));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname.startsWith("/v1/art/")) {
+      // Changing a picture from inside the app (slice 10b). The body is the raw
+      // image bytes; the type is judged by the first bytes, never by a header
+      // or a file name. An older picture is moved to art/old/, never deleted.
+      // The stop-on-413 rule mirrors readBody, but the picture is kept in a
+      // file on the drive so 8 MB never sits twice in memory.
+      const slot = decodeURIComponent(url.pathname.slice("/v1/art/".length));
+      if (!isSlot(slot)) {
+        // Refused before a single byte is read from the network.
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "bad slot" }));
+        return;
+      }
+      const saved = await receiveArt(req, slot);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, type: saved.type, size: saved.size }));
       return;
     }
 

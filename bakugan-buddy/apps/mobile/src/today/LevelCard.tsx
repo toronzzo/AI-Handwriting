@@ -1,27 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, Image, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, Animated, StyleSheet, Text, View } from "react-native";
 import { useArt } from "../art/slots.ts";
-import { mixHex, paletteFor } from "../palette.ts";
 import { PreyasHero } from "../screens/PreyasHero";
 import { theme } from "../theme";
+import { ArtSlot } from "../ui/ArtSlot";
 import { Stripe } from "../ui/Stripe";
 import { Panel } from "../ui/Panel";
 import type { AreaId } from "../rpg/types.ts";
 import { AREAS } from "../rpg/types.ts";
 import { useRpg } from "./useRpg";
-
-/** The hero stage gradient, drawn as thin bands because the app has no
- *  gradient package: day #4F88CC → #9CC4EA, night #1B2B49 → #2C4572. */
-const STAGE_BANDS = 24;
-
-function stageBands(): string[] {
-  const p = paletteFor(new Date());
-  const bands: string[] = [];
-  for (let i = 0; i < STAGE_BANDS; i++) {
-    bands.push(mixHex(p.stageTop, p.stageBottom, i / (STAGE_BANDS - 1)));
-  }
-  return bands;
-}
 
 /** True when the platform prefers reduced motion; a local check (slice 11
  *  brings the shared hook). */
@@ -138,17 +125,13 @@ export function LevelCard() {
     <Panel style={styles.card} padding={0}>
       <View style={styles.stage}>
         {hasHero ? (
-          <Image
-            source={{ uri: hero.url }}
-            style={styles.heroImage}
-            resizeMode="cover"
-            accessibilityElementsHidden
-            alt=""
-          />
+          <View style={styles.heroImage}>
+            <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable />
+          </View>
         ) : (
-          stageBands().map((colour, index) => (
-            <View key={index} style={[styles.band, { backgroundColor: colour, height: `${100 / STAGE_BANDS}%` }]} />
-          ))
+          <View style={[StyleSheet.absoluteFill, { zIndex: 1 }]} pointerEvents="box-none">
+            <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable />
+          </View>
         )}
         <View style={hasHero ? styles.heroCorner : styles.hero}>
           <PreyasHero talking={false} short={false} fill />
@@ -215,6 +198,10 @@ const styles = StyleSheet.create({
   },
   band: { width: "100%" },
   heroImage: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%" },
+  /** The hero picture fills the stage; its "Change photo" button sits in the
+   *  bottom-left corner. It is a later sibling of the level-up pill and XP
+   *  chips, so the button is never covered by them. */
+  heroSlot: { flex: 1, height: "100%", borderWidth: 0 },
   hero: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   /** With a hero picture the ball keeps the bottom-right half of the stage. */
   heroCorner: {
