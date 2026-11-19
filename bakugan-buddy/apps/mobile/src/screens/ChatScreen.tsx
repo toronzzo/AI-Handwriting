@@ -49,7 +49,7 @@ import {
   type SearchResult,
 } from "../../../../packages/alive/src/webSearch.ts";
 import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "../room/voice/VoiceSession";
-import { PreyasHero } from "./PreyasHero";
+import { PreyasHeroSwitch } from "../today/PreyasHeroSwitch";
 import { tabById, type Section } from "../nav";
 import { chatColumn, isPhone, isWide } from "../layout";
 import { useArt } from "../art/slots.ts";
@@ -60,6 +60,7 @@ import { previewMode } from "../activity/previewMode";
 import { useActivity, type ActivitySink } from "../activity/useActivity";
 import { HarnessLauncher } from "../harness/HarnessLauncher";
 import { DailyLimit } from "../settings/DailyLimit.tsx";
+import { BitModeSetting } from "../settings/BitMode.tsx";
 import { theme } from "../theme";
 
 /** Web lets the sky show through the shell; the iPhone paints the page colour. */
@@ -2104,6 +2105,7 @@ export function ChatScreen({
             <Text style={styles.profileText}>Refresh</Text>
           </Pressable>
           <DailyLimit />
+          <BitModeSetting />
           <View style={styles.phoneCard}>
             <Text style={styles.kicker}>VAULT</Text>
             <Text style={styles.dim}>
@@ -2898,7 +2900,7 @@ export function ChatScreen({
             </View>
             <ScrollView contentContainerStyle={styles.profileBody}>
               <View style={styles.profileHero}>
-                <PreyasHero talking={phase === "speaking"} short={false} fill />
+                <PreyasHeroSwitch talking={phase === "speaking"} short={false} fill />
               </View>
               <Text style={styles.kicker}>YOUR PARTNER</Text>
               <Text style={styles.bigName}>PREYAS</Text>

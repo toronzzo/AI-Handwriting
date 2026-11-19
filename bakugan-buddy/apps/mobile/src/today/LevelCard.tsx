@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, StyleSheet, Text, View } from "react-native";
 import { useArt } from "../art/slots.ts";
-import { PreyasHero } from "../screens/PreyasHero";
+import { PreyasHeroSwitch } from "./PreyasHeroSwitch";
 import { theme } from "../theme";
 import { ArtSlot } from "../ui/ArtSlot";
 import { Stripe } from "../ui/Stripe";
@@ -112,7 +112,7 @@ export function LevelCard() {
           </View>
         )}
         <View style={hasHero ? styles.heroCorner : styles.hero}>
-          <PreyasHero talking={false} short={false} fill />
+          <PreyasHeroSwitch talking={false} short={false} fill />
         </View>
         {levelUp ? (
           <Animated.View

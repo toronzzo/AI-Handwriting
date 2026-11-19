@@ -1,0 +1,60 @@
+/**
+ * The 3D ball, loaded on demand (slice 8A).
+ *
+ * The real ball (PreyasHero.tsx) pulls in react-three-fiber, three and the GLB
+ * loader. With the 8-bit look switched ON none of the 3D code must be on the
+ * page at all. So the 3D screen is imported only through the dynamic
+ * import() below, and React.lazy runs it only when Preyas3D is actually
+ * rendered - which happens only while the switch is OFF.
+ *
+ * A static test (src/bits/lazy3d.test.ts, marked "3d-code") checks that no
+ * other file imports the 3D screen.
+ *
+ * The fallback is a plain coloured box of the same size, so switching ON
+ * (module dropped, sprite drawn) and switching OFF (module fetched) never
+ * jumps the layout.
+ */
+import { lazy, Suspense } from "react";
+import { StyleSheet, View } from "react-native";
+import { theme } from "../theme";
+
+export type Preyas3DProps = { talking: boolean; short: boolean; fill?: boolean };
+
+const HERO_MIN = theme.space.xl * 7;
+const SHORT = theme.space.xl * 5;
+const TALL = theme.space.xl * 8;
+
+const LazyHero = lazy(async () => {
+  const module = await import("./PreyasHero"); // 3d-code
+  return { default: module.PreyasHero };
+});
+
+export function Preyas3D(props: Preyas3DProps) {
+  return (
+    <Suspense
+      fallback={
+        <View
+          style={[
+            styles.placeholder,
+            props.fill ? styles.fill : props.short ? styles.short : styles.tall,
+          ]}
+          accessibilityRole="image"
+          accessibilityLabel="Preyas is loading"
+        />
+      }
+    >
+      <LazyHero {...props} />
+    </Suspense>
+  );
+}
+
+const styles = StyleSheet.create({
+  placeholder: {
+    width: "100%",
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.track,
+  },
+  fill: { flex: 1, minHeight: HERO_MIN },
+  short: { height: SHORT },
+  tall: { height: TALL },
+});
