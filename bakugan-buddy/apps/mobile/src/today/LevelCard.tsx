@@ -67,7 +67,8 @@ function XpChip({ area, xp, reduce }: { area: AreaId; xp: number; reduce: boolea
       return;
     }
     rise.setValue(0);
-    Animated.timing(rise, { toValue: 1, duration: 1800, useNativeDriver: true }).start();
+    // JS driver: the web app has no native animated module, and these are tiny.
+    Animated.timing(rise, { toValue: 1, duration: 1800, useNativeDriver: false }).start();
   }, [reduce, rise]);
   const translateY = rise.interpolate({ inputRange: [0, 1], outputRange: [0, -46] });
   const opacity = rise.interpolate({ inputRange: [0, 0.15, 1], outputRange: [1, 1, 0] });
@@ -130,7 +131,8 @@ export function LevelCard() {
       return;
     }
     pillScale.setValue(0.6);
-    Animated.timing(pillScale, { toValue: 1, duration: 240, useNativeDriver: true }).start();
+    // JS driver: the web app has no native animated module, and these are tiny.
+    Animated.timing(pillScale, { toValue: 1, duration: 240, useNativeDriver: false }).start();
   }, [levelUp, reduce, pillScale]);
 
   const fill = Math.min(100, Math.round((snapshot.levelInto / snapshot.levelNeed) * 100));
