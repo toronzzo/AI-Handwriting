@@ -86,6 +86,16 @@ import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./lib/
 import { launchTaskRun, planTask, taskRunActive } from "./lib/taskRunner.mjs";
 import { createCoach } from "./lib/coach/engine.mjs";
 import { capUsd, spentTodayUsd } from "./lib/coach/spendGate.mjs";
+import { createHarnessRunner } from "./lib/harness/runner.mjs";
+import { pickAdapter } from "./lib/harness/adapter.mjs";
+import {
+  CAP_MAX_USD,
+  CAP_MIN_USD,
+  DEFAULT_CAP_USD,
+  checkSpendSaveRequest,
+  readSpendSetting,
+  writeSpendSetting,
+} from "./lib/harness/settings.mjs";
 import { handleOsRoute } from "./lib/os/routes.mjs";
 import { ART_WRITE_DIR, MAX_ART_BYTES, findArt, isSlot, saveArt } from "./lib/art.mjs";
 import { resolveSafePath } from "./lib/safeFs.mjs";
@@ -165,6 +175,25 @@ function coachUnavailable(res) {
   res.end(JSON.stringify({ error: "drive_missing" }));
 }
 
+/** The harness refusal code becomes the HTTP status the app expects. */
+function harnessRefusalStatus(code) {
+  if (code === "RUN_ACTIVE") return 409;
+  if (code === "OVER_CAP" || code === "NO_PRICE") return 402;
+  return 400;
+}
+
+/** GET and POST /v1/settings/spend share one body. */
+function spendSettingsBody() {
+  const setting = readSpendSetting(dataDir);
+  return {
+    capUsd: setting.dailyCapUsd,
+    spentTodayUsd: setting.spentTodayUsd,
+    min: CAP_MIN_USD,
+    max: CAP_MAX_USD,
+    default: DEFAULT_CAP_USD,
+  };
+}
+
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Preyas-Token");
@@ -222,6 +251,16 @@ const activity = createActivityHub({
     process.env.PREYAS_PAIR_CODE,
   ].filter(Boolean),
 });
+
+/**
+ * Harness (slice 13): the one runner for this process. Its adapter is the real
+ * CLI when STEP 0 found one (docs/HARNESS_CLI.md), Fake with HARNESS_ADAPTER=fake,
+ * and the fail-closed NotImplementedAdapter otherwise. A run still needs the
+ * prices from brain.env and the user's Да, so this choice spends nothing.
+ */
+const harness = dataDir
+  ? createHarnessRunner({ dataDir, adapter: pickAdapter(process.env), hub: activity, now: () => Date.now() })
+  : null;
 
 /** The run a request belongs to: its x-preyas-run header, else "adhoc". */
 function activityRun(req) {
@@ -754,6 +793,44 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (await handleOsRoute({ req, res, url, dataDir, readJson, readBody, now: () => Date.now() })) return;
+
+    // Harness (slice 13) and the ONE daily limit. Only this POST can write the
+    // cap, and only with confirm "save"; no model-callable path reaches it.
+    if (url.pathname.startsWith("/v1/harness/") || url.pathname === "/v1/settings/spend") {
+      if (!harness || !dataDir) return coachUnavailable(res);
+      if (req.method === "POST" && url.pathname === "/v1/harness/draft") {
+        const body = await readJson(req);
+        const goal = String(body.goal || "").trim();
+        if (!goal) return sendJson(res, 400, { error: "Type what Harness should build." });
+        return sendJson(res, 200, await harness.draft(goal, String(body.chatId || "")));
+      }
+      if (req.method === "POST" && url.pathname === "/v1/harness/approve") {
+        const body = await readJson(req);
+        const result = await harness.approve(String(body.draftId || ""), String(body.answer || ""));
+        if (!result.ok) {
+          return sendJson(res, harnessRefusalStatus(result.code), { error: result.reason, code: result.code });
+        }
+        return sendJson(res, 200, result);
+      }
+      if (req.method === "GET" && url.pathname === "/v1/harness/status") {
+        return sendJson(res, 200, harness.status());
+      }
+      if (req.method === "POST" && url.pathname === "/v1/harness/stop") {
+        return sendJson(res, 200, await harness.stop());
+      }
+      if (req.method === "GET" && url.pathname === "/v1/settings/spend") {
+        return sendJson(res, 200, spendSettingsBody());
+      }
+      if (req.method === "POST" && url.pathname === "/v1/settings/spend") {
+        const body = await readJson(req);
+        const checked = checkSpendSaveRequest(body);
+        if (!checked.ok) return sendJson(res, 400, { error: checked.error });
+        const written = writeSpendSetting(dataDir, checked.value);
+        if (!written.ok) return sendJson(res, 400, { error: written.error });
+        return sendJson(res, 200, spendSettingsBody());
+      }
+      return sendJson(res, 404, { error: "not_found" });
+    }
     if (req.method === "GET" && url.pathname === "/v1/health") {
       let llama = false;
       try {

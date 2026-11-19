@@ -58,6 +58,8 @@ import { ActivityPanel } from "../activity/ActivityPanel";
 import { PreviewCard } from "../activity/PreviewCard";
 import { previewMode } from "../activity/previewMode";
 import { useActivity, type ActivitySink } from "../activity/useActivity";
+import { HarnessLauncher } from "../harness/HarnessLauncher";
+import { DailyLimit } from "../settings/DailyLimit.tsx";
 import { theme } from "../theme";
 
 /** Web lets the sky show through the shell; the iPhone paints the page colour. */
@@ -2101,6 +2103,7 @@ export function ChatScreen({
           >
             <Text style={styles.profileText}>Refresh</Text>
           </Pressable>
+          <DailyLimit />
           <View style={styles.phoneCard}>
             <Text style={styles.kicker}>VAULT</Text>
             <Text style={styles.dim}>
@@ -2658,6 +2661,9 @@ export function ChatScreen({
               >
                 <Text style={styles.sendText}>➤</Text>
               </Pressable>
+              {wide ? (
+                <HarnessLauncher chatId={activeChatId} onOpenSettings={() => onSection?.("settings")} />
+              ) : null}
             </View>
             {!micOk ? <Text style={styles.voiceHint}>Voice works on the Mac; type here</Text> : null}
             <View style={styles.chips}>
