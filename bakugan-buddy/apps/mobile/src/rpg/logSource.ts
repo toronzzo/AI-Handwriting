@@ -179,13 +179,12 @@ export function createLogSource(options: LogSourceOptions = {}): LogSource {
   const autoRefresh = options.autoRefresh ?? true;
 
   let reply: TodayReply | null = null;
-  let demoSnippet: RpgSnapshot | null = null;
   const subscribers = new Set<(snapshot: RpgSnapshot) => void>();
 
   function current(): RpgSnapshot {
     if (reply) return buildSnapshot(reply);
-    if (!demoSnippet) demoSnippet = options.demoFallback ? options.demoFallback() : null;
-    if (demoSnippet) return demoSnippet;
+    // The demo fallback hands out a fresh snapshot per call, like the mock.
+    if (options.demoFallback) return options.demoFallback();
     // No fallback provided (tests): a zeroed real snapshot.
     return buildSnapshot({ areaXp: {}, todayXp: 0, quests: [], paths: [] });
   }
