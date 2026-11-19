@@ -1,6 +1,11 @@
 /**
  * Spend gate (the seed of the later Сторож guard): read-only view of what the
  * paid route cost today and the user's daily cap. Nothing here writes.
+ *
+ * Slice 13 (Harness) added the second spend file: the paid chat lines in
+ * `history/chat.jsonl` and the Harness runs in `spend/harness.jsonl` are summed
+ * together against the SAME cap, so there is only one daily limit for all paid
+ * work.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -14,24 +19,21 @@ function dayKeyOf(ms) {
   return `${d.getFullYear()}-${month}-${day}`;
 }
 
-/** Sum of costUsd in history/chat.jsonl for the local calendar day. */
-export function spentTodayUsd(dataDir, now = new Date()) {
-  if (!dataDir) return 0;
-  const file = path.join(dataDir, "history", "chat.jsonl");
+/** Sum one money field in a JSONL file for the local day; a missing/bad file counts 0. */
+function sumMoneyFile(file, day, field) {
   let text = "";
   try {
     text = fs.readFileSync(file, "utf8");
   } catch {
     return 0; // missing file counts as nothing, never throws
   }
-  const day = dayKeyOf(now instanceof Date ? now.getTime() : Number(now));
   let total = 0;
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     try {
       const entry = JSON.parse(line);
       if (entry && typeof entry === "object" && dayKeyOf(Number(entry.t) || 0) !== day) continue;
-      const cost = Number(entry && entry.costUsd);
+      const cost = Number(entry && entry[field]);
       if (Number.isFinite(cost) && cost > 0) total += cost;
     } catch {
       /* bad line counts 0 */
@@ -40,7 +42,16 @@ export function spentTodayUsd(dataDir, now = new Date()) {
   return total;
 }
 
-/** The daily cap from settings/spend.json; missing/invalid -> DEFAULT_CAP_USD. */
+/** Sum of paid chat and Harness cost for the local calendar day. */
+export function spentTodayUsd(dataDir, now = new Date()) {
+  if (!dataDir) return 0;
+  const day = dayKeyOf(now instanceof Date ? now.getTime() : Number(now));
+  const chat = sumMoneyFile(path.join(dataDir, "history", "chat.jsonl"), day, "costUsd");
+  const harness = sumMoneyFile(path.join(dataDir, "spend", "harness.jsonl"), day, "usd");
+  return chat + harness;
+}
+
+/** The daily cap from the spend setting; missing/invalid -> DEFAULT_CAP_USD. */
 export function capUsd(dataDir) {
   if (!dataDir) return DEFAULT_CAP_USD;
   try {
