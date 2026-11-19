@@ -43,6 +43,9 @@ export const theme = {
   note: colour("note"),
   shadow: colour("shadow"),
   scrim: colour("scrim"),
+  /** The LevelCard hero stage gradient, added in the Today slice. */
+  stageTop: colour("stageTop"),
+  stageBottom: colour("stageBottom"),
   /** Font stacks; only the web has named fonts loaded. */
   font: {
     body: isWeb ? "Inter, system-ui, -apple-system, sans-serif" : undefined,

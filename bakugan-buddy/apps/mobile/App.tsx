@@ -12,6 +12,7 @@ import { BodyWebView, BodyWebViewAPI, type BodyMetrics } from "./src/body/BodyWe
 import { BenchmarkScreen } from "./src/screens/BenchmarkScreen";
 import { RoomScreen } from "./src/room/RoomScreen";
 import { ChatScreen } from "./src/screens/ChatScreen";
+import { TodayScreen } from "./src/today/TodayScreen";
 import { MAIN_TABS, SETTINGS_ENTRY, type Section } from "./src/nav";
 import { theme } from "./src/theme";
 import { isWide } from "./src/layout";
@@ -24,7 +25,7 @@ const isWeb = typeof document !== "undefined";
 type Advanced = "room" | "body" | "bench";
 
 export default function App() {
-  const [section, setSection] = useState<Section>("chat");
+  const [section, setSection] = useState<Section>("today");
   const [advanced, setAdvanced] = useState<Advanced | null>(null);
   const [metrics, setMetrics] = useState<BodyMetrics | null>(null);
   const wide = isWide(useWindowDimensions().width);
@@ -154,6 +155,8 @@ export default function App() {
                 </View>
               ) : null}
             </AdvancedWrap>
+          ) : section === "today" ? (
+            <TodayScreen />
           ) : (
             <ChatScreen section={section} onSection={setSection} onNavigate={openAdvanced} />
           )}

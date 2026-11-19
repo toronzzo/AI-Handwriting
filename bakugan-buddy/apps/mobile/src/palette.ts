@@ -32,7 +32,9 @@ export type PaletteKey =
   | "stripeRed"
   | "note"
   | "shadow"
-  | "scrim";
+  | "scrim"
+  | "stageTop"
+  | "stageBottom";
 
 export type Palette = Record<PaletteKey, string>;
 
@@ -64,6 +66,8 @@ const KEYS: readonly PaletteKey[] = [
   "note",
   "shadow",
   "scrim",
+  "stageTop",
+  "stageBottom",
 ];
 
 export const DAY: Palette = {
@@ -93,6 +97,8 @@ export const DAY: Palette = {
   note: "#6A4D00",
   shadow: "rgba(14,34,66,0.20)",
   scrim: "rgba(10,24,50,0.45)",
+  stageTop: "#4F88CC",
+  stageBottom: "#9CC4EA",
 };
 
 export const NIGHT: Palette = {
@@ -122,6 +128,8 @@ export const NIGHT: Palette = {
   note: "#6A4D00",
   shadow: "rgba(14,34,66,0.20)",
   scrim: "rgba(10,24,50,0.45)",
+  stageTop: "#1B2B49",
+  stageBottom: "#2C4572",
 };
 
 /** Night runs from 19:00 through 05:59 local time (inclusive hour bands). */

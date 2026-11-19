@@ -7,7 +7,7 @@ import { theme } from "../theme";
  * colours are used, so every stripe in the app (the rail logo, headings, …)
  * renders through here.
  */
-export function Stripe({ height = 3, width }: { height?: number; width: number }) {
+export function Stripe({ height = 3, width = "100%" }: { height?: number; width?: number | string }) {
   return (
     <View style={[styles.stripes, { width }]}>
       <View style={[styles.bar, { height, backgroundColor: theme.stripeYellow }]} />

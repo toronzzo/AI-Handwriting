@@ -1,10 +1,10 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MAIN_TABS, SETTINGS_ENTRY } from "./nav.ts";
+import { MAIN_TABS, SETTINGS_ENTRY, tabById } from "./nav.ts";
 
-test("the app renders three main tabs plus a settings entry", () => {
-  assert.deepEqual(MAIN_TABS.map((t) => t.id), ["chat", "learn", "memory"]);
+test("the app renders four main tabs plus a settings entry", () => {
+  assert.deepEqual(MAIN_TABS.map((t) => t.id), ["today", "chat", "learn", "memory"]);
   assert.equal(SETTINGS_ENTRY.id, "settings");
 });
 
@@ -18,6 +18,13 @@ test("every tab has a label, an icon and a friendly empty state", () => {
   assert.ok(SETTINGS_ENTRY.icon.length > 0);
 });
 
-test("chat stays the first tab so the app opens at home", () => {
-  assert.equal(MAIN_TABS[0].id, "chat");
+test("today stays the first tab so the app opens on the dashboard", () => {
+  assert.equal(MAIN_TABS[0].id, "today");
+});
+
+test("tabById finds each tab by its id", () => {
+  assert.equal(tabById("today").label, "Today");
+  assert.equal(tabById("chat").id, "chat");
+  assert.equal(tabById("learn").icon, "🎓");
+  assert.equal(tabById("memory").id, "memory");
 });

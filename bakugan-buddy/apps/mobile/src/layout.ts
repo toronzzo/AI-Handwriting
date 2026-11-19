@@ -28,5 +28,12 @@ export function listWidth(width: number, open: boolean): number {
   return open && room >= theme.size.list + theme.size.maxChat / 2 ? theme.size.list : 0;
 }
 
-/** Narrow: the 3 tabs and the gear share the bottom bar evenly. */
-export const BAR_ITEMS = 4;
+/** Narrow: the 4 tabs and the gear share the bottom bar evenly. */
+export const BAR_ITEMS = 5;
+
+/** Today dashboard columns: 3 from 1100px, 2 from 700px, 1 below. */
+export function todayColumns(width: number): 1 | 2 | 3 {
+  if (width >= 1100) return 3;
+  if (width >= 700) return 2;
+  return 1;
+}
