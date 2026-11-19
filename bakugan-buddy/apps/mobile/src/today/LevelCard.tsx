@@ -89,7 +89,7 @@ function XpChip({ area, xp, reduce }: { area: AreaId; xp: number; reduce: boolea
  * prefers reduced motion.
  */
 export function LevelCard() {
-  const { snapshot } = useRpg();
+  const { snapshot, message } = useRpg();
   const reduce = useReduceMotion();
 
   const prevLevel = useRef(snapshot.level);
@@ -186,7 +186,11 @@ export function LevelCard() {
           <Text style={styles.xpNumbers}>{snapshot.levelNeed - snapshot.levelInto} to next level</Text>
         </View>
 
-        {snapshot.isDemo ? (
+        {message ? (
+          <View style={styles.bubble}>
+            <Text style={styles.bubbleText}>{message}</Text>
+          </View>
+        ) : snapshot.isDemo ? (
           <View style={styles.bubble}>
             <Text style={styles.bubbleText}>This is demo data. Real progress comes from your log.</Text>
           </View>

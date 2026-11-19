@@ -4,6 +4,7 @@ import { todayColumns } from "../layout";
 import { theme } from "../theme";
 import { Stripe } from "../ui/Stripe";
 import { DailyXp } from "./DailyXp";
+import { FocusQuest } from "./FocusQuest";
 import { LevelCard } from "./LevelCard";
 import { QuestList } from "./QuestList";
 import { Radar } from "./Radar";
@@ -67,6 +68,7 @@ export function TodayScreen() {
           </View>
           <View style={styles.sideCol}>
             <QuestList />
+            <FocusQuest />
           </View>
         </View>
       ) : cols === 2 ? (
@@ -75,6 +77,7 @@ export function TodayScreen() {
           <View style={[styles.centerCol, styles.stacked]}>
             <Radar />
             <QuestList />
+            <FocusQuest />
           </View>
         </View>
       ) : (
@@ -82,6 +85,7 @@ export function TodayScreen() {
           {left}
           <Radar />
           <QuestList />
+          <FocusQuest />
         </View>
       )}
     </ScrollView>
@@ -143,7 +147,7 @@ const styles = StyleSheet.create({
     color: theme.text,
   },
   row: { flexDirection: "row", alignItems: "flex-start", gap: 20 },
-  sideCol: { width: "26%", minWidth: 280 },
+  sideCol: { width: "26%", minWidth: 280, gap: 20 },
   centerCol: { flex: 1, minWidth: 280 },
   leftCol: { gap: 20 },
   stacked: { gap: 20 },
