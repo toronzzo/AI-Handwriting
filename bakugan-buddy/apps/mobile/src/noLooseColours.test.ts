@@ -21,8 +21,13 @@ const ALLOWED = /3d-colour/;
  * colours all carry the `// 3d-colour` marker, so anything left without that
  * marker is a UI leak. PreyasHero's remaining hex values are 3D materials and
  * lights too, so it is covered by the same rule.
+ *
+ * PixelSprite (the optional 8-bit look) draws from an SVG, so it must read its
+ * colours only from src/bits/bitPalette.ts; it is listed here like every other
+ * UI file, and src/bits is NOT exempt.
  */
 const FILES = [
+  "src/bits/PixelSprite.tsx",
   "src/screens/ChatScreen.tsx",
   "src/screens/BenchmarkScreen.tsx",
   "src/screens/PreyasHero.tsx",
