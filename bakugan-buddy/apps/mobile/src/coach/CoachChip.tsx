@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { theme } from "../theme";
+import { ComputerPanel } from "../computer/ComputerPanel";
 import { CoachVoice } from "./CoachVoice";
 import { ExampleButton } from "./ExampleButton";
 import type { CoachSkill, CoachState } from "./useCoach";
@@ -70,6 +71,7 @@ export function CoachPanel({ state, skills, onClose, onStop, onHint }: PanelProp
           </Pressable>
         )}
         <CoachVoice />
+        <ComputerPanel />
         <ExampleButton />
         <Pressable style={styles.ghostButton} onPress={onClose} accessibilityLabel="Close">
           <Text style={styles.ghostText}>Close</Text>

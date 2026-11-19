@@ -6,6 +6,7 @@
 import { PREYAS_CHAT_PERSONA } from "../../../packages/alive/src/persona.ts";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { asMs, crisisLine, dayKey, readEvents, readSettings, summarizeDay } from "./events.mjs";
 import { createSendMemory, confirmLine, logParsedEvents, normalizeSentence, undoEvents } from "./eventsConfirm.mjs";
 import { parseEvents } from "./eventsParse.mjs";
@@ -15,6 +16,11 @@ import { exampleStats, listExamples, removeExample, saveLastPair, savePair } fro
 import { listVersions, loadPersona } from "./persona.mjs";
 import { allowPaid } from "../coach/spendGate.mjs";
 import { loadSkills } from "../coach/skills.mjs";
+import { createFakeAdapter } from "./computerAdapter.mjs";
+import { shotFilePath, validShotId } from "./computerLog.mjs";
+import { createMacAdapter } from "./computerMac.mjs";
+import { createLocalProposer, createPaidProposer } from "./computerPropose.mjs";
+import { createComputerSession } from "./computerSession.mjs";
 
 function sendJson(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -28,6 +34,39 @@ function answered(res, status, body) {
 }
 
 const sendMemory = createSendMemory();
+
+/**
+ * The one computer-control session for the whole brain process, built lazily
+ * on the first computer route. Tests inject their own session through
+ * _setComputerSessionForTests before any computer route runs. The feature is
+ * OFF until the user enables it, and no adapter call happens before that.
+ */
+let computerSession = null;
+let computerSessionForTests = null;
+
+function getComputerSession(ctx) {
+  if (computerSessionForTests) return computerSessionForTests;
+  if (!computerSession) {
+    const adapter =
+      process.platform === "darwin"
+        ? createMacAdapter({ axScriptPath: fileURLToPath(new URL("../../tools/ax-dump.js", import.meta.url)) })
+        : createFakeAdapter({});
+    computerSession = createComputerSession({
+      dataDir: ctx.dataDir,
+      adapter,
+      proposer: createLocalProposer({}),
+      escalateProposer: createPaidProposer({}),
+      review: reviewAction,
+      gate: allowPaid,
+    });
+  }
+  return computerSession;
+}
+
+/** Test-only injection; the proxy never calls this. */
+export function _setComputerSessionForTests(session) {
+  computerSessionForTests = session;
+}
 
 /** Reads a JSON body through the proxy helper; a thrown HttpError keeps its status. */
 async function readJsonOr(res, ctx) {
@@ -217,6 +256,78 @@ export async function handleOsRoute(ctx) {
       autoSend = false;
     }
     return answered(res, 200, { autoSend, normalized });
+  }
+
+  if (url.pathname === "/v1/computer/state" && req.method === "GET") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    return answered(res, 200, getComputerSession(ctx).state());
+  }
+
+  if (url.pathname === "/v1/computer/settings" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    // The only writer of the computer settings file. Enabling needs the Да/Нет card first.
+    const result = await getComputerSession(ctx).updateSettings(body);
+    if (!result.ok) return answered(res, 400, { error: result.error });
+    return answered(res, 200, result);
+  }
+
+  if (url.pathname === "/v1/computer/start" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    const result = await getComputerSession(ctx).start(body);
+    if (!result.ok) {
+      return answered(res, result.error === "computer_off" ? 403 : 400, { error: result.error });
+    }
+    return answered(res, 200, result);
+  }
+
+  if (url.pathname === "/v1/computer/step" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const result = await getComputerSession(ctx).step();
+    if (result.error === "computer_off") return answered(res, 403, { error: result.error });
+    return answered(res, 200, result);
+  }
+
+  if (url.pathname === "/v1/computer/decide" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    const result = await getComputerSession(ctx).decide(body);
+    if (result.error === "computer_off") return answered(res, 403, { error: result.error });
+    return answered(res, 200, result);
+  }
+
+  if (url.pathname === "/v1/computer/escalate" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    return answered(res, 200, await getComputerSession(ctx).escalatePreview(body));
+  }
+
+  if (url.pathname === "/v1/computer/escalate/confirm" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    return answered(res, 200, await getComputerSession(ctx).escalateConfirm(body));
+  }
+
+  if (url.pathname === "/v1/computer/stop" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    return answered(res, 200, await getComputerSession(ctx).stop());
+  }
+
+  const computerShot = url.pathname.match(/^\/v1\/computer\/shot\/([^/]+)$/);
+  if (computerShot && req.method === "GET") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    // Only ids that match the pattern, only from the shots folder.
+    const file = validShotId(computerShot[1]) ? shotFilePath(dataDir, computerShot[1]) : null;
+    if (!file || !fs.existsSync(file)) return answered(res, 404, { error: "not_found" });
+    res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
+    res.end(fs.readFileSync(file));
+    return true;
   }
 
   return false;
