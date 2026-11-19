@@ -4,6 +4,33 @@
  */
 import { theme } from "./theme.ts";
 
+/**
+ * The CSS the browser shell needs so the page is exactly the window tall.
+ *
+ * The shell row and the stage are flex children, and a flex item defaults to
+ * `min-height: auto`, which means "never be shorter than my content". A long
+ * Memory list therefore grew the page past the window and pushed Settings in
+ * the rail below the fold. `min-height: 0` lets each one shrink to its slot,
+ * and `overflow: hidden` clips whatever the inner ScrollView has not shown.
+ *
+ * The root element also carries a minimum of a full viewport (a plain
+ * `min-height: 100vh` on the page, or React Native Web's own styling of it).
+ * Since the root is a column flex parent, that minimum is also the floor for
+ * its only child, which would push the page to the content height again, so
+ * the root's minimum is lowered to the larger of its height and the window.
+ */
+export const WEB_SHELL_CSS = `#root { min-height: auto; }
+html, body, #root { height: 100%; overflow: hidden; }
+[data-root] { min-height: max(100%, 100vh); }
+[data-shell], [data-stage] { min-height: 0; overflow: hidden; }`;
+
+/** Root attribute that marks the shell row (see App.tsx). */
+export const SHELL_ATTR = "data-shell";
+/** Root attribute that marks the stage beside the rail (see App.tsx). */
+export const STAGE_ATTR = "data-stage";
+/** Root attribute that marks the wrapper for the browser floor rule. */
+export const ROOT_ATTR = "data-root";
+
 /** Width from which the Mac layout (icon rail + chats list) is used. */
 export const WIDE_MIN = 900;
 
