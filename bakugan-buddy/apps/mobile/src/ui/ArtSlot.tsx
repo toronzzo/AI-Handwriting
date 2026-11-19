@@ -176,7 +176,12 @@ export function ArtSlot({
   }
 
   return (
-    <View style={box}>
+    /**
+     * box-none without a picture: the gradient is decoration, so taps over it
+     * reach what is underneath (FIX-2, where Preyas is drawn on top of the
+     * empty hero slot). With a picture the box behaves as before.
+     */
+    <View style={box} pointerEvents={hasPicture ? "auto" : "box-none"}>
       {hasPicture ? (
         <Image source={{ uri: art.url }} style={styles.image} resizeMode="cover" alt="" />
       ) : (
@@ -194,6 +199,12 @@ export function ArtSlot({
       )}
 
       {editable ? (
+        /**
+         * FIX-2: the button layer is box-none and lifted with zIndex, so the
+         * "Change photo" button stays visible and tappable even when something
+         * (the pixel Preyas, or the 3D ball's transparent box) is drawn over
+         * the picture, while the empty areas keep letting taps through.
+         */
         <View style={styles.editor} pointerEvents="box-none">
           {error ? (
             <View style={styles.errorNote} pointerEvents="none">
@@ -231,7 +242,12 @@ const styles = StyleSheet.create({
   placeholder: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center" },
   band: { width: "100%" },
   icon: { position: "absolute", alignItems: "center", justifyContent: "center" },
-  /** The button sits in the bottom-left corner; nothing else moves for it. */
+  /**
+   * The button sits in the bottom-left corner; nothing else moves for it. The
+   * zIndex keeps it above Preyas when he is drawn over the empty placeholder
+   * (LevelCard, FIX-2); the layer itself is box-none so taps elsewhere pass
+   * through to him.
+   */
   editor: {
     position: "absolute",
     left: 8,
@@ -239,6 +255,7 @@ const styles = StyleSheet.create({
     right: 8,
     alignItems: "flex-start",
     gap: 6,
+    zIndex: 3,
   },
   button: {
     minHeight: 36,
@@ -250,6 +267,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.card,
     alignItems: "center",
     justifyContent: "center",
+    zIndex: 3,
   },
   buttonPressed: { opacity: 0.85 },
   buttonText: { color: theme.text, fontSize: 13, fontWeight: "600" },

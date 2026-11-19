@@ -3105,7 +3105,8 @@ export function ChatScreen({
             </View>
             <ScrollView contentContainerStyle={styles.profileBody}>
               <View style={styles.profileHero}>
-                <PreyasHeroSwitch talking={phase === "speaking"} short={false} fill />
+                {/* fitBox: the pixel Preyas is centred at an integer scale in this box (FIX-2). */}
+                <PreyasHeroSwitch talking={phase === "speaking"} short={false} fill fitBox />
               </View>
               <Text style={styles.kicker}>YOUR PARTNER</Text>
               <Text style={styles.bigName}>PREYAS</Text>

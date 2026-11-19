@@ -47,11 +47,17 @@ type Props = {
   fill?: boolean;
   /** Size of one art pixel, in device pixels. */
   scale?: number;
+  /**
+   * Pixel sprite only: size it to the box the caller gives it, centred, at an
+   * integer scale about 60% of its height (FIX-2). The 3D ball already fills
+   * its box, so this changes nothing for it.
+   */
+  fitBox?: boolean;
   accessibilityLabel?: string;
 };
 
 /** Preyas: the 3D ball when the switch is OFF, the pixel sprite when it is ON. */
-export function PreyasHeroSwitch({ talking, short, fill, scale = 5, accessibilityLabel }: Props) {
+export function PreyasHeroSwitch({ talking, short, fill, scale = 5, fitBox = false, accessibilityLabel }: Props) {
   const [bit] = useBitMode();
   const mood = usePreyasMood(bit);
   if (!bit) return <Preyas3D talking={talking} short={short} fill={fill} />;
@@ -61,6 +67,7 @@ export function PreyasHeroSwitch({ talking, short, fill, scale = 5, accessibilit
       sprite={PREYAS_SPRITE}
       frames={frames}
       scale={scale}
+      fit={fitBox}
       accessibilityLabel={accessibilityLabel ?? `Preyas, ${mood}`}
     />
   );
