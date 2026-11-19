@@ -89,6 +89,7 @@ import { capUsd, spentTodayUsd } from "./lib/coach/spendGate.mjs";
 import { handleOsRoute } from "./lib/os/routes.mjs";
 import { ART_WRITE_DIR, MAX_ART_BYTES, findArt, isSlot, saveArt } from "./lib/art.mjs";
 import { resolveSafePath } from "./lib/safeFs.mjs";
+import { createActivityHub } from "./lib/activity.mjs";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -205,6 +206,27 @@ async function readJson(req, limit = 64_000) {
   } catch {
     throw new HttpError(400, "bad json");
   }
+}
+
+/**
+ * Live Activity (slice 12): one hub for the whole process. The app polls
+ * GET /v1/activity; every tool route below emits a step into it. Exact key
+ * values the proxy knows about are hidden from every line.
+ */
+const activity = createActivityHub({
+  dataDir,
+  secrets: [
+    process.env.DEEPSEEK_API_KEY,
+    process.env.OPENAI_API_KEY,
+    process.env.LITELLM_MASTER_KEY,
+    process.env.PREYAS_PAIR_CODE,
+  ].filter(Boolean),
+});
+
+/** The run a request belongs to: its x-preyas-run header, else "adhoc". */
+function activityRun(req) {
+  const header = String(req.headers?.["x-preyas-run"] || "").trim();
+  return /^[A-Za-z0-9_.-]{1,80}$/.test(header) ? header : "adhoc";
 }
 
 /** Where a picture in flight is parked until saveArt takes it. One folder
@@ -475,7 +497,7 @@ async function startTask(title, chatId) {
     .join("\n");
   const steps = await planTask(llamaUrl, title, seed);
   const task = newTask(dataDir, { title, chatId, steps });
-  const run = launchTaskRun(dataDir, task, { llamaUrl });
+  const run = launchTaskRun(dataDir, task, { llamaUrl, onActivity: activity });
   if (run) void run.catch(() => {});
   return task;
 }
@@ -989,7 +1011,15 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: "nothing to save" }));
         return;
       }
-      const saved = saveToVault(title, text, { root: VAULT_DIR });
+      const saveStep = activity.begin(activityRun(req), "vault_save", title);
+      let saved;
+      try {
+        saved = saveToVault(title, text, { root: VAULT_DIR });
+      } catch (error) {
+        saveStep.fail(title);
+        throw error;
+      }
+      saveStep.done(title);
       res.writeHead(201, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, ...saved }));
       return;
@@ -1332,7 +1362,17 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: "q is required" }));
         return;
       }
-      const result = await searchWeb(query, { root: dataDir || undefined });
+      const step = activity.begin(activityRun(req), "search_web", query);
+      let result;
+      try {
+        result = await searchWeb(query, { root: dataDir || undefined });
+      } catch (error) {
+        // A failed search is a step that says so; the response body is unchanged.
+        step.fail(query);
+        throw error;
+      }
+      if (result.ok) step.done(query);
+      else step.fail(query);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -1415,7 +1455,7 @@ const server = http.createServer(async (req, res) => {
             task.status = "planned";
             task.updated = Date.now();
             saveTask(dataDir, task);
-            const run = launchTaskRun(dataDir, task, { llamaUrl });
+            const run = launchTaskRun(dataDir, task, { llamaUrl, onActivity: activity });
             if (!run) {
               sendJson(res, 409, { error: "task is already running", task: loadTask(dataDir, task.id) || task });
               return;
@@ -1742,6 +1782,52 @@ const server = http.createServer(async (req, res) => {
         body,
         model === "paid" ? "paid gateway is down" : "llama is down",
       );
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/activity") {
+      // Polling with a cursor: the app asks for everything newer than `after`.
+      const after = Number(url.searchParams.get("after") || 0);
+      const run = (url.searchParams.get("run") || "").trim().slice(0, 80);
+      const asked = Number(url.searchParams.get("limit") || 200);
+      const limit = Number.isFinite(asked) && asked > 0 ? Math.min(asked, 200) : 200;
+      const page = activity.since(Number.isFinite(after) ? after : 0, { runId: run, limit });
+      sendJson(res, 200, page);
+      return;
+    }
+
+    const frameRoute = url.pathname.match(/^\/v1\/activity\/frame\/([^/]+)$/);
+    if (req.method === "GET" && frameRoute) {
+      // The preview card's picture. Nothing writes frames yet: a future screen
+      // or browser skill drops <dataDir>/activity/frames/<id>.png and emits a
+      // `frame` event. Only a plain id, only inside that folder, at most 2 MB.
+      const id = decodeURIComponent(frameRoute[1]);
+      if (!/^[A-Za-z0-9_-]+$/.test(id) || !dataDir) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "no frame" }));
+        return;
+      }
+      const types = { png: "image/png", jpg: "image/jpeg" };
+      let found = null;
+      for (const ext of Object.keys(types)) {
+        let file;
+        try {
+          file = resolveSafePath(path.join("activity", "frames", `${id}.${ext}`), dataDir);
+        } catch {
+          continue;
+        }
+        if (fs.existsSync(file) && fs.statSync(file).isFile() && fs.statSync(file).size <= 2 * 1024 * 1024) {
+          found = { file, type: types[ext] };
+          break;
+        }
+      }
+      if (!found) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "no frame" }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": found.type, "Cache-Control": "no-cache" });
+      res.end(fs.readFileSync(found.file));
       return;
     }
 
