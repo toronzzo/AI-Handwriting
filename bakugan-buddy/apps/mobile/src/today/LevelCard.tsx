@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, StyleSheet, Text, View } from "react-native";
-import { paletteFor } from "../palette.ts";
+import { AccessibilityInfo, Animated, Image, StyleSheet, Text, View } from "react-native";
+import { useArt } from "../art/slots.ts";
+import { mixHex, paletteFor } from "../palette.ts";
 import { PreyasHero } from "../screens/PreyasHero";
 import { theme } from "../theme";
 import { Stripe } from "../ui/Stripe";
@@ -12,18 +13,6 @@ import { useRpg } from "./useRpg";
 /** The hero stage gradient, drawn as thin bands because the app has no
  *  gradient package: day #4F88CC → #9CC4EA, night #1B2B49 → #2C4572. */
 const STAGE_BANDS = 24;
-
-function mixHex(from: string, to: string, t: number): string {
-  const pa = parseInt(from.replace("#", ""), 16);
-  const pb = parseInt(to.replace("#", ""), 16);
-  const channel = (shift: number) => {
-    const a = (pa >> shift) & 255;
-    const b = (pb >> shift) & 255;
-    return Math.round(a + (b - a) * t);
-  };
-  const value = (channel(16) << 16) | (channel(8) << 8) | channel(0);
-  return `#${value.toString(16).padStart(6, "0")}`;
-}
 
 function stageBands(): string[] {
   const p = paletteFor(new Date());
@@ -87,10 +76,17 @@ function XpChip({ area, xp, reduce }: { area: AreaId; xp: number; reduce: boolea
  * the rank line. A level-up pops the LEVEL UP pill for 2 s; XP gains float
  * as "+N Area" chips for 1.8 s. Both animations are skipped when the user
  * prefers reduced motion.
+ *
+ * When the user has a `hero` picture in his own art folder it fills the stage
+ * and the ball moves to the bottom-right at half the width, with a soft drop
+ * shadow so it stays readable over the picture. Without the picture nothing
+ * changes.
  */
 export function LevelCard() {
   const { snapshot, message } = useRpg();
   const reduce = useReduceMotion();
+  const hero = useArt("hero");
+  const hasHero = hero.status === "ready" && Boolean(hero.url);
 
   const prevLevel = useRef(snapshot.level);
   const prevAreaXp = useRef<Record<AreaId, number>>({ ...snapshot.areaXp });
@@ -141,10 +137,20 @@ export function LevelCard() {
   return (
     <Panel style={styles.card} padding={0}>
       <View style={styles.stage}>
-        {stageBands().map((colour, index) => (
-          <View key={index} style={[styles.band, { backgroundColor: colour, height: `${100 / STAGE_BANDS}%` }]} />
-        ))}
-        <View style={styles.hero}>
+        {hasHero ? (
+          <Image
+            source={{ uri: hero.url }}
+            style={styles.heroImage}
+            resizeMode="cover"
+            accessibilityElementsHidden
+            alt=""
+          />
+        ) : (
+          stageBands().map((colour, index) => (
+            <View key={index} style={[styles.band, { backgroundColor: colour, height: `${100 / STAGE_BANDS}%` }]} />
+          ))
+        )}
+        <View style={hasHero ? styles.heroCorner : styles.hero}>
           <PreyasHero talking={false} short={false} fill />
         </View>
         {levelUp ? (
@@ -208,7 +214,20 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   band: { width: "100%" },
+  heroImage: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%" },
   hero: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  /** With a hero picture the ball keeps the bottom-right half of the stage. */
+  heroCorner: {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    width: "50%",
+    height: "100%",
+    shadowColor: theme.shadow,
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+  },
   levelUpPill: {
     position: "absolute",
     top: 14,
