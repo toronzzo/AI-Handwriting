@@ -1,8 +1,8 @@
 /**
- * The whole app's shape: three main tabs and one settings entry.
+ * The whole app's shape: four main tabs and one settings entry.
  * The shell (App.tsx) renders this list; the test keeps the shape honest.
  */
-export type MainTab = "chat" | "learn" | "memory";
+export type MainTab = "today" | "chat" | "learn" | "memory";
 export type Section = MainTab | "settings";
 
 export type TabDef = {
@@ -15,6 +15,13 @@ export type TabDef = {
 };
 
 export const MAIN_TABS: TabDef[] = [
+  {
+    id: "today",
+    label: "Today",
+    icon: "🏠",
+    empty: "Your day at a glance: level, quests and focus.",
+    example: "Try in chat: \"lunch plov 1500\" (logging comes soon)",
+  },
   {
     id: "chat",
     label: "Chat",
@@ -37,5 +44,10 @@ export const MAIN_TABS: TabDef[] = [
     example: "Try in chat: “remember my bike lock code is 4521”",
   },
 ];
+
+/** The tab by id; ids come from this list so the find never misses. */
+export function tabById(id: MainTab): TabDef {
+  return MAIN_TABS.find((tab) => tab.id === id)!;
+}
 
 export const SETTINGS_ENTRY = { id: "settings" as Section, label: "Settings", icon: "⚙️" };

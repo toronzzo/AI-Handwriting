@@ -49,7 +49,7 @@ import {
 } from "../../../../packages/alive/src/webSearch.ts";
 import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "../room/voice/VoiceSession";
 import { PreyasHero } from "./PreyasHero";
-import { MAIN_TABS, type Section } from "../nav";
+import { tabById, type Section } from "../nav";
 import { chatColumn, isPhone, isWide } from "../layout";
 import { theme } from "../theme";
 
@@ -2043,10 +2043,10 @@ export function ChatScreen({
       ) : section === "learn" ? (
         <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
           <Text style={styles.sectionTitle}>Learn</Text>
-          <Text style={styles.dim}>{MAIN_TABS[1]!.empty}</Text>
+          <Text style={styles.dim}>{tabById("learn").empty}</Text>
           {decks.length === 0 ? (
             <View style={styles.emptyTab}>
-              <Text style={styles.dim}>{MAIN_TABS[1]!.example}</Text>
+              <Text style={styles.dim}>{tabById("learn").example}</Text>
             </View>
           ) : null}
           {decks.map((deck) => (
@@ -2071,7 +2071,7 @@ export function ChatScreen({
         <View style={styles.fill}>
           <View style={styles.memHead}>
             <Text style={styles.sectionTitle}>Memory</Text>
-            <Text style={styles.dim}>{MAIN_TABS[2]!.empty}</Text>
+            <Text style={styles.dim}>{tabById("memory").empty}</Text>
             <TextInput
               style={styles.modalInput}
               value={notesQuery}
@@ -2103,7 +2103,7 @@ export function ChatScreen({
             {(memFilter === "all" || memFilter === "notes") ? (
               <>
                 {notesList.length === 0 && memFilter === "notes" ? (
-                  <Text style={styles.dim}>{MAIN_TABS[2]!.example}</Text>
+                  <Text style={styles.dim}>{tabById("memory").example}</Text>
                 ) : null}
                 {notesList.map((noteRow) => (
                   <View key={noteRow.id} style={styles.noteRow}>
@@ -2188,7 +2188,7 @@ export function ChatScreen({
               </>
             ) : null}
             {memFilter === "all" && notesList.length === 0 && reminders.length === 0 && inbox.length === 0 ? (
-              <Text style={styles.dim}>{MAIN_TABS[2]!.example}</Text>
+              <Text style={styles.dim}>{tabById("memory").example}</Text>
             ) : null}
           </ScrollView>
         </View>
@@ -2278,8 +2278,8 @@ export function ChatScreen({
               {messages.length === 0 && !live ? (
                 <View style={styles.emptyChat}>
                   <Text style={styles.emptyTitle}>Say hi to Preyas.</Text>
-                  <Text style={styles.emptyText}>{MAIN_TABS[0]!.empty}</Text>
-                  <Text style={styles.emptyText}>{MAIN_TABS[0]!.example}</Text>
+                  <Text style={styles.emptyText}>{tabById("chat").empty}</Text>
+                  <Text style={styles.emptyText}>{tabById("chat").example}</Text>
                 </View>
               ) : null}
               {messages.map((message, index) => {
