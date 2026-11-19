@@ -19,13 +19,16 @@ function columnsFor(width: number): number {
   return 1;
 }
 
-/** One path: its picture on top, the name, the percent and a thin bar. */
+/**
+ * One path: its picture on top, the name, the percent and a thin bar. The
+ * picture is editable, so the user can change it from here (slice 10b).
+ */
 function PathCard({ path }: { path: PathState }) {
   const pct = Math.max(0, Math.min(100, Math.round(path.pct)));
   return (
     <Panel padding={0} style={styles.card}>
       <View style={styles.picture}>
-        <ArtSlot slot={path.id} aspectRatio={16 / 10} radius={0} />
+        <ArtSlot slot={path.id} aspectRatio={16 / 10} radius={0} editable />
       </View>
       <View style={styles.body}>
         <View style={styles.nameRow}>
