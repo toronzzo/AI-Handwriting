@@ -31,7 +31,7 @@ import type { MicPhase } from "../../../../packages/alive/src/speech.ts";
 import { currentBrainUrl, readBrainHost } from "../room/brain/brainLink";
 import { brainFetch, isUnauthorized, pairWithCode } from "../room/brain/token";
 import { isValidPairingCode, microphoneAvailable, normalizePairingCode } from "../../../../packages/alive/src/phone.ts";
-import { isWhisperHallucination, resetSpeech } from "../../../../packages/alive/src/speech.ts";
+import { isWhisperHallucination, resetSpeech, transcribeClip } from "../../../../packages/alive/src/speech.ts";
 import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../../../packages/alive/src/notes.ts";
 import { looksLikeTask, taskStatusLine, type TaskRecord } from "../../../../packages/alive/src/tasks.ts";
 import { confirmFor } from "../../../../packages/alive/src/confirm.ts";
@@ -49,6 +49,24 @@ import {
   type SearchResult,
 } from "../../../../packages/alive/src/webSearch.ts";
 import { interruptTalk, queueSpokenLine, VoiceSession, type TalkSinks } from "../room/voice/VoiceSession";
+import { openTapEar, type TapEar } from "../room/voice/tapEar";
+import {
+  boxAfterTranscription,
+  cancelsRecording,
+  finishTranscribing,
+  formatClock,
+  HEARD_NOTHING_LABEL,
+  idleTapState,
+  MIC_DENIED_LABEL,
+  recordedMs,
+  shouldAutoSend,
+  shouldAutoStop,
+  startRecording,
+  startTranscribing,
+  TRANSCRIBING_LABEL,
+  type TapState,
+} from "../voice/tapToTalk";
+import { patchVoiceSettings, readVoiceSettings, type VoiceSettings } from "../voice/voiceSettings";
 import { PreyasHeroSwitch } from "../today/PreyasHeroSwitch";
 import { tabById, type Section } from "../nav";
 import { chatColumn, isPhone, isWide } from "../layout";
@@ -327,6 +345,15 @@ export function ChatScreen({
   const [briefingSettings, setBriefingSettings] = useState<{ briefingTime: string; briefingOn: boolean } | null>(null);
   const [briefingDismissed, setBriefingDismissed] = useState(false);
   const [profile, setProfile] = useState(false);
+  /** Tap-to-talk: the mic, its timer and the two voice switches (slice V1). */
+  const [tap, setTap] = useState<TapState>(idleTapState);
+  const [tapMs, setTapMs] = useState(0);
+  const [tapNote, setTapNote] = useState<"" | "heardNothing" | "denied">("");
+  const [voice, setVoice] = useState<VoiceSettings>(() => readVoiceSettings());
+  const tapEar = useRef<TapEar | null>(null);
+  const tapRef = useRef<TapState>(idleTapState());
+  const draftRef = useRef("");
+  const sendRefTap = useRef<(text: string) => Promise<void>>(async () => {});
   const { width, height } = useWindowDimensions();
   const wide = isWide(width);
   const micOk =
@@ -1503,6 +1530,40 @@ export function ChatScreen({
       clearInterval(timer);
     };
   }, [bag]);
+  // The recording timer, and the 60 second auto-stop (one place, no stray loops).
+  useEffect(() => {
+    if (tap.phase !== "recording") return;
+    const id = setInterval(() => {
+      const current = tapRef.current;
+      if (current.phase !== "recording") return;
+      const now = Date.now();
+      setTapMs(recordedMs(current, now));
+      if (shouldAutoStop(current, now)) void transcribeRecording();
+    }, 250);
+    return () => clearInterval(id);
+    // transcribeRecording reads refs, so it does not need to be a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tap.phase]);
+  // Esc throws a running recording away (never a finished transcription).
+  useEffect(() => {
+    if (tap.phase !== "recording" || typeof window === "undefined") return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      cancelTapping();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tap.phase]);
+  // Closing the page mid-recording releases the microphone.
+  useEffect(
+    () => () => {
+      tapEar.current?.cancel();
+      tapEar.current = null;
+    },
+    [],
+  );
   useEffect(() => {
     let cancel = false;
     const ping = async () => {
@@ -1844,6 +1905,92 @@ export function ChatScreen({
     setDraft("");
     void send(text, false);
   };
+  draftRef.current = draft;
+  sendRefTap.current = async (text: string) => {
+    await send(text, false);
+  };
+  /** Move the mic to a new phase, in the ref first so a fast second tap agrees. */
+  const setTapPhase = (next: TapState) => {
+    tapRef.current = next;
+    setTap(next);
+  };
+  /**
+   * Tap-to-talk, step 2: close the mic, send the wav to the brain's existing
+   * /v1/stt, and put the words in the message box (or send them when the
+   * "Send voice right away" switch is on). Silence leaves the box untouched.
+   */
+  async function transcribeRecording(): Promise<void> {
+    const ear = tapEar.current;
+    tapEar.current = null;
+    setTapPhase(startTranscribing());
+    setTapNote("");
+    const wav = ear ? await ear.stop() : null;
+    let heard = "";
+    if (wav) {
+      const result = await transcribeClip(bag.brainUrl, wav, 30_000);
+      const text = result?.text?.trim() ?? "";
+      heard = isWhisperHallucination(text) ? "" : text;
+    }
+    setTapPhase(finishTranscribing());
+    setTapMs(0);
+    if (!heard) {
+      setTapNote("heardNothing");
+      return;
+    }
+    if (shouldAutoSend(voice.autoSend, heard)) {
+      setDraft("");
+      void sendRefTap.current(heard);
+      return;
+    }
+    const next = boxAfterTranscription(heard, draftRef.current);
+    setDraft(next.text);
+  }
+  /** Tap-to-talk, step 1: interrupt Preyas, ask for the mic, start recording. */
+  async function startTapping(): Promise<void> {
+    if (tapRef.current.phase !== "idle") return;
+    // Preyas talking over his own user is the first thing to stop.
+    if (bag.playing) interruptTalk(bag);
+    setTapNote("");
+    const opened = await openTapEar();
+    if ("denied" in opened) {
+      setTapNote("denied");
+      return;
+    }
+    const started = await opened.ear.start();
+    if (!started) {
+      opened.ear.cancel();
+      setTapNote("denied");
+      return;
+    }
+    tapEar.current = opened.ear;
+    const now = Date.now();
+    setTapMs(0);
+    setTapPhase(startRecording(now));
+  }
+  /** Throw the recording away: nothing is transcribed and nothing is sent. */
+  function cancelTapping(): void {
+    if (!cancelsRecording(tapRef.current)) return;
+    tapEar.current?.cancel();
+    tapEar.current = null;
+    setTapPhase(idleTapState());
+    setTapMs(0);
+    setTapNote("");
+  }
+  /** The one mic button: start, stop, or (while waiting) nothing at all. */
+  function onMicTap(): void {
+    const phase = tapRef.current.phase;
+    if (phase === "recording") {
+      void transcribeRecording();
+      return;
+    }
+    if (phase === "idle") void startTapping();
+    // "transcribing": a second tap must not open the mic again.
+  }
+  function saveVoice(patch: Partial<VoiceSettings>): void {
+    const next = patchVoiceSettings(voice, patch);
+    setVoice(next);
+    setChip(patch.autoSend !== undefined ? (next.autoSend ? "Voice sends right away" : "Voice waits for Send") : next.handsFree ? "Hands-free listening on" : "Hands-free listening off");
+  }
   const button = paidButton({
     available: paid.available,
     offPeakOnly: paid.offPeakOnly,
@@ -2064,7 +2211,7 @@ export function ChatScreen({
   );
   return (
     <View style={styles.root}>
-      <VoiceSession sinks={bag} />
+      <VoiceSession sinks={bag} handsFreeOn={voice.handsFree} />
       <BackgroundPhotoCard />
       {section === "settings" ? (
         <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
@@ -2153,6 +2300,31 @@ export function ChatScreen({
               <Text style={styles.profileText}>Send it now</Text>
             </Pressable>
             <Text style={styles.dim}>To change the time, tell Preyas: "briefing at 7:30".</Text>
+          </View>
+          <View style={styles.phoneCard}>
+            <Text style={styles.kicker}>VOICE</Text>
+            <View style={styles.switchRow}>
+              <Text style={styles.dim}>Send voice right away</Text>
+              <Switch
+                value={voice.autoSend}
+                onValueChange={(on) => saveVoice({ autoSend: on })}
+                accessibilityLabel="Send voice right away"
+              />
+            </View>
+            <Text style={styles.dim}>
+              Text switches: tap the mic, speak, tap it again and press Send. With this on, what it hears is sent at once.
+            </Text>
+            <View style={styles.switchRow}>
+              <Text style={styles.dim}>Hands-free listening</Text>
+              <Switch
+                value={voice.handsFree}
+                onValueChange={(on) => saveVoice({ handsFree: on })}
+                accessibilityLabel="Hands-free listening"
+              />
+            </View>
+            <Text style={styles.dim}>
+              Always listening while the page is open. Off by default; the tap works either way and the two never record together.
+            </Text>
           </View>
           <View style={styles.phoneCard}>
             <Text style={styles.kicker}>HARDER QUESTIONS</Text>
@@ -2636,16 +2808,40 @@ export function ChatScreen({
                 onSubmitEditing={submitDraft}
               />
               {micOk ? (
-                <Pressable
-                  style={styles.composerBtn}
-                  onPress={() => {
-                    if (bag.playing) interruptTalk(bag);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Microphone ${phase}`}
-                >
-                  <Text style={styles.composerBtnText}>{MIC_ICON[phase] ?? "🎤"}</Text>
-                </Pressable>
+                tap.phase === "recording" ? (
+                  <>
+                    <Pressable
+                      style={styles.tapMicOn}
+                      onPress={onMicTap}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Stop recording, ${formatClock(tapMs)} so far`}
+                    >
+                      <Text style={styles.tapMicOnText}>●</Text>
+                    </Pressable>
+                    <Text style={styles.tapTimer}>{formatClock(tapMs)}</Text>
+                    <Pressable
+                      style={styles.tapCancel}
+                      onPress={cancelTapping}
+                      accessibilityRole="button"
+                      accessibilityLabel="Cancel recording"
+                    >
+                      <Text style={styles.tapCancelText}>✕</Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <Pressable
+                    style={[styles.composerBtn, tap.phase === "transcribing" && styles.composerBtnBusy]}
+                    onPress={onMicTap}
+                    disabled={tap.phase === "transcribing"}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: tap.phase === "transcribing" }}
+                    accessibilityLabel={
+                      tap.phase === "transcribing" ? "Turning speech into text" : `Microphone ${phase}`
+                    }
+                  >
+                    <Text style={styles.composerBtnText}>{tap.phase === "transcribing" ? "…" : MIC_ICON[phase] ?? "🎤"}</Text>
+                  </Pressable>
+                )
               ) : null}
               <Pressable
                 style={[styles.thinkBtn, thinkForced && styles.thinkBtnOn]}
@@ -2667,6 +2863,15 @@ export function ChatScreen({
                 <HarnessLauncher chatId={activeChatId} onOpenSettings={() => onSection?.("settings")} />
               ) : null}
             </View>
+            {tap.phase === "transcribing" ? (
+              <Text style={styles.voiceHint}>{TRANSCRIBING_LABEL}</Text>
+            ) : tap.phase === "recording" ? (
+              <Text style={styles.voiceHint}>Listening… tap ● to stop, ✕ or Esc to cancel</Text>
+            ) : tapNote === "heardNothing" ? (
+              <Text style={styles.voiceHint}>{HEARD_NOTHING_LABEL}</Text>
+            ) : tapNote === "denied" ? (
+              <Text style={styles.voiceHint}>{MIC_DENIED_LABEL}</Text>
+            ) : null}
             {!micOk ? <Text style={styles.voiceHint}>Voice works on the Mac; type here</Text> : null}
             <View style={styles.chips}>
               {QUICK.map((chip) => (
@@ -3156,6 +3361,40 @@ const styles = StyleSheet.create({
   /** Mic and attach: 36x36 ghost squares. */
   composerBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, borderColor: theme.lineStrong, alignItems: "center", justifyContent: "center" },
   composerBtnText: { color: theme.text, fontSize: theme.type.title, lineHeight: theme.type.title + 4 },
+  /** While waiting for the words the mic is quiet, not disabled-looking. */
+  composerBtnBusy: { backgroundColor: theme.accentSoft, borderColor: theme.accentLine },
+  /** Recording: accent fill with an onAccent dot, never red (slice V1). */
+  tapMicOn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.accent,
+    backgroundColor: theme.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tapMicOnText: { color: theme.onAccent, fontSize: theme.type.body, lineHeight: theme.type.body + 4 },
+  /** The mm:ss counter beside the dot, in the display face. */
+  tapTimer: {
+    fontFamily: theme.font.display,
+    color: theme.accentText,
+    fontSize: theme.type.display.timer,
+    fontWeight: "700",
+    minWidth: 38,
+    textAlign: "center",
+  },
+  /** ✕ throws the recording away; it sits where the send button does. */
+  tapCancel: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.lineStrong,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tapCancelText: { color: theme.text, fontSize: theme.type.body, lineHeight: theme.type.body + 4 },
   thinkBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, borderColor: theme.lineStrong, alignItems: "center", justifyContent: "center" },
   thinkBtnOn: { backgroundColor: theme.accentSoft, borderColor: aqua },
   thinkBtnText: { color: theme.text, fontSize: theme.type.body, lineHeight: theme.type.body + 4 },

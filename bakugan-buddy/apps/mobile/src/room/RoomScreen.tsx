@@ -30,6 +30,7 @@ import {
 } from "../../../../packages/alive/src/index.ts";
 import { fetchRemembered, findBrain, normalizeBrainUrl, probeBrain, readBrainHost, sendMoment, writeBrainHost } from "./brain/brainLink";
 import { queueSpokenLine, VoiceSession } from "./voice/VoiceSession";
+import { readVoiceSettings } from "../voice/voiceSettings";
 import { adviseOnDevice, onDeviceBrainEnabled } from "bakugan-on-device-brain";
 import { Canvas, useFrame, useThree } from "./fiber";
 import { loadPreyasBall } from "./loadPreyas";
@@ -871,7 +872,7 @@ export function RoomScreen() {
         <Canvas style={styles.canvas} dpr={[1, 1.5]} camera={CAMERA} gl={GL_PROPS}>
           <World sinks={bag} />
         </Canvas>
-        <VoiceSession sinks={bag} />
+        <VoiceSession sinks={bag} handsFreeOn={readVoiceSettings().handsFree} />
         <Pressable
           accessibilityLabel="debug"
           delayLongPress={700}
