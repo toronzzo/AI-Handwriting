@@ -7,52 +7,106 @@ import { Panel } from "../ui/Panel";
 import { usePalette } from "../usePalette";
 import { useRpg } from "./useRpg";
 
+/** A small outline button with a 36 px tap area, palette tokens only. */
+function SmallButton({
+  label,
+  onPress,
+  children,
+}: {
+  label: string;
+  onPress: () => void;
+  children: string;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onHoverIn={() => setHovered(true)}
+      onHoverOut={() => setHovered(false)}
+      onPress={onPress}
+      style={[styles.smallButton, hovered && styles.smallButtonHover]}
+    >
+      <Text style={styles.smallButtonText}>{children}</Text>
+    </Pressable>
+  );
+}
+
 /** One quest row: check box, title, progress hint and the +5 XP chip. */
-function QuestRow({ quest, onToggle }: { quest: QuestState; onToggle: () => void }) {
+function QuestRow({
+  quest,
+  onToggle,
+  onAddWater,
+  onAddMood,
+}: {
+  quest: QuestState;
+  onToggle: () => void;
+  onAddWater: () => void;
+  onAddMood: (score: number) => void;
+}) {
   const [hovered, setHovered] = useState(false);
   const palette = usePalette();
   const areaName = AREAS.find((row) => row.id === quest.area)?.name ?? quest.area;
 
   return (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: quest.done }}
-      accessibilityLabel={quest.title}
-      onHoverIn={() => setHovered(true)}
-      onHoverOut={() => setHovered(false)}
-      onPress={onToggle}
-      style={[styles.row, hovered && styles.rowHover]}
-    >
-      <View style={[styles.box, quest.done && styles.boxDone]}>
-        {quest.done ? (
-          <Svg width={20} height={20} viewBox="0 0 20 20" accessibilityElementsHidden>
-            <Path
-              d="M4.5 10.6 L8.2 14.2 L15.6 5.8"
-              stroke={palette.onAccent}
-              strokeWidth={2.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-          </Svg>
-        ) : null}
-      </View>
-      <Text style={[styles.title, quest.done && styles.titleDone]} numberOfLines={1}>
-        {quest.title}
-      </Text>
-      {quest.sub ? <Text style={styles.sub}>{quest.sub}</Text> : null}
-      <View style={styles.chip}>
-        <Text style={styles.chipText}>
-          +{quest.bonusXp} {areaName}
+    <View>
+      <Pressable
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: quest.done }}
+        accessibilityLabel={quest.title}
+        onHoverIn={() => setHovered(true)}
+        onHoverOut={() => setHovered(false)}
+        onPress={onToggle}
+        style={[styles.row, hovered && styles.rowHover]}
+      >
+        <View style={[styles.box, quest.done && styles.boxDone]}>
+          {quest.done ? (
+            <Svg width={20} height={20} viewBox="0 0 20 20" accessibilityElementsHidden>
+              <Path
+                d="M4.5 10.6 L8.2 14.2 L15.6 5.8"
+                stroke={palette.onAccent}
+                strokeWidth={2.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+            </Svg>
+          ) : null}
+        </View>
+        <Text style={[styles.title, quest.done && styles.titleDone]} numberOfLines={1}>
+          {quest.title}
         </Text>
-      </View>
-    </Pressable>
+        {quest.sub ? <Text style={styles.sub}>{quest.sub}</Text> : null}
+        <View style={styles.chip}>
+          <Text style={styles.chipText}>
+            +{quest.bonusXp} {areaName}
+          </Text>
+        </View>
+      </Pressable>
+      {quest.id === "water" ? (
+        <View style={styles.questActions}>
+          <SmallButton label="Add one glass of water" onPress={onAddWater}>
+            +1 glass
+          </SmallButton>
+        </View>
+      ) : null}
+      {quest.id === "mood" ? (
+        <View style={styles.questActions}>
+          {[1, 2, 3, 4, 5].map((score) => (
+            <SmallButton key={score} label={`Mood ${score} of 5`} onPress={() => onAddMood(score)}>
+              {String(score)}
+            </SmallButton>
+          ))}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
 /**
  * The daily quests (right column of the Today screen). Tapping a quest
- * toggles it in the source, which moves the XP numbers and the radar.
+ * toggles it in the source, which moves the XP numbers and the radar. The
+ * water and mood quests also have small buttons that log real events.
  */
 export function QuestList() {
   const { snapshot, source } = useRpg();
@@ -72,6 +126,8 @@ export function QuestList() {
             key={quest.id}
             quest={quest}
             onToggle={() => source.toggleQuest?.(quest.id)}
+            onAddWater={() => source.addWater?.(1)}
+            onAddMood={(score) => source.addMood?.(score)}
           />
         ))}
       </View>
@@ -149,5 +205,30 @@ const styles = StyleSheet.create({
     color: theme.dim,
     fontSize: 12,
     fontWeight: "600",
+  },
+  questActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginLeft: 38,
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  smallButton: {
+    minHeight: 36,
+    minWidth: 36,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.lineStrong,
+  },
+  smallButtonHover: { backgroundColor: theme.cardSoft },
+  smallButtonText: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
   },
 });

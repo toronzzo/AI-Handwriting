@@ -34,7 +34,7 @@
     "web": "expo start --web",
     "check:ball": "node --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-ball-clips.mts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/nav.test.ts src/layout.test.ts src/palette.test.ts src/noLooseColours.test.ts src/productRules.test.ts src/today/layout.test.ts src/rpg/rpgMath.test.ts src/rpg/mockSource.test.ts src/today/radarGeometry.test.ts src/today/focusTimer.test.ts"
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/nav.test.ts src/layout.test.ts src/palette.test.ts src/noLooseColours.test.ts src/productRules.test.ts src/today/layout.test.ts src/rpg/rpgMath.test.ts src/rpg/mockSource.test.ts src/rpg/logSource.test.ts src/today/radarGeometry.test.ts src/today/focusTimer.test.ts"
   },
   "private": true
 }
