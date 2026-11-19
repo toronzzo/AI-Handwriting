@@ -11,6 +11,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   type ScrollViewInstance,
+  type ViewStyle,
 } from "react-native";
 import {
   chooseRoute,
@@ -2251,13 +2252,13 @@ export function ChatScreen({
                 ))}
                 {hasFlashcardsDue(briefing) ? (
                   <Pressable
-                    style={styles.docBtn}
+                    style={styles.studyNow}
                     onPress={() => {
                       onSection?.("learn");
                       void refreshDecks();
                     }}
                   >
-                    <Text style={styles.docBtnText}>Study now</Text>
+                    <Text style={styles.studyNowText}>Study now</Text>
                   </Pressable>
                 ) : null}
               </View>
@@ -2334,7 +2335,7 @@ export function ChatScreen({
                           </View>
                         </View>
                       ) : (
-                        <Text style={styles.bubbleText}>{message.content}</Text>
+                        <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{message.content}</Text>
                       )}
                       {!mine && message.thinking ? (
                         <Pressable onPress={() => setOpenThink((current) => ({ ...current, [index]: !current[index] }))}>
@@ -2460,6 +2461,7 @@ export function ChatScreen({
               <Pressable
                 style={styles.send}
                 onPress={submitDraft}
+                accessibilityLabel="Send"
               >
                 <Text style={styles.sendText}>➤</Text>
               </Pressable>
@@ -2719,7 +2721,16 @@ export function ChatScreen({
     </View>
   );
 }
+/** Accent fill (bars, the send button, badges); text that needs contrast uses accentText. */
 const aqua = theme.accent;
+/** Paper panel: card, hairline accentLine edge, 16px radius, soft drop shadow. */
+const panel: ViewStyle = { backgroundColor: theme.card, borderWidth: 1, borderColor: theme.accentLine, borderRadius: 16, shadowColor: theme.shadow, shadowOpacity: 1, shadowRadius: 8, shadowOffset: { width: 0, height: 8 }, elevation: 3 };
+/** Secondary paper surface: no shadow, same hairline edge. */
+const paperSoft: ViewStyle = { backgroundColor: theme.cardSoft, borderWidth: 1, borderColor: theme.accentLine };
+/** Ghost button: hairline lineStrong edge, 10px radius, a 36px-tall hit area. */
+const ghost: ViewStyle = { borderWidth: 1, borderColor: theme.lineStrong, borderRadius: 10, minHeight: 36, minWidth: 36, alignItems: "center", justifyContent: "center" };
+/** Primary button: accent fill with onAccent text, 10px radius. */
+const primary: ViewStyle = { backgroundColor: theme.accent, borderRadius: 10, minHeight: 36, alignItems: "center", justifyContent: "center" };
 const styles = StyleSheet.create({
   root: {
     flex: 1,
@@ -2735,85 +2746,84 @@ const styles = StyleSheet.create({
   // Phone: one column with 16px side padding. Mac: chats list + the thread.
   split: { flex: 1, flexDirection: "row", padding: theme.space.md, gap: theme.space.md, minWidth: 0, maxWidth: "100%" },
   stack: { flexDirection: "column", padding: 0, gap: 0 },
-  kicker: { color: theme.dim, fontSize: theme.type.label, letterSpacing: 1.6, marginTop: theme.space.sm },
-  bigName: { color: theme.text, fontSize: theme.type.hero * 1.5, fontWeight: "800", letterSpacing: 1 },
+  kicker: { color: theme.accentText, fontSize: theme.type.label, fontWeight: "700", letterSpacing: 1.3, textTransform: "uppercase", marginTop: theme.space.sm },
+  bigName: { fontFamily: theme.font.display, color: theme.text, fontSize: theme.type.hero * 1.5, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.48 },
   tagline: { color: theme.dim, fontSize: theme.type.body },
   pills: { flexDirection: "row", flexWrap: "wrap", gap: theme.space.sm, marginTop: theme.space.xs },
   pill: { color: theme.text, borderWidth: 1, borderColor: theme.accentLine, borderRadius: theme.radius.md, paddingHorizontal: theme.space.sm + 2, paddingVertical: theme.space.xs + 2, fontSize: theme.type.caption },
-  bondCard: { marginTop: theme.space.sm, padding: theme.space.md - 4, borderRadius: theme.radius.md, borderWidth: 1, borderColor: theme.accentLine, backgroundColor: theme.cardSoft },
+  bondCard: { marginTop: theme.space.sm, padding: theme.space.md - 4, borderRadius: 14, ...paperSoft },
   bondHead: { flexDirection: "row", justifyContent: "space-between" },
   bondTitle: { color: theme.text, fontWeight: "700", fontSize: theme.type.body },
-  bondPct: { color: aqua, fontWeight: "700", fontSize: theme.type.body },
+  bondPct: { color: theme.accentText, fontWeight: "700", fontSize: theme.type.body },
   track: { height: theme.space.sm, borderRadius: theme.space.xs, backgroundColor: theme.track, marginTop: theme.space.sm, overflow: "hidden" },
+  // The Bond bar is a plain accent fill: the stripes never go here.
   fillBar: { height: theme.space.sm, backgroundColor: aqua },
   caption: { color: theme.dim, fontSize: theme.type.caption, marginTop: theme.space.xs + 2 },
-  profileBtn: { alignSelf: "flex-start", borderWidth: 1, borderColor: theme.accentDim, borderRadius: theme.radius.sm, paddingHorizontal: theme.space.md - 4, paddingVertical: theme.space.sm },
-  profileText: { color: aqua, fontWeight: "700", fontSize: theme.type.caption },
-  profileBtnHead: {
-    borderWidth: 1,
-    borderColor: theme.accentLine,
-    borderRadius: theme.radius.sm,
-    paddingHorizontal: theme.space.sm + 2,
-    paddingVertical: theme.space.xs + 2,
-  },
-  chatCard: { flex: 1, flexDirection: "row", borderWidth: 1, borderColor: theme.accentLine, borderRadius: 16, backgroundColor: theme.card, padding: theme.space.sm, minHeight: theme.space.xl * 10, minWidth: 0, maxWidth: "100%", shadowColor: theme.shadow, shadowOpacity: 1, shadowRadius: 8, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
+  /** Ghost button with a short label (Refresh, Close and the like). */
+  profileBtn: { alignSelf: "flex-start", ...ghost, paddingHorizontal: theme.space.md },
+  profileText: { color: theme.text, fontSize: theme.type.caption, fontWeight: "600", paddingVertical: theme.space.xs },
+  /** The header ghost buttons: View profile and the gear. */
+  profileBtnHead: { ...ghost, paddingHorizontal: theme.space.sm + 2 },
+  chatCard: { flex: 1, flexDirection: "row", ...panel, padding: theme.space.sm, minHeight: theme.space.xl * 10, minWidth: 0, maxWidth: "100%" },
   thread: { flex: 1, minWidth: 0 },
   /** The reading column: messages, briefing and composer, centred on a Mac. */
   column: { flex: 1, alignSelf: "center", minWidth: 0, paddingHorizontal: theme.space.md },
-  sidebar: { width: theme.size.list, borderRadius: 16, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.accentLine, padding: theme.space.sm, marginRight: theme.space.sm, shadowColor: theme.shadow, shadowOpacity: 1, shadowRadius: 8, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
+  /** The chats list: secondary paper (cardSoft) under the same panel edge. */
+  sidebar: { width: theme.size.list, ...panel, backgroundColor: theme.cardSoft, padding: theme.space.sm, marginRight: theme.space.sm },
   sidebarInner: { flex: 1, gap: 8 },
   sidebarHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sidebarTitle: { color: theme.dim, fontSize: 11, letterSpacing: 1.6 },
-  sidebarClose: { color: theme.dim, fontSize: 16, paddingHorizontal: 4 },
-  newChat: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: 12, paddingVertical: 8, alignItems: "center" },
-  newChatText: { color: aqua, fontSize: 13, fontWeight: "700" },
+  sidebarTitle: { color: theme.faint, fontSize: theme.type.label, fontWeight: "700", letterSpacing: 1.6 },
+  sidebarClose: { color: theme.dim, fontSize: 16, minWidth: 36, minHeight: 36, textAlign: "center", textAlignVertical: "center" },
+  newChat: { ...ghost, minHeight: 44, paddingHorizontal: theme.space.sm + 2 },
+  newChatText: { color: theme.text, fontSize: 13, fontWeight: "600" },
   chatList: { flex: 1 },
   chatListInner: { gap: theme.space.xs, paddingBottom: theme.space.sm },
   listHide: { borderTopWidth: 1, borderTopColor: theme.accentLine, paddingTop: theme.space.sm, alignItems: "flex-start" },
-  listHideText: { color: theme.dim, fontSize: theme.type.caption, fontWeight: "600" },
-  chatRow: { flexDirection: "row", alignItems: "center", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 6, gap: 2 },
-  chatRowOn: { backgroundColor: theme.accentSoft },
-  chatRowMain: { flex: 1, minWidth: 0 },
-  chatRowTitle: { color: theme.text, fontSize: 13, fontWeight: "600" },
-  chatRowDate: { color: theme.faint, fontSize: 11, marginTop: 1 },
-  chatRowIcon: { paddingHorizontal: 3 },
+  listHideText: { color: theme.dim, fontSize: theme.type.caption, fontWeight: "600", minHeight: 36, textAlignVertical: "center" },
+  // 3px accent bar on the left of the active row; the left border only shows then.
+  chatRow: { flexDirection: "row", alignItems: "center", borderLeftWidth: 3, borderLeftColor: "transparent", borderRadius: 10, paddingHorizontal: 6, paddingVertical: 4, gap: 2, minHeight: 44 },
+  chatRowOn: { backgroundColor: theme.accentSoft, borderLeftColor: aqua },
+  chatRowMain: { flex: 1, minWidth: 0, justifyContent: "center" },
+  chatRowTitle: { color: theme.text, fontSize: 14, fontWeight: "500" },
+  chatRowDate: { color: theme.dim, fontSize: 12, marginTop: 1 },
+  chatRowIcon: { minWidth: 36, minHeight: 36, alignItems: "center", justifyContent: "center" },
   chatRowIconText: { color: theme.dim, fontSize: 13 },
   chatEmpty: { color: theme.faint, fontSize: 12 },
   emptyChat: { alignItems: "center", paddingVertical: 36, paddingHorizontal: 20, gap: 6 },
   emptyTitle: { color: theme.text, fontSize: 16, fontWeight: "800" },
   emptyText: { color: theme.dim, fontSize: 13, lineHeight: 19, textAlign: "center" },
-  chipSaved: { alignSelf: "center", borderWidth: 1, borderColor: theme.accentLine, backgroundColor: theme.accentSoft, borderRadius: theme.radius.md, paddingHorizontal: theme.space.sm + 2, paddingVertical: theme.space.xs, marginBottom: theme.space.xs },
+  chipSaved: { alignSelf: "center", ...paperSoft, borderRadius: theme.radius.md, paddingHorizontal: theme.space.sm + 2, paddingVertical: theme.space.xs, marginBottom: theme.space.xs },
   chipSavedText: { color: theme.accentText, fontSize: 12, fontWeight: "700" },
   noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, borderWidth: 1, borderColor: theme.accentLine, borderRadius: 10, padding: 8 },
   noteEditing: { flex: 1, gap: 6 },
   kindRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  kindChip: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3 },
+  kindChip: { borderWidth: 1, borderColor: theme.lineStrong, borderRadius: 10, minHeight: 36, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
   kindChipOn: { backgroundColor: theme.accentSoft },
-  kindText: { color: theme.text, fontSize: 11 },
+  kindText: { color: theme.text, fontSize: theme.type.label },
   noteActions: { flexDirection: "row", justifyContent: "flex-end", gap: 14 },
   noteMain: { flex: 1, minWidth: 0 },
-  noteKind: { color: aqua, fontSize: 10, letterSpacing: 1 },
+  noteKind: { color: theme.accentText, fontSize: 10, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase" },
   noteText: { color: theme.text, fontSize: 13, lineHeight: 18, marginTop: 2 },
-  taskCard: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: 12, backgroundColor: theme.cardSoft, padding: 10, gap: 6, marginTop: 6 },
-  taskStatus: { color: aqua, fontSize: 12, fontWeight: "700" },
+  taskCard: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: 14, backgroundColor: theme.cardSoft, padding: 10, gap: 6, marginTop: 6 },
+  taskStatus: { color: theme.accentText, fontSize: 12, fontWeight: "700" },
   stepRow: { gap: 2 },
   stepTitle: { color: theme.text, fontSize: 13 },
   stepResult: { color: theme.dim, fontSize: 12, lineHeight: 17, marginLeft: 14 },
-  resumeBtn: { alignSelf: "flex-start", borderWidth: 1, borderColor: theme.accentLine, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, marginTop: 2 },
-  resumeText: { color: aqua, fontSize: 12, fontWeight: "700" },
-  drawerBtn: { paddingHorizontal: 4, paddingVertical: 2 },
-  drawerBtnText: { color: aqua, fontSize: 20 },
+  resumeBtn: { alignSelf: "flex-start", ...ghost, paddingHorizontal: 10, marginTop: 2 },
+  resumeText: { color: theme.text, fontSize: 12, fontWeight: "600", paddingVertical: theme.space.xs },
+  drawerBtn: { minWidth: 36, minHeight: 36, alignItems: "center", justifyContent: "center" },
+  drawerBtnText: { color: theme.dim, fontSize: 20 },
   drawerWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 20, flexDirection: "row" },
   scrim: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: theme.scrim },
   drawer: { width: 260, maxWidth: "82%", backgroundColor: theme.card, borderRightWidth: 1, borderRightColor: theme.accentLine, padding: 12, zIndex: 21 },
   modalWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 30, backgroundColor: theme.scrim, alignItems: "center", justifyContent: "center", padding: 20 },
-  modal: { width: "100%", maxWidth: 360, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.accentLine, borderRadius: 16, padding: 16, gap: 10 },
+  modal: { width: "100%", maxWidth: 360, ...panel, padding: 16, gap: 10 },
   modalTitle: { color: theme.text, fontSize: 16, fontWeight: "800" },
   modalBody: { color: theme.dim, fontSize: 13, lineHeight: 19 },
-  modalInput: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: 10, color: theme.text, paddingHorizontal: 10, paddingVertical: 8, fontSize: 16 },
+  modalInput: { borderWidth: 1, borderColor: theme.lineStrong, borderRadius: 12, color: theme.text, paddingHorizontal: 10, paddingVertical: 8, fontSize: 16, minHeight: 44 },
   modalRow: { flexDirection: "row", justifyContent: "flex-end", gap: 16, marginTop: 4 },
-  modalCancel: { color: theme.dim, fontWeight: "700" },
-  modalOk: { color: aqua, fontWeight: "800" },
+  modalCancel: { color: theme.text, fontWeight: "700", minHeight: 36, minWidth: 36, textAlign: "center", textAlignVertical: "center" },
+  modalOk: { color: theme.accentText, fontWeight: "800", minHeight: 36, minWidth: 36, textAlign: "center", textAlignVertical: "center" },
   modalDanger: { color: theme.danger },
   chatHead: {
     flexDirection: "row",
@@ -2826,14 +2836,15 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   chatHeadText: { flex: 1, minWidth: 0 },
-  chatName: { color: theme.text, fontWeight: "800", fontSize: theme.type.body + 1 },
-  subtitle: { color: theme.dim, fontSize: theme.type.caption },
+  /** Oswald display, the only place the name is set in the heading face. */
+  chatName: { fontFamily: theme.font.display, color: theme.text, fontWeight: "700", fontSize: 22, textTransform: "uppercase", letterSpacing: 0.44 },
+  subtitle: { color: theme.dim, fontSize: 13 },
   onlineRow: { flexDirection: "row", alignItems: "center", gap: theme.space.xs },
   onlineCompact: { display: "none" },
   dot: { width: theme.space.sm, height: theme.space.sm, borderRadius: theme.space.xs },
   dotOn: { backgroundColor: theme.good },
   dotOff: { backgroundColor: theme.off },
-  online: { color: theme.text, fontSize: theme.type.caption },
+  online: { color: theme.dim, fontSize: theme.type.caption },
   /** The 40px ball in the header: a ring, no 3D canvas. */
   ball: {
     width: theme.size.avatar,
@@ -2852,98 +2863,88 @@ const styles = StyleSheet.create({
   log: { flex: 1, width: "100%" },
   logWrap: { flex: 1, position: "relative" },
   jumpWrap: { position: "absolute", left: 0, right: 0, bottom: 6, alignItems: "center" },
-  jump: {
-    borderWidth: 1,
-    borderColor: theme.accentLine,
-    backgroundColor: theme.card,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  jumpText: { color: aqua, fontSize: 12, fontWeight: "700" },
+  jump: { ...panel, borderRadius: 16, minHeight: 36, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 6 },
+  jumpText: { color: theme.accentText, fontSize: 12, fontWeight: "700" },
   logInner: { gap: 10, paddingVertical: 8, width: "100%" },
   // A bubble is capped by the screen, never by a pixel width: 420px overflowed a
   // 390px phone. flexShrink lets the row give way instead of pushing sideways.
   bubbleWrap: { flexDirection: "row", alignItems: "flex-end", gap: theme.space.sm, maxWidth: "75%", flexShrink: 1 },
   bubbleLeft: { alignSelf: "flex-start" },
   bubbleRight: { alignSelf: "flex-end" },
-  bubble: { borderRadius: theme.radius.md, paddingHorizontal: theme.type.body, paddingVertical: theme.space.sm + 2, maxWidth: "100%", flexShrink: 1 },
-  bubbleHis: { backgroundColor: theme.card, borderWidth: 1, borderColor: theme.accentLine },
-  bubbleMine: { backgroundColor: theme.accentSoft, borderWidth: 1, borderColor: theme.accentLine },
-  bubbleWho: { color: aqua, fontSize: theme.type.label, fontWeight: "700", marginBottom: theme.space.xs / 2 },
-  bubbleText: { color: theme.text, fontSize: theme.type.input - 1, lineHeight: theme.lead, flexShrink: 1 },
+  bubble: { borderRadius: 14, paddingHorizontal: theme.type.body, paddingVertical: theme.space.sm + 2, maxWidth: "100%", flexShrink: 1 },
+  /** His: soft paper with a hairline edge. */
+  bubbleHis: { ...paperSoft },
+  /** Mine: accent fill, onAccent text. */
+  bubbleMine: { backgroundColor: theme.accent },
+  bubbleWho: { color: theme.accentText, fontSize: theme.type.label, fontWeight: "700", marginBottom: theme.space.xs / 2 },
+  bubbleText: { color: theme.text, fontSize: 15, lineHeight: theme.lead, flexShrink: 1 },
+  /** My bubble is accent-filled, so its text is onAccent. */
+  bubbleTextMine: { color: theme.onAccent },
   time: { color: theme.faint, fontSize: theme.type.label, marginTop: theme.space.xs, textAlign: "right" },
-  typing: { color: aqua, fontSize: 13, marginTop: 4 },
+  typing: { color: theme.dim, fontSize: 13, marginTop: 4 },
   sources: { marginTop: 6, gap: 2 },
   healthList: { gap: 8, marginVertical: 10 },
   briefingTop: { marginTop: theme.space.sm },
-  briefingCard: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: theme.radius.md, backgroundColor: theme.cardSoft, padding: theme.space.sm + 2, gap: theme.space.xs + 2, width: "100%" },
-  briefingTitle: { color: aqua, fontSize: 12, fontWeight: "700", letterSpacing: 1 },
-  briefingText: { color: theme.text, fontSize: 13, lineHeight: 19 },
+  /** The briefing card: soft paper, hairline edge, 14px radius. */
+  briefingCard: { ...paperSoft, borderRadius: 14, padding: theme.space.sm + 2, gap: theme.space.xs + 2, width: "100%" },
+  briefingTitle: { color: theme.accentText, fontSize: theme.type.label, fontWeight: "700", letterSpacing: 1.3, textTransform: "uppercase" },
+  briefingText: { color: theme.text, fontSize: 14, lineHeight: 19 },
   briefingItemRow: { flexDirection: "row", gap: 6, alignItems: "flex-start" },
-  briefingBullet: { color: aqua, fontSize: 13, lineHeight: 19 },
-  briefingItem: { color: theme.text, fontSize: 13, lineHeight: 19, flexShrink: 1 },
+  briefingBullet: { color: theme.text, fontSize: 14, lineHeight: 19 },
+  briefingItem: { color: theme.text, fontSize: 14, lineHeight: 19, flexShrink: 1 },
   briefingActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   healthRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   healthLabel: { color: theme.text, fontSize: 14, width: 120 },
   healthDetail: { color: theme.dim, fontSize: 12, flex: 1 },
-  restartBtn: { borderColor: theme.danger, marginTop: 8 },
-  phoneCard: { marginVertical: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: theme.accentLine, backgroundColor: theme.cardSoft, gap: 6 },
-  phoneUrl: { color: aqua, fontSize: 16, fontWeight: "700" },
+  restartBtn: { borderColor: theme.danger },
+  phoneCard: { marginVertical: 10, padding: 12, ...paperSoft, borderRadius: 14, gap: 6 },
+  phoneUrl: { color: theme.accentText, fontSize: 16, fontWeight: "700" },
   reviewQuestion: { color: theme.text, fontSize: 16, fontWeight: "700", lineHeight: 22 },
   reviewAnswer: { color: theme.dim, fontSize: 14, lineHeight: 20 },
   gradeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   gradeAgain: { borderColor: theme.danger },
   quizOptions: { gap: 6 },
-  reminderBanner: { position: "absolute", top: 56, left: 12, right: 12, zIndex: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, borderWidth: 1, borderColor: theme.accentLine, backgroundColor: theme.card, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  reminderBanner: { position: "absolute", top: 56, left: 12, right: 12, zIndex: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, ...panel, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 },
   reminderBannerText: { color: theme.text, fontSize: 13, flex: 1 },
-  docBtn: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
-  docBtnText: { color: aqua, fontSize: 11, fontWeight: "700" },
-  docChoice: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: 10, padding: 8 },
-  savePoints: { marginTop: 8, alignSelf: "flex-start", borderWidth: 1, borderColor: theme.accentLine, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5 },
-  savePointsText: { color: theme.accentText, fontSize: 12, fontWeight: "700" },
+  docBtn: { ...ghost, paddingHorizontal: 8 },
+  docBtnText: { color: theme.text, fontSize: theme.type.label, fontWeight: "600", paddingVertical: theme.space.xs },
+  /** "Study now" in the briefing is the one primary button there. */
+  studyNow: { ...primary, paddingHorizontal: theme.space.md - 4 },
+  studyNowText: { color: theme.onAccent, fontSize: 12, fontWeight: "700", paddingVertical: theme.space.xs },
+  docChoice: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: 10, padding: 8, minHeight: 36, justifyContent: "center" },
+  savePoints: { marginTop: 8, alignSelf: "flex-start", ...ghost, borderRadius: 12, paddingHorizontal: 10 },
+  savePointsText: { color: theme.text, fontSize: 12, fontWeight: "600", paddingVertical: theme.space.xs },
   sourceLink: { color: theme.accentText, fontSize: 12, textDecorationLine: "underline" },
-  thinkToggle: { color: theme.faint, fontSize: 11, marginTop: 6 },
+  thinkToggle: { color: theme.faint, fontSize: 11, marginTop: 6, minHeight: 36, textAlignVertical: "center" },
   thinkBody: { color: theme.dim, fontSize: 12, marginTop: 4 },
   note: { color: theme.note, fontSize: 13 },
-  /** One rounded box: text, mic, brain and the teal send. */
+  /** The composer: one paper box holding text, mic, brain and the accent send. */
   composerBox: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.space.sm,
     borderWidth: 1,
-    borderColor: theme.accentLine,
-    borderRadius: theme.size.composer,
+    borderColor: theme.lineStrong,
+    borderRadius: 12,
     paddingLeft: theme.space.md,
     paddingRight: theme.space.xs,
     paddingVertical: theme.space.xs,
-    backgroundColor: theme.cardSoft,
+    backgroundColor: theme.card,
     marginTop: theme.space.sm,
+    minHeight: 44,
   },
-  input: { flex: 1, minWidth: 0, color: theme.text, paddingVertical: theme.space.sm, fontSize: theme.type.input },
-  composerBtn: {
-    width: theme.space.xl + theme.space.xs,
-    height: theme.space.xl + theme.space.xs,
-    borderRadius: (theme.space.xl + theme.space.xs) / 2,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  composerBtnText: { fontSize: theme.type.title },
-  thinkBtn: {
-    width: theme.space.xl + theme.space.xs,
-    height: theme.space.xl + theme.space.xs,
-    borderRadius: (theme.space.xl + theme.space.xs) / 2,
-    borderWidth: 1,
-    borderColor: theme.accentLine,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  input: { flex: 1, minWidth: 0, color: theme.text, paddingVertical: theme.space.sm, fontSize: theme.type.input, minHeight: 44 },
+  /** Mic and attach: 36x36 ghost squares. */
+  composerBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, borderColor: theme.lineStrong, alignItems: "center", justifyContent: "center" },
+  composerBtnText: { color: theme.text, fontSize: theme.type.title, lineHeight: theme.type.title + 4 },
+  thinkBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, borderColor: theme.lineStrong, alignItems: "center", justifyContent: "center" },
   thinkBtnOn: { backgroundColor: theme.accentSoft, borderColor: aqua },
-  thinkBtnText: { fontSize: theme.type.body },
-  send: { width: theme.space.xl + theme.space.sm, height: theme.space.xl + theme.space.sm, borderRadius: (theme.space.xl + theme.space.sm) / 2, backgroundColor: aqua, alignItems: "center", justifyContent: "center" },
-  sendText: { color: theme.bg, fontSize: theme.type.body },
+  thinkBtnText: { color: theme.text, fontSize: theme.type.body, lineHeight: theme.type.body + 4 },
+  /** Send: accent fill, onAccent glyph, 10px radius. */
+  send: { ...primary, minHeight: 36, minWidth: 44, paddingHorizontal: theme.space.sm },
+  sendText: { color: theme.onAccent, fontSize: theme.type.body, fontWeight: "700" },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: theme.space.xs + 2, marginTop: theme.space.sm },
-  chip: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: theme.radius.md, paddingHorizontal: theme.space.sm + 2, paddingVertical: theme.space.xs + 2 },
+  chip: { borderWidth: 1, borderColor: theme.lineStrong, borderRadius: theme.radius.md, minHeight: 36, alignItems: "center", justifyContent: "center", paddingHorizontal: theme.space.sm + 2 },
   chipOff: { opacity: 0.45 },
   chipHint: { backgroundColor: theme.accentSoft },
   chipText: { color: theme.text, fontSize: 12 },
@@ -2951,34 +2952,31 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   pad: { padding: 20, gap: 8 },
   dim: { color: theme.dim, fontSize: 14 },
-  // Profile: a centred panel that holds the hero, pills and Bond card.
+  // Profile: a centred paper panel that holds the hero, pills and Bond card.
   profileWrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 25, alignItems: "center", justifyContent: "center", padding: theme.space.md },
   profilePanel: {
     width: "100%",
     maxWidth: theme.size.maxChat / 2,
     maxHeight: "100%",
-    backgroundColor: theme.card,
-    borderWidth: 1,
-    borderColor: aqua,
-    borderRadius: theme.radius.lg,
+    ...panel,
     padding: theme.space.md,
     gap: theme.space.sm,
   },
   profileHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   profileBody: { gap: theme.space.xs, paddingBottom: theme.space.sm },
   profileHero: { height: theme.space.xl * 8 },
-  // One header per tab, one gear in the chat header.
-  sectionTitle: { color: theme.text, fontSize: 18, fontWeight: "800" },
-  gearBtn: { padding: 4 },
-  gearText: { color: theme.dim, fontSize: 18 },
+  /** One heading per screen, in the same Oswald style as SectionTitle. */
+  sectionTitle: { fontFamily: theme.font.display, color: theme.text, fontWeight: "700", fontSize: theme.type.display.section, textTransform: "uppercase", letterSpacing: 0.78 },
+  gearBtn: { ...ghost },
+  gearText: { color: theme.text, fontSize: 18, lineHeight: 22 },
   briefingCardHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   briefingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   advRow: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
-  advLink: { color: aqua, fontSize: 14, fontWeight: "700", paddingVertical: 4 },
+  advLink: { color: theme.accentText, fontSize: 14, fontWeight: "700", paddingVertical: 4, minHeight: 36, textAlignVertical: "center" },
   memHead: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4, gap: 8 },
   emptyTab: { marginTop: 16, alignItems: "center", gap: 6 },
   deckRow: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: theme.accentLine, borderRadius: 12, padding: 10 },
   deckTitle: { color: theme.text, fontSize: 14, fontWeight: "700" },
-  deckBtn: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
-  deckBtnText: { color: aqua, fontSize: 12, fontWeight: "700" },
+  deckBtn: { ...ghost, paddingHorizontal: 10 },
+  deckBtnText: { color: theme.text, fontSize: 12, fontWeight: "600", paddingVertical: theme.space.xs },
 });
