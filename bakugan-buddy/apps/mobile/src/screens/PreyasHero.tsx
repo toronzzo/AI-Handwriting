@@ -5,8 +5,24 @@ import type { GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { Canvas, useFrame, useThree } from "../room/fiber";
 import { loadPreyasBall } from "../room/loadPreyas";
 import { theme } from "../theme";
+import { usePageVisible } from "../ui/usePageVisible";
+import { useReducedMotion } from "../ui/useReducedMotion";
 
-function Scene({ talking }: { talking: boolean }) {
+/**
+ * How often a visible canvas asks for a fresh frame: 33 ms ≈ 30 fps, a hard
+ * cap instead of a full 60 fps loop (slice 11).
+ */
+const FRAME_MS = 33;
+
+function Scene({
+  talking,
+  reduce,
+  active,
+}: {
+  talking: boolean;
+  reduce: boolean;
+  active: boolean;
+}) {
   const rig = useRef<Group>(null);
   const [gltf, setGltf] = useState<GLTF | null>(null);
   useEffect(() => {
@@ -22,12 +38,14 @@ function Scene({ talking }: { talking: boolean }) {
   }, []);
   const scene = useMemo(() => (gltf ? gltf.scene.clone(true) : null), [gltf]);
   useFrame((_, dt) => {
+    if (reduce) return;
     const node = rig.current;
     if (!node) return;
     node.rotation.y += dt * (talking ? 0.85 : 0.28);
     node.position.y = talking ? Math.sin(node.rotation.y * 3) * 0.05 : 0;
   });
   const { camera } = useThree();
+  const invalidate = useThree((state) => state.invalidate);
   useEffect(() => {
     if (!scene) return;
     const box = new Box3().setFromObject(scene);
@@ -37,6 +55,17 @@ function Scene({ talking }: { talking: boolean }) {
     camera.position.set(center.x + dist * 0.15, center.y + dist * 0.28, center.z + dist);
     camera.lookAt(center);
   }, [camera, scene]);
+  useEffect(() => {
+    if (!active) return;
+    if (reduce) {
+      // One static render: the ball is drawn once and does not spin.
+      invalidate();
+      return;
+    }
+    // The Canvas runs in "demand" mode, so this pulse is the whole loop.
+    const id = setInterval(() => invalidate(), FRAME_MS);
+    return () => clearInterval(id);
+  }, [active, reduce, invalidate]);
   return (
     <>
       <ambientLight intensity={0.62} color="#d7f6ff" /> {/* 3d-colour */}
@@ -67,12 +96,19 @@ function Scene({ talking }: { talking: boolean }) {
 /**
  * The ball on a pedestal. One slow spin, no room simulation.
  * `fill` lets the frame take whatever height its parent gives it (the Profile panel).
+ *
+ * Slice 11: the loop is "never" while the tab is hidden, "demand" with a
+ * 33 ms invalidate() pulse (~30 fps cap) while visible, and reduced motion
+ * gets a single static render with no spin at all.
  */
 export function PreyasHero({ talking, short, fill }: { talking: boolean; short: boolean; fill?: boolean }) {
+  const visible = usePageVisible();
+  const reduce = useReducedMotion();
+  const frameloop = visible && !reduce ? "demand" : "never";
   return (
     <View style={[styles.frame, fill ? styles.fill : short ? styles.short : styles.tall]}>
-      <Canvas camera={{ position: [0.15, 1.7, 3.6], fov: 32 }} dpr={[1, 1.25]}>
-        <Scene talking={talking} />
+      <Canvas camera={{ position: [0.15, 1.7, 3.6], fov: 32 }} dpr={[1, 1.25]} frameloop={frameloop}>
+        <Scene talking={talking} reduce={reduce} active={visible} />
       </Canvas>
     </View>
   );

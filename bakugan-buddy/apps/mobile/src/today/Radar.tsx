@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, StyleSheet, Text, View } from "react-native";
+import { Animated, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, G, Line, Polygon, Text as SvgText } from "react-native-svg";
 import { AREAS, type AreaId } from "../rpg/types.ts";
 import { theme } from "../theme";
 import { Panel } from "../ui/Panel";
+import { useReducedMotion } from "../ui/useReducedMotion";
 import { usePalette } from "../usePalette";
 import { radarAxisDirection, radarPoints, type RadarPoint } from "./radarGeometry.ts";
 import { useRpg } from "./useRpg";
@@ -16,29 +17,6 @@ const CY = VIEW / 2;
 const RADIUS = 128;
 /** How far the label block sits beyond the outer ring. */
 const LABEL_GAP = 34;
-
-/** True when the platform prefers reduced motion; a local check (slice 11
- *  brings the shared hook). */
-function useReduceMotion(): boolean {
-  const [reduce, setReduce] = useState(false);
-  useEffect(() => {
-    let cancel = false;
-    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
-      const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-      const update = () => setReduce(media.matches);
-      update();
-      media.addEventListener("change", update);
-      return () => media.removeEventListener("change", update);
-    }
-    AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (!cancel) setReduce(enabled);
-    });
-    return () => {
-      cancel = true;
-    };
-  }, []);
-  return reduce;
-}
 
 /** Turn a palette hex into the same colour with a different alpha, for the
  *  SVG grid and polygon fills (CSS var() strings do not work in SVG). */
@@ -86,7 +64,7 @@ function Pulse({ x, y, colour }: { x: number; y: number; colour: string }) {
 export function Radar() {
   const { snapshot } = useRpg();
   const palette = usePalette();
-  const reduce = useReduceMotion();
+  const reduce = useReducedMotion();
 
   const values = AREAS.map((area) => snapshot.areaValue[area.id]);
 
@@ -150,7 +128,7 @@ export function Radar() {
   return (
     <Panel>
       <View style={styles.header}>
-        <Text style={styles.heading}>RADAR</Text>
+        <Text style={styles.heading} accessibilityRole="header">RADAR</Text>
       </View>
       <View accessible accessibilityLabel={label}>
         <Svg
@@ -201,10 +179,11 @@ export function Radar() {
               strokeWidth={3}
             />
           ))}
-          {pulses.map((pulse) => {
-            const i = AREAS.findIndex((area) => area.id === pulse.area);
-            return <Pulse key={pulse.id} x={target[i].x} y={target[i].y} colour={palette.accent} />;
-          })}
+          {!reduce &&
+            pulses.map((pulse) => {
+              const i = AREAS.findIndex((area) => area.id === pulse.area);
+              return <Pulse key={pulse.id} x={target[i].x} y={target[i].y} colour={palette.accent} />;
+            })}
           {AREAS.map((area, i) => {
             const dir = radarAxisDirection(i);
             const x = CX + dir.x * (RADIUS + LABEL_GAP);

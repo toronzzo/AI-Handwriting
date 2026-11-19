@@ -1941,7 +1941,12 @@ export function ChatScreen({
       <View style={styles.sidebarHead}>
         <Text style={styles.sidebarTitle}>CHATS</Text>
         {withClose ? (
-          <Pressable onPress={() => setDrawerOpen(false)} hitSlop={8}>
+          <Pressable
+            onPress={() => setDrawerOpen(false)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Close chats"
+          >
             <Text style={styles.sidebarClose}>✕</Text>
           </Pressable>
         ) : null}
@@ -1961,6 +1966,8 @@ export function ChatScreen({
             <Pressable
               style={styles.chatRowIcon}
               hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={`Rename ${chat.title}`}
               onPress={() => setDialog({ kind: "rename", id: chat.id, value: chat.title })}
             >
               <Text style={styles.chatRowIconText}>✎</Text>
@@ -1968,6 +1975,8 @@ export function ChatScreen({
             <Pressable
               style={styles.chatRowIcon}
               hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={`Delete ${chat.title}`}
               onPress={() => setDialog({ kind: "delete", id: chat.id, title: chat.title })}
             >
               <Text style={styles.chatRowIconText}>🗑</Text>
@@ -1989,7 +1998,7 @@ export function ChatScreen({
       <BackgroundPhotoCard />
       {section === "settings" ? (
         <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
-          <Text style={styles.sectionTitle}>Settings</Text>
+          <Text style={styles.sectionTitle} accessibilityRole="header">Settings</Text>
           <Text style={styles.kicker}>STATUS</Text>
           {health ? (
             <View style={styles.healthList}>
@@ -2101,7 +2110,7 @@ export function ChatScreen({
         </ScrollView>
       ) : section === "learn" ? (
         <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
-          <Text style={styles.sectionTitle}>Learn</Text>
+          <Text style={styles.sectionTitle} accessibilityRole="header">Learn</Text>
           <Text style={styles.dim}>{tabById("learn").empty}</Text>
           {decks.length === 0 ? (
             <View style={styles.emptyTab}>
@@ -2120,7 +2129,13 @@ export function ChatScreen({
               <Pressable style={styles.deckBtn} onPress={() => void startQuiz(deck.id, deck.title)}>
                 <Text style={styles.deckBtnText}>Quiz</Text>
               </Pressable>
-              <Pressable hitSlop={6} onPress={() => setDialog({ kind: "deleteDeck", id: deck.id, title: deck.title })}>
+              <Pressable
+                style={styles.chatRowIcon}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={`Delete ${deck.title}`}
+                onPress={() => setDialog({ kind: "deleteDeck", id: deck.id, title: deck.title })}
+              >
                 <Text style={styles.chatRowIconText}>🗑</Text>
               </Pressable>
             </View>
@@ -2129,7 +2144,7 @@ export function ChatScreen({
       ) : section === "memory" ? (
         <View style={styles.fill}>
           <View style={styles.memHead}>
-            <Text style={styles.sectionTitle}>Memory</Text>
+            <Text style={styles.sectionTitle} accessibilityRole="header">Memory</Text>
             <Text style={styles.dim}>{tabById("memory").empty}</Text>
             <TextInput
               style={styles.modalInput}
@@ -2187,7 +2202,13 @@ export function ChatScreen({
                           <Text style={styles.noteKind}>{noteRow.kind}</Text>
                           <Text style={styles.noteText}>{noteRow.text}</Text>
                         </Pressable>
-                        <Pressable hitSlop={6} onPress={() => setDialog({ kind: "deleteNote", id: noteRow.id, text: noteRow.text })}>
+                        <Pressable
+                          style={styles.chatRowIcon}
+                          hitSlop={6}
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete note"
+                          onPress={() => setDialog({ kind: "deleteNote", id: noteRow.id, text: noteRow.text })}
+                        >
                           <Text style={styles.chatRowIconText}>🗑</Text>
                         </Pressable>
                       </>
@@ -2210,10 +2231,18 @@ export function ChatScreen({
                       </Text>
                       <Text style={styles.noteText}>{row.text}</Text>
                     </View>
-                    <Pressable hitSlop={6} onPress={() => void updateReminder(row.id, { action: "done" })}>
+                    <Pressable
+                      style={styles.chatRowIcon}
+                      hitSlop={6}
+                      onPress={() => void updateReminder(row.id, { action: "done" })}
+                    >
                       <Text style={styles.deckBtnText}>Done</Text>
                     </Pressable>
-                    <Pressable hitSlop={6} onPress={() => void updateReminder(row.id, { action: "snooze", snooze: "10m" })}>
+                    <Pressable
+                      style={styles.chatRowIcon}
+                      hitSlop={6}
+                      onPress={() => void updateReminder(row.id, { action: "snooze", snooze: "10m" })}
+                    >
                       <Text style={styles.dim}>+10m</Text>
                     </Pressable>
                   </View>
@@ -2261,11 +2290,17 @@ export function ChatScreen({
                 style={styles.drawerBtn}
                 onPress={() => (wide ? setListOpen(!listOpen) : setDrawerOpen(true))}
                 hitSlop={8}
+                accessibilityRole="button"
                 accessibilityLabel={wide && listOpen ? "Hide chats" : "Show chats"}
               >
                 <Text style={styles.drawerBtnText}>☰</Text>
               </Pressable>
-              <Pressable onPress={() => setProfile(true)} hitSlop={6} accessibilityLabel="Preyas profile">
+              <Pressable
+                onPress={() => setProfile(true)}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel="Preyas profile"
+              >
                 <View style={styles.ball}>
                   <View style={styles.ballCore} />
                 </View>
@@ -2277,7 +2312,14 @@ export function ChatScreen({
               <CoachChip state={coach.state} compact={!wide} onPress={() => setCoachPanel(true)} />
               {wide ? (
                 <View style={styles.bondInline}>
-                  <View style={styles.track}><View style={[styles.fillBar, { width: `${partner.bond}%` }]} /></View>
+                  <View
+                    style={styles.track}
+                    accessibilityRole="progressbar"
+                    accessibilityValue={{ min: 0, max: 100, now: partner.bond }}
+                    accessibilityLabel={`Bond ${partner.bond} percent`}
+                  >
+                    <View style={[styles.fillBar, { width: `${partner.bond}%` }]} />
+                  </View>
                   <Text style={styles.bondInlineText}>Bond {partner.bond}%</Text>
                 </View>
               ) : null}
@@ -2288,7 +2330,13 @@ export function ChatScreen({
               <Pressable style={styles.profileBtnHead} onPress={() => setProfile(true)} accessibilityLabel="View profile">
                 <Text style={styles.profileText}>View profile</Text>
               </Pressable>
-              <Pressable style={styles.gearBtn} onPress={() => onSection?.("settings")} hitSlop={8} accessibilityLabel="Settings">
+              <Pressable
+                style={styles.gearBtn}
+                onPress={() => onSection?.("settings")}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Settings"
+              >
                 <Text style={styles.gearText}>⚙</Text>
               </Pressable>
             </View>
@@ -2297,7 +2345,12 @@ export function ChatScreen({
               <View style={[styles.briefingCard, styles.briefingTop]}>
                 <View style={styles.briefingCardHead}>
                   <Text style={styles.briefingTitle}>{briefingKicker(briefing.day)}</Text>
-                  <Pressable onPress={() => setBriefingDismissed(true)} hitSlop={8} accessibilityLabel="Dismiss briefing">
+                  <Pressable
+                    onPress={() => setBriefingDismissed(true)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Dismiss briefing"
+                  >
                     <Text style={styles.sidebarClose}>✕</Text>
                   </Pressable>
                 </View>
@@ -2504,6 +2557,7 @@ export function ChatScreen({
                   onPress={() => {
                     if (bag.playing) interruptTalk(bag);
                   }}
+                  accessibilityRole="button"
                   accessibilityLabel={`Microphone ${phase}`}
                 >
                   <Text style={styles.composerBtnText}>{MIC_ICON[phase] ?? "🎤"}</Text>
@@ -2512,6 +2566,7 @@ export function ChatScreen({
               <Pressable
                 style={[styles.thinkBtn, thinkForced && styles.thinkBtnOn]}
                 onPress={() => setThinkForced((on) => !on)}
+                accessibilityRole="button"
                 accessibilityLabel={thinkForced ? "Thinking on" : "Thinking off"}
               >
                 <Text style={styles.thinkBtnText}>🧠</Text>
@@ -2519,6 +2574,7 @@ export function ChatScreen({
               <Pressable
                 style={styles.send}
                 onPress={submitDraft}
+                accessibilityRole="button"
                 accessibilityLabel="Send"
               >
                 <Text style={styles.sendText}>➤</Text>
@@ -2637,7 +2693,11 @@ export function ChatScreen({
           <Text style={styles.reminderBannerText}>
             Reminder: {nextReminder.text} · {nextReminder.label}
           </Text>
-          <Pressable onPress={() => setPendingReminder(null)}>
+          <Pressable
+            onPress={() => setPendingReminder(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Close reminder"
+          >
             <Text style={styles.sidebarClose}>✕</Text>
           </Pressable>
         </View>
@@ -2746,7 +2806,7 @@ export function ChatScreen({
           <Pressable style={styles.scrim} onPress={() => setProfile(false)} accessibilityLabel="Close profile" />
           <View style={styles.profilePanel}>
             <View style={styles.profileHead}>
-              <Text style={styles.sectionTitle}>Profile</Text>
+              <Text style={styles.sectionTitle} accessibilityRole="header">Profile</Text>
               <Pressable style={styles.profileBtn} onPress={() => setProfile(false)} accessibilityLabel="Close profile">
                 <Text style={styles.profileText}>Close ✕</Text>
               </Pressable>
@@ -2768,7 +2828,14 @@ export function ChatScreen({
                   <Text style={styles.bondTitle}>Bond Level</Text>
                   <Text style={styles.bondPct}>{partner.bond}%</Text>
                 </View>
-                <View style={styles.track}><View style={[styles.fillBar, { width: `${partner.bond}%` }]} /></View>
+                <View
+                  style={styles.track}
+                  accessibilityRole="progressbar"
+                  accessibilityValue={{ min: 0, max: 100, now: partner.bond }}
+                  accessibilityLabel={`Bond ${partner.bond} percent`}
+                >
+                  <View style={[styles.fillBar, { width: `${partner.bond}%` }]} />
+                </View>
                 <Text style={styles.caption}>{partner.caption}</Text>
               </View>
               <Text style={styles.dim}>{via === "gateway" ? "Talking through the gateway." : "Talking to the local brain."}</Text>

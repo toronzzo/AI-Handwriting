@@ -94,3 +94,7 @@ The `companion/` Vite app proxies `/studio`. If the sidecar is down, `brain.ts` 
 ## Emotion persistence
 
 `packages/emotion-state` stores mood + intensity + partner memory in SQLite (Expo) / SQLite-shaped durable row (web). On load, `decayEmotion` softens intensity toward **neutral** so a days-old `[angry]` does not snap the body awake furious. Writes happen after turns — never inside the animation frame.
+
+## Before release
+
+TODO verify: Polish support-line number 116 123 (and the crisis text) must be checked against an official source before it is shown in the app.
