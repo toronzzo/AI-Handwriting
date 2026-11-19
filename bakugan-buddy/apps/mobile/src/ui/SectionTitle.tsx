@@ -14,7 +14,11 @@ export function SectionTitle({
   children: ReactNode;
   style?: TextStyle | TextStyle[];
 }) {
-  return <Text style={[styles.title, style]}>{children}</Text>;
+  return (
+    <Text style={[styles.title, style]} accessibilityRole="header">
+      {children}
+    </Text>
+  );
 }
 
 const styles = StyleSheet.create({

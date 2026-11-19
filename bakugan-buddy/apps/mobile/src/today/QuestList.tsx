@@ -61,7 +61,7 @@ export function QuestList() {
   return (
     <Panel>
       <View style={styles.header}>
-        <Text style={styles.heading}>QUESTS</Text>
+        <Text style={styles.heading} accessibilityRole="header">QUESTS</Text>
         <Text style={styles.count}>
           {done}/{snapshot.quests.length}
         </Text>

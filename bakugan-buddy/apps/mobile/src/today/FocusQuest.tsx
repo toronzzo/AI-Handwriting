@@ -4,6 +4,7 @@ import Svg, { Circle } from "react-native-svg";
 import { theme } from "../theme";
 import { Panel } from "../ui/Panel";
 import { Stripe } from "../ui/Stripe";
+import { usePageVisible } from "../ui/usePageVisible";
 import { usePalette } from "../usePalette";
 import {
   BREAK_MS,
@@ -47,6 +48,7 @@ function formatTime(ms: number): string {
 export function FocusQuest() {
   const { source, postNotice } = useRpg();
   const palette = usePalette();
+  const pageVisible = usePageVisible();
 
   const [minutes, setMinutes] = useState<number>(25);
   const [state, setState] = useState<FocusTimerState>(() => reset());
@@ -59,9 +61,8 @@ export function FocusQuest() {
   }, []);
 
   useEffect(() => {
-    const visible = () => typeof document === "undefined" || !document.hidden;
+    if (!pageVisible) return;
     const step = () => {
-      if (!visible()) return;
       const current = stateRef.current;
       if (current.mode !== "run" && current.mode !== "break") return;
       const now = Date.now();
@@ -73,18 +74,11 @@ export function FocusQuest() {
         postNotice(`Quest complete! +${focusXp(result.completed)} XP. Break: 5 min.`);
       }
     };
+    // Catch up as soon as the tab becomes visible again, then once a second.
+    step();
     const timer = setInterval(step, 1000);
-    const onVisible = () => step();
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", onVisible);
-    }
-    return () => {
-      clearInterval(timer);
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVisible);
-      }
-    };
-  }, [apply, source, postNotice]);
+    return () => clearInterval(timer);
+  }, [apply, source, postNotice, pageVisible]);
 
   const running = state.mode === "run";
   const breaking = state.mode === "break";
@@ -134,7 +128,7 @@ export function FocusQuest() {
 
         <View style={styles.side}>
           <View style={styles.titleRow}>
-            <Text style={styles.title}>Focus quest</Text>
+            <Text style={styles.title} accessibilityRole="header">Focus quest</Text>
             <Text style={styles.length}>{minutes} min</Text>
           </View>
 

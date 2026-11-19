@@ -13,15 +13,21 @@ export function DailyXp() {
   const { snapshot, source } = useRpg();
   const fill = Math.min(100, Math.round((snapshot.todayXp / snapshot.dailyGoal) * 100));
   const fillWidth = `${fill}%` as const;
+  const nowXp = Math.min(snapshot.todayXp, snapshot.dailyGoal);
 
   return (
     <Panel>
-      <Text style={styles.heading}>DAILY XP</Text>
+      <Text style={styles.heading} accessibilityRole="header">DAILY XP</Text>
       <View style={styles.numberRow}>
         <Text style={styles.big}>{snapshot.todayXp}</Text>
         <Text style={styles.goal}>/ {snapshot.dailyGoal}</Text>
       </View>
-      <View style={styles.bar}>
+      <View
+        style={styles.bar}
+        accessibilityRole="progressbar"
+        accessibilityValue={{ min: 0, max: snapshot.dailyGoal, now: nowXp }}
+        accessibilityLabel={`${nowXp} of ${snapshot.dailyGoal} daily XP`}
+      >
         <View style={[styles.fill, { width: fillWidth }]} />
       </View>
       <View style={styles.fillStripe}>

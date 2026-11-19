@@ -1,38 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, StyleSheet, Text, View } from "react-native";
+import { Animated, StyleSheet, Text, View } from "react-native";
 import { useArt } from "../art/slots.ts";
 import { PreyasHero } from "../screens/PreyasHero";
 import { theme } from "../theme";
 import { ArtSlot } from "../ui/ArtSlot";
 import { Stripe } from "../ui/Stripe";
 import { Panel } from "../ui/Panel";
+import { useReducedMotion } from "../ui/useReducedMotion";
 import type { AreaId } from "../rpg/types.ts";
 import { AREAS } from "../rpg/types.ts";
 import { useRpg } from "./useRpg";
-
-/** True when the platform prefers reduced motion; a local check (slice 11
- *  brings the shared hook). */
-function useReduceMotion(): boolean {
-  const [reduce, setReduce] = useState(false);
-  useEffect(() => {
-    let cancel = false;
-    if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
-      const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-      const update = () => setReduce(media.matches);
-      update();
-      media.addEventListener("change", update);
-      return () => media.removeEventListener("change", update);
-    }
-    // iPhone: AccessibilityInfo.isReduceMotionEnabled.
-    AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (!cancel) setReduce(enabled);
-    });
-    return () => {
-      cancel = true;
-    };
-  }, []);
-  return reduce;
-}
 
 /** One floating "+N Area" chip that rises and fades over 1.8 s. */
 function XpChip({ area, xp, reduce }: { area: AreaId; xp: number; reduce: boolean }) {
@@ -71,7 +48,7 @@ function XpChip({ area, xp, reduce }: { area: AreaId; xp: number; reduce: boolea
  */
 export function LevelCard() {
   const { snapshot, message } = useRpg();
-  const reduce = useReduceMotion();
+  const reduce = useReducedMotion();
   const hero = useArt("hero");
   const hasHero = hero.status === "ready" && Boolean(hero.url);
 
@@ -120,6 +97,7 @@ export function LevelCard() {
 
   const fill = Math.min(100, Math.round((snapshot.levelInto / snapshot.levelNeed) * 100));
   const fillWidth = `${fill}%` as const;
+  const nowXp = Math.min(snapshot.levelInto, snapshot.levelNeed);
 
   return (
     <Panel style={styles.card} padding={0}>
@@ -137,7 +115,11 @@ export function LevelCard() {
           <PreyasHero talking={false} short={false} fill />
         </View>
         {levelUp ? (
-          <Animated.View style={[styles.levelUpPill, { transform: [{ scale: pillScale }] }]}>
+          <Animated.View
+            style={[styles.levelUpPill, { transform: [{ scale: pillScale }] }]}
+            accessibilityLiveRegion="polite"
+            accessibilityLabel="Level up"
+          >
             <Text style={styles.levelUpText}>LEVEL UP</Text>
           </Animated.View>
         ) : null}
@@ -162,7 +144,12 @@ export function LevelCard() {
           </View>
         </View>
 
-        <View style={styles.bar}>
+        <View
+          style={styles.bar}
+          accessibilityRole="progressbar"
+          accessibilityValue={{ min: 0, max: snapshot.levelNeed, now: nowXp }}
+          accessibilityLabel={`${nowXp} of ${snapshot.levelNeed} XP`}
+        >
           <View style={[styles.fill, { width: fillWidth }]} />
         </View>
         <View style={styles.fillStripe}>
@@ -176,7 +163,7 @@ export function LevelCard() {
         </View>
 
         {message ? (
-          <View style={styles.bubble}>
+          <View style={styles.bubble} accessibilityLiveRegion="polite">
             <Text style={styles.bubbleText}>{message}</Text>
           </View>
         ) : snapshot.isDemo ? (

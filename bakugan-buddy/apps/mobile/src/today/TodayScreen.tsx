@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-n
 import { todayColumns } from "../layout";
 import { theme } from "../theme";
 import { Stripe } from "../ui/Stripe";
+import { usePageVisible } from "../ui/usePageVisible";
 import { DailyXp } from "./DailyXp";
 import { FocusQuest } from "./FocusQuest";
 import { LevelCard } from "./LevelCard";
@@ -27,11 +28,14 @@ export function TodayScreen() {
   const { snapshot } = useRpg();
   const { width } = useWindowDimensions();
   const [time, setTime] = useState(() => clockText(new Date()));
+  const pageVisible = usePageVisible();
 
   useEffect(() => {
+    if (!pageVisible) return;
+    setTime(clockText(new Date()));
     const timer = setInterval(() => setTime(clockText(new Date())), 30_000);
     return () => clearInterval(timer);
-  }, []);
+  }, [pageVisible]);
 
   const cols = todayColumns(width);
   const left = (
