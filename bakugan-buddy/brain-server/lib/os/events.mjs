@@ -8,7 +8,19 @@ import fs from "node:fs";
 import path from "node:path";
 
 export const DEFAULT_CURRENCY = "KZT";
-export const EVENT_TYPES = ["money", "food", "stomach", "sleep", "book", "film", "undo"];
+export const EVENT_TYPES = [
+  "money",
+  "food",
+  "stomach",
+  "sleep",
+  "book",
+  "film",
+  "undo",
+  "quest",
+  "focus",
+  "water",
+  "mood",
+];
 
 function asDate(now) {
   if (now instanceof Date) return now;

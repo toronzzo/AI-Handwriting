@@ -7,9 +7,10 @@ import { PREYAS_CHAT_PERSONA } from "../../../packages/alive/src/persona.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { asMs, crisisLine, dayKey, readEvents, readSettings, summarizeDay } from "./events.mjs";
+import { asMs, appendEvent, crisisLine, dayKey, makeId, readEvents, readSettings, summarizeDay } from "./events.mjs";
 import { createSendMemory, confirmLine, logParsedEvents, normalizeSentence, undoEvents } from "./eventsConfirm.mjs";
 import { parseEvents } from "./eventsParse.mjs";
+import { focusEvent, moodEvent, questEvent, rpgToday, waterEvent } from "./rpg.mjs";
 import { reviewAction } from "./guard.mjs";
 import { readGuardLog } from "./guardLog.mjs";
 import { exampleStats, listExamples, removeExample, saveLastPair, savePair } from "./gold.mjs";
@@ -83,6 +84,23 @@ function recentFoods(dataDir, nowMs, tz) {
   const from = dayKey(nowMs - 4 * 3600 * 1000, tz);
   const to = dayKey(nowMs, tz);
   return readEvents(dataDir, { from, to, types: ["food"] }).filter((event) => Number(event.ts) >= nowMs - 4 * 3600 * 1000);
+}
+
+/** Appends ONE rpg event (append-only) and returns the fresh Today view. */
+function appendRpgEvent(dataDir, type, data, nowMs, now) {
+  const settings = readSettings(dataDir);
+  appendEvent(dataDir, {
+    v: 1,
+    id: makeId(nowMs),
+    ts: nowMs,
+    day: dayKey(nowMs, settings.tz),
+    type,
+    data,
+    src: "rpg",
+    raw: "",
+    parser: "rpg",
+  });
+  return rpgToday(dataDir, now);
 }
 
 /**
@@ -176,6 +194,47 @@ export async function handleOsRoute(ctx) {
     const settings = readSettings(dataDir);
     const day = url.searchParams.get("day") || dayKey(nowMs, settings.tz);
     return answered(res, 200, summarizeDay(dataDir, day, { tz: settings.tz }));
+  }
+
+  if (url.pathname === "/v1/rpg/today" && req.method === "GET") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    return answered(res, 200, rpgToday(dataDir, now()));
+  }
+
+  if (url.pathname === "/v1/rpg/quest" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    const checked = questEvent(body);
+    if (!checked.ok) return answered(res, 400, { error: checked.error });
+    return answered(res, 200, appendRpgEvent(dataDir, "quest", checked.data, nowMs, now()));
+  }
+
+  if (url.pathname === "/v1/rpg/focus" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    const checked = focusEvent(body);
+    if (!checked.ok) return answered(res, 400, { error: checked.error });
+    return answered(res, 200, appendRpgEvent(dataDir, "focus", checked.data, nowMs, now()));
+  }
+
+  if (url.pathname === "/v1/rpg/water" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    const checked = waterEvent(body);
+    if (!checked.ok) return answered(res, 400, { error: checked.error });
+    return answered(res, 200, appendRpgEvent(dataDir, "water", checked.data, nowMs, now()));
+  }
+
+  if (url.pathname === "/v1/rpg/mood" && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    const checked = moodEvent(body);
+    if (!checked.ok) return answered(res, 400, { error: checked.error });
+    return answered(res, 200, appendRpgEvent(dataDir, "mood", checked.data, nowMs, now()));
   }
 
   if (url.pathname === "/v1/guard/review" && req.method === "POST") {

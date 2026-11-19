@@ -76,4 +76,8 @@ export interface RpgSource {
   toggleQuest?(id: string): void;
   addDemoXp?(area: AreaId, xp: number): void;
   addFocus?(minutes: number): void;
+  /** Log one glass of water (real event log source only). */
+  addWater?(glasses: number): void;
+  /** Log a mood score 1..5 (real event log source only). */
+  addMood?(score: number): void;
 }
