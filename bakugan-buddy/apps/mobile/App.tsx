@@ -18,7 +18,7 @@ import { ChatScreen } from "./src/screens/ChatScreen";
 import { TodayScreen } from "./src/today/TodayScreen";
 import { MAIN_TABS, SETTINGS_ENTRY, type Section } from "./src/nav";
 import { theme } from "./src/theme";
-import { isWide } from "./src/layout";
+import { isWide, ROOT_ATTR, SHELL_ATTR, STAGE_ATTR, WEB_SHELL_CSS } from "./src/layout";
 import { Stripe } from "./src/ui/Stripe";
 import { useArt } from "./src/art/slots.ts";
 import { SHADE_BANDS, mixColour } from "./src/skyCss.ts";
@@ -30,7 +30,17 @@ const isWeb = typeof document !== "undefined";
 /** Advanced/demo surfaces that live behind Settings, not the main tabs. */
 type Advanced = "room" | "body" | "bench";
 
+/**
+ * Marks a view for the browser shell rules (WEB_SHELL_CSS) without adding a
+ * prop on the iPhone, where native views have no DOM attributes.
+ */
+const webMark = (...attrs: string[]): Record<string, string> =>
+  isWeb ? Object.fromEntries(attrs.map((attr) => [attr, ""])) : {};
+
 export default function App() {
+  // Browser only: the page must never be taller than the window, or the rail's
+  // pinned Settings slides below the fold. Runs before the first paint.
+  useState(installWebShellCss);
   const [section, setSection] = useState<Section>("today");
   const [advanced, setAdvanced] = useState<Advanced | null>(null);
   const [metrics, setMetrics] = useState<BodyMetrics | null>(null);
@@ -127,7 +137,7 @@ export default function App() {
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
-      <View style={shellStyles.shell}>
+      <View style={shellStyles.shell} {...webMark(SHELL_ATTR, ROOT_ATTR)}>
         {hasBg ? (
           // The user's own `bg` picture, behind everything, with a shade on
           // top so paper panels and text keep their contrast. It goes FIRST so
@@ -147,7 +157,7 @@ export default function App() {
         ) : null}
         {wide ? <View style={styles.sidebar}>{rails}</View> : null}
 
-        <View style={styles.stage}>
+        <View style={styles.stage} {...webMark(STAGE_ATTR)}>
           {advanced === "room" ? (
             <AdvancedWrap title="Preyas' room" onBack={() => setAdvanced(null)}>
               <RoomScreen />
@@ -210,7 +220,9 @@ function AdvancedWrap({ title, onBack, children }: { title: string; onBack: () =
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: isWeb ? "transparent" : theme.bg },
-  stage: { flex: 1, backgroundColor: isWeb ? "transparent" : theme.bg },
+  // Same reasoning as the shell row: the stage must shrink to its slot so the
+  // Memory list scrolls inside it rather than growing the page.
+  stage: { flex: 1, minHeight: 0, overflow: "hidden", backgroundColor: isWeb ? "transparent" : theme.bg },
   fill: { flex: 1 },
   hidden: { height: 0, overflow: "hidden", flex: 0 },
 
@@ -336,8 +348,22 @@ const backdropStyles: { wrap: ViewStyle; image: ImageStyle; shade: ViewStyle } =
  * platforms.
  */
 const shellStyles: { shell: ViewStyle } = {
-  shell: { flex: 1, flexDirection: "row", position: "relative" },
+  // minHeight 0 (plus the web rules) keeps the row exactly as tall as the
+  // window, so a long Memory list scrolls inside the stage instead of
+  // stretching the rail and hiding Settings.
+  shell: { flex: 1, minHeight: 0, flexDirection: "row", position: "relative" },
 };
+
+/** Browser-only: pins the page to the window, once the document exists. */
+function installWebShellCss(): void {
+  if (!isWeb || typeof document === "undefined") return;
+  const id = "preyas-shell-size";
+  if (document.getElementById(id)) return;
+  const style = document.createElement("style");
+  style.id = id;
+  style.textContent = WEB_SHELL_CSS;
+  document.head.appendChild(style);
+}
 
 /** On the iPhone the bottom bar must paint over the bg picture, not under it. */
 const mobileBarStyles: { bar: ViewStyle } = {

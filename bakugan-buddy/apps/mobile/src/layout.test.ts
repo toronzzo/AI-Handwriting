@@ -1,7 +1,17 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chatColumn, isPhone, isWide, listWidth, todayColumns } from "./layout.ts";
+import {
+  chatColumn,
+  isPhone,
+  isWide,
+  listWidth,
+  ROOT_ATTR,
+  SHELL_ATTR,
+  STAGE_ATTR,
+  todayColumns,
+  WEB_SHELL_CSS,
+} from "./layout.ts";
 import { theme } from "./theme.ts";
 
 test("the Mac layout starts at 900px", () => {
@@ -35,6 +45,22 @@ test("the Today dashboard uses three columns from 1100px, two from 700px", () =>
   assert.equal(todayColumns(700), 2);
   assert.equal(todayColumns(900), 2);
   assert.equal(todayColumns(390), 1);
+});
+
+test("the browser shell can shrink to the window, so the rail keeps Settings", () => {
+  // A flex item defaults to min-height auto, which lets a long Memory list
+  // stretch the page and push the rail's Settings button out of view.
+  assert.match(WEB_SHELL_CSS, /\[data-shell\], \[data-stage\] \{ min-height: 0; overflow: hidden; \}/);
+  // The page itself must not be taller than the window either.
+  assert.match(WEB_SHELL_CSS, /#root \{ min-height: auto; \}/);
+  assert.match(WEB_SHELL_CSS, /html, body, #root \{ height: 100%; overflow: hidden; \}/);
+  // The root keeps the window floor, so a wide window is still filled.
+  assert.match(WEB_SHELL_CSS, /\[data-root\] \{ min-height: max\(100%, 100vh\); \}/);
+  assert.notEqual(new Set([SHELL_ATTR, STAGE_ATTR, ROOT_ATTR]).size, 1);
+  for (const attr of [SHELL_ATTR, STAGE_ATTR, ROOT_ATTR]) {
+    assert.match(attr, /^data-[a-z]+$/);
+    assert.ok(WEB_SHELL_CSS.includes("[" + attr + "]"));
+  }
 });
 
 test("every shell size is a whole number of pixels", () => {
