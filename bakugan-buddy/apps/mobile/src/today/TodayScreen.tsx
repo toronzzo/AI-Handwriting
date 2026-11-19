@@ -3,9 +3,10 @@ import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-n
 import { todayColumns } from "../layout";
 import { theme } from "../theme";
 import { Stripe } from "../ui/Stripe";
-import { Panel } from "../ui/Panel";
 import { DailyXp } from "./DailyXp";
 import { LevelCard } from "./LevelCard";
+import { QuestList } from "./QuestList";
+import { Radar } from "./Radar";
 import { useRpg } from "./useRpg";
 
 function clockText(d: Date): string {
@@ -14,19 +15,10 @@ function clockText(d: Date): string {
   return `${h}:${m}`;
 }
 
-/** A placeholder column until the Quests and Radar slices land. */
-function ComingSoon() {
-  return (
-    <Panel>
-      <Text style={styles.coming}>Coming in the next slice</Text>
-    </Panel>
-  );
-}
-
 /**
  * The Today dashboard: header with the brand chip and the live clock, then
- * the level card and daily XP on the left, with the centre and right
- * columns reserved for the next slices. Plain scroll flow, nothing fixed.
+ * the level card and daily XP on the left, the radar in the centre and the
+ * quests on the right. Plain scroll flow, nothing fixed.
  */
 export function TodayScreen() {
   const { snapshot } = useRpg();
@@ -71,25 +63,25 @@ export function TodayScreen() {
         <View style={styles.row}>
           <View style={styles.sideCol}>{left}</View>
           <View style={styles.centerCol}>
-            <ComingSoon />
+            <Radar />
           </View>
           <View style={styles.sideCol}>
-            <ComingSoon />
+            <QuestList />
           </View>
         </View>
       ) : cols === 2 ? (
         <View style={styles.row}>
           <View style={styles.sideCol}>{left}</View>
           <View style={[styles.centerCol, styles.stacked]}>
-            <ComingSoon />
-            <ComingSoon />
+            <Radar />
+            <QuestList />
           </View>
         </View>
       ) : (
         <View style={styles.stacked}>
           {left}
-          <ComingSoon />
-          <ComingSoon />
+          <Radar />
+          <QuestList />
         </View>
       )}
     </ScrollView>
@@ -155,5 +147,4 @@ const styles = StyleSheet.create({
   centerCol: { flex: 1, minWidth: 280 },
   leftCol: { gap: 20 },
   stacked: { gap: 20 },
-  coming: { color: theme.dim, fontSize: 14 },
 });
