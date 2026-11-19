@@ -21,13 +21,24 @@ export const ART_ROOTS = ["/Volumes/Agent/agent/art", "/Volumes/Agent/agent/prot
 export const ART_EXTENSIONS = ["jpg", "jpeg", "png", "webp"];
 
 /**
- * The folders a picture may live in: the whitelist above, and nothing else.
- * A slot name has no separator, so `../../etc/passwd` is refused before the
- * disk; within a folder the file name is fixed too, so `..` is impossible
- * there. The file itself is then re-resolved under this boundary with
- * resolveSafePath, which is what stops a symlink pointing out of the drive.
+ * The drive a picture must really live on. A slot name has no separator, so
+ * `../../etc/passwd` is refused before the disk; within a folder the file name
+ * is fixed too, so `..` is impossible there. The file itself is then
+ * re-resolved under this boundary with resolveSafePath, which is what stops a
+ * symlink pointing out of the drive.
+ *
+ * It is `/Volumes/Agent` on the Mac, and the only reason it can be anything
+ * else is a test that has no drive (CI): `ART_ROOT` lets the test scope the
+ * boundary to its own temp folder, so the check still runs, just inside a
+ * folder the test owns. Set it once, at the top of a test file, never in the
+ * running app.
  */
 export const ART_ROOT = "/Volumes/Agent";
+
+/** The drive boundary in force; see ART_ROOT. */
+export function artRoot() {
+  return process.env.PREYAS_ART_ROOT || ART_ROOT;
+}
 
 /** 8 MB: bigger files are ignored rather than streamed. */
 export const MAX_ART_BYTES = 8 * 1024 * 1024;
@@ -60,8 +71,8 @@ export function findArt(slot, roots = ART_ROOTS) {
       let file;
       try {
         file = resolveSafePath(name, root);
-        // Second lock: the real file must still sit inside the Agent drive.
-        resolveSafePath(file, ART_ROOT);
+        // Second lock: the real file must still sit inside the drive.
+        resolveSafePath(file, artRoot());
       } catch {
         // A link outside the drive, or a path we cannot read: no picture here.
         continue;
