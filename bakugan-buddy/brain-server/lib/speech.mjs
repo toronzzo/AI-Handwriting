@@ -8,6 +8,42 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+/** The bigger model this Mac already has; better at Russian and English. */
+export const WHISPER_PREFERRED = "ggml-small.bin";
+/** The model the brain shipped with; used when the bigger one is missing. */
+export const WHISPER_FALLBACK = "ggml-base.bin";
+
+/**
+ * The preferred model the user set on purpose, or null when the setting is
+ * unset or unreadable. Anything other than the fallback's own file name counts
+ * as "on purpose" (for example a custom path or ggml-small.en.bin).
+ */
+export function explicitWhisperModel(env = process.env) {
+  const set = String(env.WHISPER_MODEL || "").trim();
+  if (!set) return null;
+  if (path.basename(set) === WHISPER_FALLBACK) return null;
+  return set;
+}
+
+/**
+ * Which whisper model to hear with. A model the user chose on purpose wins;
+ * otherwise the bigger ggml-small.bin is preferred when it exists, and the
+ * current ggml-base.bin is the fallback. Returns "" when nothing is findable.
+ */
+export function whisperModelFor(env = process.env, exists = (file) => fs.existsSync(file)) {
+  const chosen = explicitWhisperModel(env);
+  if (chosen) return chosen;
+  const root = String(env.BAKUGAN_DATA_DIR || "").trim();
+  if (root) {
+    const preferred = path.join(root, "models", "whisper", WHISPER_PREFERRED);
+    if (exists(preferred)) return preferred;
+  }
+  const set = String(env.WHISPER_MODEL || "").trim();
+  if (set) return set;
+  if (root) return path.join(root, "models", "whisper", WHISPER_FALLBACK);
+  return "";
+}
+
 export function whisperArgs(model, wavPath, outBase) {
   return ["-m", model, "-f", wavPath, "-l", "auto", "--no-timestamps", "-otxt", "-of", outBase];
 }
@@ -95,7 +131,7 @@ export async function transcribeFile(wavPath, env = process.env) {
       /* fall through to the CLI */
     }
   }
-  const model = env.WHISPER_MODEL || "";
+  const model = whisperModelFor(env);
   const bin = env.WHISPER_BIN || "whisper-cli";
   if (!model || !fs.existsSync(model)) return null;
   const base = wavPath.replace(/\.wav$/i, "");

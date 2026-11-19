@@ -96,11 +96,18 @@ export function queueSpokenLine(sinks: TalkSinks, line: string, mood: string, fi
   speakChain.set(sinks, chain);
 }
 
-export function VoiceSession({ sinks }: { sinks: TalkSinks }) {
+/**
+ * The old always-on ear. Slice V1 turned it into an opt-in: it only runs while
+ * the "Hands-free listening" switch is ON (default OFF), so the microphone is
+ * never opened on page load and tap-to-talk has the mic to itself.
+ */
+export function VoiceSession({ sinks, handsFreeOn }: { sinks: TalkSinks; handsFreeOn: boolean }) {
   const ear = useRef<Ear | null>(null);
   const vad = useRef<VadState>(freshVad());
 
   useEffect(() => {
+    // Off means no microphone, no loop, no permission prompt.
+    if (!handsFreeOn) return;
     let cancel = false;
     void createEar().then((next) => {
       if (cancel || !next) return;
@@ -166,7 +173,7 @@ export function VoiceSession({ sinks }: { sinks: TalkSinks }) {
       void ear.current?.stop();
       ear.current = null;
     };
-  }, [sinks]);
+  }, [sinks, handsFreeOn]);
 
   return null;
 }

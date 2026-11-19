@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { FACT_EXTRACT_PROMPT } from "../packages/alive/src/longMemory.ts";
 import { openMemory, parseExtractedFacts, relevantFacts, rememberFacts } from "./lib/memory.mjs";
-import { synthesizeFile, transcribeFile } from "./lib/speech.mjs";
+import { synthesizeFile, transcribeFile, whisperModelFor } from "./lib/speech.mjs";
 import { withSampling } from "./lib/sampling.mjs";
 import { mergeHistoryFiles, paidAvailability } from "./lib/history.mjs";
 import {
@@ -856,7 +856,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
-          stt: Boolean(process.env.WHISPER_MODEL),
+          stt: Boolean(whisperModelFor()),
           tts: Boolean(process.env.PIPER_PYTHON || process.env.BAKUGAN_DATA_DIR),
           voices: { en: "am_puck", ru: "ru_RU-dmitri-medium" },
         }),
