@@ -54,6 +54,10 @@ import { tabById, type Section } from "../nav";
 import { chatColumn, isPhone, isWide } from "../layout";
 import { useArt } from "../art/slots.ts";
 import { usePhotoSwitcher } from "../ui/ArtSlot";
+import { ActivityPanel } from "../activity/ActivityPanel";
+import { PreviewCard } from "../activity/PreviewCard";
+import { previewMode } from "../activity/previewMode";
+import { useActivity, type ActivitySink } from "../activity/useActivity";
 import { theme } from "../theme";
 
 /** Web lets the sky show through the shell; the iPhone paints the page colour. */
@@ -67,6 +71,8 @@ const MIC_ICON: Record<string, string> = {
 };
 type Shown = ChatMessage & {
   t: number;
+  /** The Live Activity run this reply belongs to (slice 12). */
+  runId?: string;
   thinking?: string;
   sources?: SearchResult[];
   document?: { name: string; summary?: string; points?: { text: string; kind: NoteKind }[] };
@@ -306,6 +312,14 @@ export function ChatScreen({
   const [searchNote, setSearchNote] = useState("");
   const [openSteps, setOpenSteps] = useState<Record<number, boolean>>({});
   const taskPoll = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Live Activity: one run per message, the id of the one on screen, and its poll. */
+  const runsRef = useRef(new Map<string, ActivitySink>());
+  const [lastRunId, setLastRunId] = useState("");
+  const [lastRunActive, setLastRunActive] = useState(false);
+  const isRunActive = useRef(false);
+  const activity = useActivity({ runId: lastRunId, active: lastRunActive, brainUrl: bag.brainUrl });
+  const activityRef = useRef(activity);
+  activityRef.current = activity;
   const [memFilter, setMemFilter] = useState<"all" | "notes" | "reminders" | "docs">("all");
   const [briefingSettings, setBriefingSettings] = useState<{ briefingTime: string; briefingOn: boolean } | null>(null);
   const [briefingDismissed, setBriefingDismissed] = useState(false);
@@ -321,6 +335,7 @@ export function ChatScreen({
     });
   const phone = isPhone(width, height);
   const column = chatColumn(width);
+  const preview = previewMode(width);
   const setActiveChat = (id: string | null) => {
     activeIdRef.current = id;
     setActiveChatId(id);
@@ -1213,11 +1228,16 @@ export function ChatScreen({
     return { error: "the summary took too long" };
   }
   /** Run a web search for a message that needs fresh information. */
-  async function runWebSearch(text: string): Promise<{ query: string; results: SearchResult[] }> {
+  async function runWebSearch(text: string, runId = ""): Promise<{ query: string; results: SearchResult[] }> {
     const query = searchQueryFrom(text) || text.trim();
     setSearching(true);
+    const sink = runId ? runsRef.current.get(runId) : undefined;
+    const stepId = sink ? sink.pushLocal({ kind: "tool", tool: "search_web", label: "Searched web", detail: query, status: "running" }) : "";
     try {
-      const res = await brainFetch(`${bag.brainUrl}/v1/search?q=${encodeURIComponent(query)}`);
+      const res = await brainFetch(
+        `${bag.brainUrl}/v1/search?q=${encodeURIComponent(query)}`,
+        runId ? { headers: { "x-preyas-run": runId } } : undefined,
+      );
       const body = (await res.json()) as { ok?: boolean; results?: SearchResult[]; error?: string };
       if (!body.ok || !body.results?.length) {
         setSearchNote(body.error ? `No web results (${body.error}).` : "No web results.");
@@ -1229,6 +1249,7 @@ export function ChatScreen({
       setSearchNote("No internet, answering from memory.");
       return { query, results: [] };
     } finally {
+      if (sink && stepId) sink.markDone(stepId);
       setSearching(false);
     }
   }
@@ -1245,6 +1266,7 @@ export function ChatScreen({
           if (body.task.status === "done" || body.task.status === "error") {
             if (taskPoll.current) clearInterval(taskPoll.current);
             taskPoll.current = null;
+            setLastRunActive(false);
           }
         } catch {
           /* the poll is best effort */
@@ -1271,7 +1293,17 @@ export function ChatScreen({
       if (!res.ok) throw new Error("task endpoint");
       const body = (await res.json()) as { task?: TaskRecord };
       if (!body.task) throw new Error("no task");
-      setTask(body.task);
+      const started = body.task;
+      setTask(started);
+      // The task panel shows the placeholders; the Activity panel shows the
+      // task's own tools, keyed by the task id the brain reports them under.
+      const tagged = messagesRef.current.map((row) => (row.content === "On it…" ? { ...row, runId: started.id } : row));
+      const last = tagged[tagged.length - 1];
+      messagesRef.current = tagged;
+      setMessages(tagged);
+      if (started.chatId && last?.runId) void remember(last, started.chatId);
+      setLastRunId(started.id);
+      setLastRunActive(true);
       setOpenSteps({});
       watchTask(body.task.id);
     } catch {
@@ -1552,6 +1584,7 @@ export function ChatScreen({
     sources: SearchResult[] = [],
     searchQuery = "",
     think = false,
+    runId = "",
   ) {
     const endpoint = await resolveChatBase(bag.brainUrl);
     if (isCurrent()) setVia(endpoint.via);
@@ -1560,6 +1593,8 @@ export function ChatScreen({
     let last = "";
     let lastThink = "";
     let spoke = false;
+    let thinkStarted = 0;
+    let thinkStep = "";
     const result = await streamReply({
       base,
       model,
@@ -1570,6 +1605,17 @@ export function ChatScreen({
         const shown = splitPaidHint(update.answer).text;
         last = shown;
         lastThink = update.thinking;
+        // Thinking time is measured here: from the first thinking delta to the
+        // first real answer text, and shown as "Thought 5s".
+        const sink = runsRef.current.get(runId);
+        if (update.thinking && !last && !thinkStarted && sink) {
+          thinkStarted = Date.now();
+          thinkStep = sink.pushLocal({ kind: "thought", tool: "think", label: "Thinking…", status: "running", startedAt: thinkStarted });
+        }
+        if (shown && thinkStarted && thinkStep && sink) {
+          sink.markDone(thinkStep);
+          thinkStep = "";
+        }
         if (!isCurrent()) return;
         setLive(shown ? { who: route === "paid" ? "paid" : "preyas", text: shown } : null);
         if (route === "local" && shown) {
@@ -1578,6 +1624,7 @@ export function ChatScreen({
         }
       },
     });
+    if (thinkStarted && thinkStep) runsRef.current.get(runId)?.markDone(thinkStep);
     if (isCurrent()) setLive(null);
     const parsed = splitPaidHint(result.text || last);
     if (isCurrent() && route === "local" && parsed.text) void speakPreyas(parsed.text, true, !spoke);
@@ -1599,6 +1646,17 @@ export function ChatScreen({
       if (chat) setActiveChat(chat.id);
       else setNote("Preyas can answer, but this chat is not being saved while the brain is offline.");
     }
+    const runId = `r-${Date.now()}`;
+    runsRef.current.set(runId, activityRef.current);
+    activityRef.current.resubscribe();
+    setLastRunId(runId);
+    setLastRunActive(false);
+    isRunActive.current = true;
+    // Start polling only after the previous run's last look is in, so this run's
+    // cursor never runs past a step that belongs to it.
+    setTimeout(() => {
+      if (isRunActive.current) setLastRunActive(true);
+    }, 0);
     const chatId = activeIdRef.current;
     const epoch = sendEpoch.current;
     const isCurrent = () => activeIdRef.current === chatId && sendEpoch.current === epoch;
@@ -1674,14 +1732,14 @@ export function ChatScreen({
         let sources: SearchResult[] = [];
         let searchQuery = "";
         if (shouldWebSearch(trimmed)) {
-          const found = await runWebSearch(trimmed);
+          const found = await runWebSearch(trimmed, runId);
           sources = found.results;
           searchQuery = found.query;
           if (!sources.length && isCurrent()) setChip("Web search found nothing");
         }
         const think = thinkForced || wantsThinking(trimmed);
         if (think && isCurrent()) setThinking(true);
-        const local = await ask("local", history, trimmed, isCurrent, sources, searchQuery, think).finally(() => {
+        const local = await ask("local", history, trimmed, isCurrent, sources, searchQuery, think, runId).finally(() => {
           if (isCurrent()) setThinking(false);
         });
         const cleaned = splitPaidHint(local.text);
@@ -1693,6 +1751,7 @@ export function ChatScreen({
             content: cleaned.text,
             who: "preyas",
             model: "preyas",
+            runId,
             thinking: local.thinking || undefined,
             sources: sources.length ? sources : undefined,
           };
@@ -1717,7 +1776,7 @@ export function ChatScreen({
         }
       }
       if (route.route !== "paid") return;
-      const paidReply = await ask("paid", history, trimmed, isCurrent);
+      const paidReply = await ask("paid", history, trimmed, isCurrent, [], "", false, runId);
       if (!paidReply.ok) {
         if (isCurrent()) setNote(paidReply.error || "The paid model didn't answer.");
         return;
@@ -1730,6 +1789,7 @@ export function ChatScreen({
         who: "paid",
         model: "deepseek-flash",
         costUsd: cost,
+        runId,
         thinking: paidReply.thinking || undefined,
       };
       void remember(paidMsg, chatId);
@@ -1744,6 +1804,10 @@ export function ChatScreen({
         reactionHistory,
         "In one or two sentences, react to what the paid model just said. Stay in your voice.",
         isCurrent,
+        [],
+        "",
+        false,
+        runId,
       );
       if (reaction.ok) {
         const line = splitPaidHint(reaction.text).text;
@@ -1753,6 +1817,7 @@ export function ChatScreen({
           content: line,
           who: "preyas",
           model: "preyas",
+          runId,
           thinking: reaction.thinking || undefined,
         };
         void remember(reply, chatId);
@@ -1765,6 +1830,8 @@ export function ChatScreen({
     } finally {
       bag.thinking = false;
       busy.current = false;
+      isRunActive.current = false;
+      setLastRunActive(false);
     }
   }
   sendRef.current = send;
@@ -2400,7 +2467,11 @@ export function ChatScreen({
                 const label = message.who === "paid" ? "deepseek-flash" : message.who === "preyas" ? "Preyas" : "You";
                 const asBriefing = message.briefingDay ? toBriefing(message.briefingDay, message.content) : null;
                 return (
-                  <View key={`${message.t}-${index}`} style={[styles.bubbleWrap, mine ? styles.bubbleRight : styles.bubbleLeft]}>
+                  <View
+                    key={`${message.t}-${index}`}
+                    style={[styles.msgColumn, mine ? styles.msgMine : styles.msgHis]}
+                  >
+                  <View style={[styles.bubbleWrap, mine ? styles.bubbleRight : styles.bubbleLeft]}>
                     {!mine ? <View style={styles.miniBall} /> : null}
                     <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleHis]}>
                       {!mine ? (
@@ -2481,6 +2552,10 @@ export function ChatScreen({
                       <Text style={styles.time}>{clock(message.t)}{mine ? (read ? "  ✓✓" : "  ✓") : ""}</Text>
                     </View>
                   </View>
+                  {!mine && message.runId ? (
+                    <ActivityPanel state={activity.state} runId={message.runId} style={styles.activityInline} />
+                  ) : null}
+                  </View>
                 );
               })}
               {live ? (
@@ -2536,6 +2611,10 @@ export function ChatScreen({
                   </Pressable>
                 </View>
               ) : null}
+            </View>
+            {/* In normal flow right above the composer, so it can never cover it. */}
+            <View style={styles.previewRow} pointerEvents="box-none">
+              <PreviewCard state={activity.state} runId={lastRunId} mode={preview} brainUrl={bag.brainUrl} />
             </View>
             {chip ? (
               <View style={styles.chipSaved}>
@@ -2986,6 +3065,13 @@ const styles = StyleSheet.create({
   bondInlineText: { color: theme.dim, fontSize: theme.type.label },
   miniBall: { width: theme.size.dot, height: theme.size.dot, borderRadius: theme.size.dot / 2, backgroundColor: theme.accentSoft, borderWidth: 1, borderColor: aqua },
   log: { flex: 1, width: "100%" },
+  /** A message and its Activity panel share one column. */
+  msgColumn: { flexDirection: "column", width: "100%" },
+  msgHis: { alignItems: "flex-start" },
+  msgMine: { alignItems: "flex-end" },
+  activityInline: { maxWidth: 420, alignSelf: "flex-start" },
+  /** The corner preview lives in the flow above the composer. */
+  previewRow: { alignItems: "flex-end", marginTop: theme.space.xs + 2 },
   logWrap: { flex: 1, position: "relative" },
   jumpWrap: { position: "absolute", left: 0, right: 0, bottom: 6, alignItems: "center" },
   jump: { ...panel, borderRadius: 16, minHeight: 36, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 6 },

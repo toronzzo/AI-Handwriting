@@ -66,11 +66,44 @@ export async function planTask(llamaUrl, title, seed = "", options = {}) {
   return [{ text: title, tool: null }];
 }
 
+/** The activity tool id and the one-line detail for a step's tool. */
+function toolDetail(tool) {
+  if (tool.name === "search_notes") return { name: "search_notes", detail: String(tool.query || "") };
+  return { name: String(tool.name), detail: String(tool.path || "") };
+}
+
+/**
+ * Tell the Activity hub a step started and how it ended. `onActivity` is a
+ * hub, a { begin } object or a function; without one nothing happens.
+ * A tool that failed says so ("error"), it never claims to have worked.
+ */
+function activityStep(onActivity, runId, tool) {
+  const noop = { done() {}, fail() {}, stop() {} };
+  if (!onActivity || !tool || !tool.name) return noop;
+  const spec = toolDetail(tool);
+  try {
+    if (typeof onActivity.begin === "function") return onActivity.begin(runId, spec.name, spec.detail);
+    if (typeof onActivity === "function") {
+      const started = onActivity({ tool: spec.name, detail: spec.detail, runId, status: "running" }) || {};
+      return {
+        done: () => onActivity({ ...started, tool: spec.name, detail: spec.detail, runId, status: "done" }),
+        fail: () => onActivity({ ...started, tool: spec.name, detail: spec.detail, runId, status: "error" }),
+        stop: () => onActivity({ ...started, tool: spec.name, detail: spec.detail, runId, status: "stopped" }),
+      };
+    }
+  } catch {
+    /* the feed is a nicety; a task never fails because of it */
+  }
+  return noop;
+}
+
 /** Context for one step: its tool result plus a few related notes. */
 export function stepContext(root, task, step, options = {}) {
-  const { fsRoot, searchNotesImpl = searchNotes } = options;
+  const { fsRoot, searchNotesImpl = searchNotes, onActivity, runId = String(task?.id || "") } = options;
   const chunks = [];
   const tool = step.tool;
+  const mark = tool && tool.name ? activityStep(onActivity, runId, tool) : null;
+  let failed = false;
   if (tool && tool.name === "search_notes") {
     const hits = searchNotesImpl(root, tool.query, 5);
     chunks.push(`Notes matching "${tool.query}":\n${hits.length ? hits.map((n) => `- ${n.text}`).join("\n") : "none"}`);
@@ -81,6 +114,7 @@ export function stepContext(root, task, step, options = {}) {
         `Files in ${listing.path}:\n${listing.entries.map((entry) => (entry.dir ? `${entry.name}/` : entry.name)).join("\n")}`,
       );
     } catch (error) {
+      failed = true;
       chunks.push(`Tool error: ${error instanceof Error ? error.message : String(error)}`);
     }
   } else if (tool && tool.name === "read_file") {
@@ -88,8 +122,13 @@ export function stepContext(root, task, step, options = {}) {
       const file = readTextFile(tool.path, { root: fsRoot });
       chunks.push(`File ${file.path}:\n${file.text.slice(0, 6000)}`);
     } catch (error) {
+      failed = true;
       chunks.push(`Tool error: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+  if (mark) {
+    if (failed) mark.fail();
+    else mark.done();
   }
   const related = searchNotesImpl(root, step.text, 3);
   if (related.length) chunks.push(`Related notes:\n${related.map((n) => `- ${n.text}`).join("\n")}`);
@@ -116,7 +155,8 @@ export function launchTaskRun(root, task, options = {}) {
 }
 
 export async function runTask(root, task, options = {}) {
-  const { llamaUrl, fetchImpl = fetch, fsRoot, searchNotesImpl, guard = reviewAction, judge } = options;
+  const id = String(task?.id || "");
+  const { llamaUrl, fetchImpl = fetch, fsRoot, searchNotesImpl, guard = reviewAction, judge, onActivity } = options;
   const modelJudge =
     judge !== undefined
       ? judge
@@ -161,7 +201,7 @@ export async function runTask(root, task, options = {}) {
     }
 
     try {
-      const context = stepContext(root, task, step, { fsRoot, searchNotesImpl });
+      const context = stepContext(root, task, step, { fsRoot, searchNotesImpl, onActivity, runId: id });
       const result = await askLlama(
         llamaUrl,
         [

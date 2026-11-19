@@ -159,3 +159,46 @@ test("step context uses notes and safe files, and refuses paths outside", () => 
   assert.match(notes, /Dentist on Friday/);
   done();
 });
+
+test("a tool step reports itself to the activity hub", () => {
+  const { root, done } = drive();
+  fs.mkdirSync(path.join(root, "projects"), { recursive: true });
+  fs.writeFileSync(path.join(root, "projects", "plan.txt"), "rest");
+  const task = newTask(root, { title: "t", steps: [{ text: "look" }] });
+  const seen = [];
+  const onActivity = {
+    begin(runId, tool, detail) {
+      seen.push({ runId, tool, detail, status: "running" });
+      return {
+        done: () => seen.push({ runId, tool, status: "done" }),
+        fail: () => seen.push({ runId, tool, status: "error" }),
+        stop: () => seen.push({ runId, tool, status: "stopped" }),
+      };
+    },
+  };
+  stepContext(
+    root,
+    task,
+    { id: 1, text: "read it", status: "pending", tool: { name: "read_file", path: "projects/plan.txt" } },
+    { fsRoot: root, onActivity },
+  );
+  stepContext(
+    root,
+    task,
+    { id: 2, text: "read it", status: "pending", tool: { name: "read_file", path: "/etc/passwd" } },
+    { fsRoot: root, onActivity },
+  );
+  stepContext(root, task, { id: 3, text: "plain", status: "pending", tool: null }, { fsRoot: root, onActivity });
+  assert.deepEqual(seen, [
+    { runId: task.id, tool: "read_file", detail: "projects/plan.txt", status: "running" },
+    { runId: task.id, tool: "read_file", status: "done" },
+    { runId: task.id, tool: "read_file", detail: "/etc/passwd", status: "running" },
+    { runId: task.id, tool: "read_file", status: "error" },
+  ]);
+  // No hub at all is fine.
+  assert.match(
+    stepContext(root, task, { id: 4, text: "look", status: "pending", tool: { name: "search_notes", query: "x" } }, { fsRoot: root }),
+    /Notes matching/,
+  );
+  done();
+});
