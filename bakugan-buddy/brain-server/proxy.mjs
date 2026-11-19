@@ -87,6 +87,7 @@ import { launchTaskRun, planTask, taskRunActive } from "./lib/taskRunner.mjs";
 import { createCoach } from "./lib/coach/engine.mjs";
 import { capUsd, spentTodayUsd } from "./lib/coach/spendGate.mjs";
 import { handleOsRoute } from "./lib/os/routes.mjs";
+import { findArt, isSlot } from "./lib/art.mjs";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 
@@ -1588,6 +1589,33 @@ const server = http.createServer(async (req, res) => {
       if (!dataDir) return coachUnavailable(res);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ spentTodayUsd: spentTodayUsd(dataDir), capUsd: capUsd(dataDir) }));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname.startsWith("/v1/art/")) {
+      // The user's own pictures (slice 10). Read only: the slot name is
+      // checked against a fixed whitelist before the disk is touched, the file
+      // must really sit on the Agent drive, and nothing is cached so dropping a
+      // picture in shows up on the next load.
+      const slot = decodeURIComponent(url.pathname.slice("/v1/art/".length));
+      if (!isSlot(slot)) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "bad slot" }));
+        return;
+      }
+      let found = null;
+      try {
+        found = findArt(slot);
+      } catch {
+        found = null;
+      }
+      if (!found) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "no image" }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": found.type, "Cache-Control": "no-cache" });
+      res.end(fs.readFileSync(found.path));
       return;
     }
 

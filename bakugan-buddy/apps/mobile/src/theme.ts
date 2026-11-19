@@ -46,6 +46,10 @@ export const theme = {
   /** The LevelCard hero stage gradient, added in the Today slice. */
   stageTop: colour("stageTop"),
   stageBottom: colour("stageBottom"),
+  /** Image slots (slice 10): the empty box and the shade over a bg picture. */
+  slotPlaceholder: colour("slotPlaceholder"),
+  bgShadeTop: colour("bgShadeTop"),
+  bgShadeBottom: colour("bgShadeBottom"),
   /** Font stacks; only the web has named fonts loaded. */
   font: {
     body: isWeb ? "Inter, system-ui, -apple-system, sans-serif" : undefined,

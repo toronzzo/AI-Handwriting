@@ -34,7 +34,10 @@ export type PaletteKey =
   | "shadow"
   | "scrim"
   | "stageTop"
-  | "stageBottom";
+  | "stageBottom"
+  | "slotPlaceholder"
+  | "bgShadeTop"
+  | "bgShadeBottom";
 
 export type Palette = Record<PaletteKey, string>;
 
@@ -68,6 +71,9 @@ const KEYS: readonly PaletteKey[] = [
   "scrim",
   "stageTop",
   "stageBottom",
+  "slotPlaceholder",
+  "bgShadeTop",
+  "bgShadeBottom",
 ];
 
 export const DAY: Palette = {
@@ -99,6 +105,10 @@ export const DAY: Palette = {
   scrim: "rgba(10,24,50,0.45)",
   stageTop: "#4F88CC",
   stageBottom: "#9CC4EA",
+  /* Image slots: the empty picture box, and the shade over a bg picture. */
+  slotPlaceholder: "#DCE6F2",
+  bgShadeTop: "rgba(63,120,192,0.55)",
+  bgShadeBottom: "rgba(156,196,234,0.60)",
 };
 
 export const NIGHT: Palette = {
@@ -130,7 +140,33 @@ export const NIGHT: Palette = {
   scrim: "rgba(10,24,50,0.45)",
   stageTop: "#1B2B49",
   stageBottom: "#2C4572",
+  slotPlaceholder: "#B9C4D3",
+  bgShadeTop: "rgba(22,34,60,0.80)",
+  bgShadeBottom: "rgba(35,54,88,0.85)",
 };
+
+/**
+ * Blend two `#RRGGBB` colours channel by channel, `t` 0 = from and `t` 1 = to.
+ * Used to draw the small gradients the app shows as stacked bands (the level
+ * card stage and the empty image slot), since there is no gradient package.
+ * Non-hex values fall back to the `to` colour so translucent tokens are safe.
+ */
+export function mixHex(from: string, to: string, t: number): string {
+  const parse = (value: string): number | null => {
+    const hex = value.trim();
+    return /^#[0-9a-fA-F]{6}$/.test(hex) ? parseInt(hex.slice(1), 16) : null;
+  };
+  const a = parse(from);
+  const b = parse(to);
+  if (a === null || b === null) return b === null ? from : to;
+  const channel = (shift: number) => {
+    const ca = (a >> shift) & 255;
+    const cb = (b >> shift) & 255;
+    return Math.round(ca + (cb - ca) * t);
+  };
+  const value = (channel(16) << 16) | (channel(8) << 8) | channel(0);
+  return `#${value.toString(16).padStart(6, "0")}`;
+}
 
 /** Night runs from 19:00 through 05:59 local time (inclusive hour bands). */
 export function isNight(d: Date): boolean {

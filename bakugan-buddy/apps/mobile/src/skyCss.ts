@@ -58,3 +58,29 @@ export function installSky(): void {
   }
   style.textContent = skyCss();
 }
+
+/**
+ * The shade drawn over the user's own `bg` picture (slice 10). The app has no
+ * gradient package, so it is six stacked bands from the top colour to the
+ * bottom one: day rgba(63,120,192,0.55) → rgba(156,196,234,0.60), night
+ * rgba(22,34,60,0.80) → rgba(35,54,88,0.85). Those values live in the palette
+ * (`bgShadeTop` / `bgShadeBottom`); nothing is hard-coded here.
+ */
+export const SHADE_BANDS = [0, 0.2, 0.4, 0.6, 0.8, 1] as const;
+
+/**
+ * Mix two translucent colour strings channel by channel, `t` 0 = from and
+ * `t` 1 = to. Accepts `rgb(r,g,b)` / `rgba(r,g,b,a)`. The result is used for a
+ * single layer, so its alpha is the mixed alpha (0..1), not scaled.
+ */
+export function mixColour(from: string, to: string, t: number): string {
+  const parse = (value: string): number[] => {
+    const inner = value.slice(value.indexOf("(") + 1, value.lastIndexOf(")")).split(",");
+    return [0, 1, 2, 3].map((n) => Number(inner[n] ?? (n === 3 ? 1 : 0)));
+  };
+  const a = parse(from);
+  const b = parse(to);
+  const mixed = a.map((channel, n) => Math.round(channel + ((b[n] ?? 0) - channel) * t));
+  const alpha = Math.max(0, Math.min(1, mixed[3] ?? 1));
+  return `rgba(${mixed[0]},${mixed[1]},${mixed[2]},${alpha.toFixed(3)})`;
+}

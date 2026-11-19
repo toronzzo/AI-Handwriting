@@ -1,11 +1,14 @@
 import { useState } from "react";
 import {
+  Image,
   Pressable,
   SafeAreaView,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
+  type ImageStyle,
+  type ViewStyle,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { BodyWebView, BodyWebViewAPI, type BodyMetrics } from "./src/body/BodyWebView";
@@ -17,6 +20,9 @@ import { MAIN_TABS, SETTINGS_ENTRY, type Section } from "./src/nav";
 import { theme } from "./src/theme";
 import { isWide } from "./src/layout";
 import { Stripe } from "./src/ui/Stripe";
+import { useArt } from "./src/art/slots.ts";
+import { SHADE_BANDS, mixColour } from "./src/skyCss.ts";
+import { usePalette } from "./src/usePalette";
 
 /** Web lets the sky show through; the iPhone paints the page colour. */
 const isWeb = typeof document !== "undefined";
@@ -29,6 +35,9 @@ export default function App() {
   const [advanced, setAdvanced] = useState<Advanced | null>(null);
   const [metrics, setMetrics] = useState<BodyMetrics | null>(null);
   const wide = isWide(useWindowDimensions().width);
+  const palette = usePalette();
+  const bgArt = useArt("bg");
+  const hasBg = bgArt.status === "ready" && Boolean(bgArt.url);
 
   const openAdvanced = (tab: Advanced) => setAdvanced(tab);
 
@@ -118,7 +127,24 @@ export default function App() {
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
-      <View style={styles.shell}>
+      <View style={shellStyles.shell}>
+        {hasBg ? (
+          // The user's own `bg` picture, behind everything, with a shade on
+          // top so paper panels and text keep their contrast. It goes FIRST so
+          // the shell below paints over it; no picture means no shade and the
+          // sky shows through.
+          <View style={backdropStyles.wrap} pointerEvents="none" accessibilityElementsHidden>
+            <Image source={{ uri: bgArt.url }} style={backdropStyles.image} resizeMode="cover" alt="" />
+            <View style={backdropStyles.shade}>
+              {SHADE_BANDS.map((t) => (
+                <View
+                  key={t}
+                  style={{ flex: 1, backgroundColor: mixColour(palette.bgShadeTop, palette.bgShadeBottom, t) }}
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
         {wide ? <View style={styles.sidebar}>{rails}</View> : null}
 
         <View style={styles.stage}>
@@ -163,7 +189,7 @@ export default function App() {
         </View>
       </View>
 
-      {!wide ? <View style={styles.tabbar}>{bar}</View> : null}
+      {!wide ? <View style={[styles.tabbar, mobileBarStyles.bar]}>{bar}</View> : null}
     </SafeAreaView>
   );
 }
@@ -184,7 +210,6 @@ function AdvancedWrap({ title, onBack, children }: { title: string; onBack: () =
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: isWeb ? "transparent" : theme.bg },
-  shell: { flex: 1, flexDirection: "row" },
   stage: { flex: 1, backgroundColor: isWeb ? "transparent" : theme.bg },
   fill: { flex: 1 },
   hidden: { height: 0, overflow: "hidden", flex: 0 },
@@ -289,3 +314,32 @@ const styles = StyleSheet.create({
   },
   qbtnT: { color: theme.text, fontSize: theme.type.caption, fontWeight: "600" },
 });
+
+/**
+ * The fixed bg picture and its shade.
+ *
+ * The picture is the first child of the shell and sits at the same stack level
+ * as the shell's other children, so it paints first and the rail (and the
+ * iPhone bottom bar) paint over it. The sky itself is only `html`'s own
+ * background, so the picture covers it, and the shade on top keeps paper
+ * panels and text readable.
+ */
+const backdropStyles: { wrap: ViewStyle; image: ImageStyle; shade: ViewStyle } = {
+  wrap: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none", zIndex: 0 },
+  image: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%" },
+  shade: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+};
+
+/**
+ * The shell row. `relative` makes it the containing block for the fixed
+ * picture, so the picture fills the window rather than one tab, on both
+ * platforms.
+ */
+const shellStyles: { shell: ViewStyle } = {
+  shell: { flex: 1, flexDirection: "row", position: "relative" },
+};
+
+/** On the iPhone the bottom bar must paint over the bg picture, not under it. */
+const mobileBarStyles: { bar: ViewStyle } = {
+  bar: { zIndex: 1 },
+};

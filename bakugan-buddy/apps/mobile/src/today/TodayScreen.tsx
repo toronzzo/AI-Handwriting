@@ -6,6 +6,7 @@ import { Stripe } from "../ui/Stripe";
 import { DailyXp } from "./DailyXp";
 import { FocusQuest } from "./FocusQuest";
 import { LevelCard } from "./LevelCard";
+import { PathsRow } from "./PathsRow";
 import { QuestList } from "./QuestList";
 import { Radar } from "./Radar";
 import { useRpg } from "./useRpg";
@@ -19,7 +20,8 @@ function clockText(d: Date): string {
 /**
  * The Today dashboard: header with the brand chip and the live clock, then
  * the level card and daily XP on the left, the radar in the centre and the
- * quests on the right. Plain scroll flow, nothing fixed.
+ * quests on the right, and the PATHS row across the bottom. Plain scroll
+ * flow, nothing fixed.
  */
 export function TodayScreen() {
   const { snapshot } = useRpg();
@@ -88,6 +90,8 @@ export function TodayScreen() {
           <FocusQuest />
         </View>
       )}
+
+      <PathsRow />
     </ScrollView>
   );
 }
