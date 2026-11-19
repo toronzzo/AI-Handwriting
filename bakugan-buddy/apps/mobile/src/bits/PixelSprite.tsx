@@ -12,9 +12,10 @@
  * when the user asked for reduced motion (frame 0 only).
  */
 import { useEffect, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import Svg, { Rect } from "react-native-svg";
 import { bitColour } from "./bitPalette.ts";
+import { fitScale } from "./fitScale.ts";
 import type { Sprite } from "./sprite.ts";
 import { usePageVisible } from "../ui/usePageVisible";
 import { useReducedMotion } from "../ui/useReducedMotion";
@@ -29,6 +30,12 @@ type Props = {
   frames?: number[];
   /** Width, in device pixels, of one art pixel. Whole numbers only. */
   scale?: number;
+  /**
+   * Size the sprite to its box instead: fill the box, centre it, and pick the
+   * largest whole scale covering about 60% of the box height (FIX-2). The
+   * parent must give the box a size for this to have an effect.
+   */
+  fit?: boolean;
   /** What a screen reader should say; defaults to "Preyas". */
   accessibilityLabel?: string;
 };
@@ -57,11 +64,24 @@ export function frameAt(frames: number[], step: number): number {
   return frames[step % frames.length];
 }
 
-export function PixelSprite({ sprite, frames = [0], scale = 6, accessibilityLabel = "Preyas" }: Props) {
+export function PixelSprite({
+  sprite,
+  frames = [0],
+  scale = 6,
+  fit = false,
+  accessibilityLabel = "Preyas",
+}: Props) {
   const visible = usePageVisible();
   const reduce = useReducedMotion();
   const [step, setStep] = useState(0);
+  /** The box this sprite was given, when fitting; 0 x 0 until it is measured. */
+  const [box, setBox] = useState({ width: 0, height: 0 });
   const still = reduce || !visible || frames.length < 2;
+
+  const onLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    setBox((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+  };
 
   useEffect(() => {
     if (still) {
@@ -72,7 +92,9 @@ export function PixelSprite({ sprite, frames = [0], scale = 6, accessibilityLabe
     return () => clearInterval(timer);
   }, [still]);
 
-  const size = Number.isFinite(scale) && scale > 0 ? Math.round(scale) : 1;
+  const fixed = Number.isFinite(scale) && scale > 0 ? Math.round(scale) : 1;
+  // Fitting waits for a real box; until then the plain scale draws something.
+  const size = fit ? fitScale(box.height, box.width, sprite.w, fixed) : fixed;
   const index = still ? 0 : step % frames.length;
   const frameNumber = frameAt(frames, index);
   const frame = sprite.frames[frameNumber] ?? sprite.frames[0] ?? [];
@@ -80,7 +102,8 @@ export function PixelSprite({ sprite, frames = [0], scale = 6, accessibilityLabe
 
   return (
     <View
-      style={[styles.frame, { width: sprite.w * size, height: sprite.h * size }]}
+      onLayout={fit ? onLayout : undefined}
+      style={[styles.frame, fit ? styles.fit : { width: sprite.w * size, height: sprite.h * size }]}
       accessibilityRole="image"
       accessibilityLabel={accessibilityLabel}
     >
@@ -103,4 +126,6 @@ export function PixelSprite({ sprite, frames = [0], scale = 6, accessibilityLabe
 
 const styles = StyleSheet.create({
   frame: { alignItems: "center", justifyContent: "center" },
+  /** Fitting: take the whole box so the sprite can be centred inside it. */
+  fit: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
 });

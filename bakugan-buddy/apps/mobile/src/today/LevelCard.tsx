@@ -107,12 +107,24 @@ export function LevelCard() {
             <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable />
           </View>
         ) : (
-          <View style={[StyleSheet.absoluteFill, { zIndex: 1 }]} pointerEvents="box-none">
+          /**
+           * FIX-2: without a picture the empty placeholder is the BACKGROUND
+           * (drawn first, lowest layer) and Preyas is drawn on top of it. It
+           * used to be an absoluteFill with zIndex 1, which painted over him.
+           *
+           * box-none: the gradient and the picture glyph ignore taps, but the
+           * "Change photo" button inside it still takes them, and it carries a
+           * higher zIndex than Preyas so it also shows on top of him.
+           */
+          <View style={styles.heroBack}>
             <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable />
           </View>
         )}
-        <View style={hasHero ? styles.heroCorner : styles.hero}>
-          <PreyasHeroSwitch talking={false} short={false} fill />
+        <View
+          style={hasHero ? styles.heroCorner : styles.hero}
+          pointerEvents={hasHero ? "auto" : "box-none"}
+        >
+          <PreyasHeroSwitch talking={false} short={false} fill fitBox={!hasHero} />
         </View>
         {levelUp ? (
           <Animated.View
@@ -189,7 +201,22 @@ const styles = StyleSheet.create({
    *  bottom-left corner. It is a later sibling of the level-up pill and XP
    *  chips, so the button is never covered by them. */
   heroSlot: { flex: 1, height: "100%", borderWidth: 0 },
-  hero: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  /**
+   * FIX-2: the empty placeholder sits UNDER Preyas. It has no zIndex, so the
+   * later sibling (the Preyas layer, zIndex 2) paints over it. Its own
+   * "Change photo" button is lifted to zIndex 3 by ArtSlot, so the button
+   * still shows and still takes taps on top of him.
+   */
+  heroBack: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
+  },
+  /** Preyas on top of the placeholder (and of the empty stage). */
+  hero: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 2 },
   /** With a hero picture the ball keeps the bottom-right half of the stage. */
   heroCorner: {
     position: "absolute",
