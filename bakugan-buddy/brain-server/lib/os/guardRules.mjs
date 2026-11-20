@@ -74,6 +74,9 @@ export const URL_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 export const MAX_STRING_ARG = 4000;
 // eslint-disable-next-line no-control-regex
 export const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+// eslint-disable-next-line no-control-regex
+/** File content may contain newlines and tabs; other control characters stay blocked. */
+export const FILE_CONTENT_CONTROLS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
 /** Path-like arguments that must resolve under the safe roots. */
 const PATH_ARG_KEYS = ["path", "file", "target", "source", "destination", "cwd"];
@@ -142,7 +145,10 @@ export function reviewRules(action, deps = {}) {
     if (value.length > MAX_STRING_ARG) {
       findings.push({ id: "R7", verdict: "block", why: `argument "${name}" is longer than ${MAX_STRING_ARG} characters` });
     }
-    if (CONTROL_CHARS.test(value)) {
+    // File content is the one place newlines are legitimate; other control
+    // characters stay blocked everywhere.
+    const isFileContent = (kind === "files_write_file" || kind === "files_edit_file") && name === "content";
+    if ((isFileContent ? FILE_CONTENT_CONTROLS : CONTROL_CHARS).test(value)) {
       findings.push({ id: "R7", verdict: "block", why: `argument "${name}" contains control characters` });
     }
     if (PATH_SEGMENT_DOTS.test(value)) {

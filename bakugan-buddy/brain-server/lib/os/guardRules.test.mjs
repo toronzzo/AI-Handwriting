@@ -268,3 +268,17 @@ test("browser reads allow, interactive browser tools ask", () => {
   assert.equal(file.verdict, "block");
   assert.equal(file.id, "R7");
 });
+
+test("multi-line file content is allowed, other control characters stay blocked", () => {
+  const multiline = decide(
+    reviewRules(action({ kind: "files_write_file", args: { path: "/Volumes/Agent/agent/tmp/x.txt", content: "line one\nline two\ttabbed" } })),
+  );
+  assert.equal(multiline.verdict, "ask", "newlines in file content must not be an R7 block");
+  assert.notEqual(multiline.id, "R7");
+
+  const nul = decide(
+    reviewRules(action({ kind: "files_write_file", args: { path: "/Volumes/Agent/agent/tmp/x.txt", content: "bad\u0000byte" } })),
+  );
+  assert.equal(nul.verdict, "block");
+  assert.equal(nul.id, "R7");
+});
