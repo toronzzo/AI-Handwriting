@@ -4,13 +4,51 @@
  * the local model is only a tie-breaker for "unsure" and can only tighten.
  */
 import { resolveSafePath, SAFE_ROOT } from "../safeFs.mjs";
+import { SHELL_SECRET } from "./terminalServer.mjs";
 
 export const KINDS = {
-  read: new Set(["read_file", "list_files", "search_notes", "search_vault"]),
+  read: new Set([
+    "read_file",
+    "list_files",
+    "search_notes",
+    "search_vault",
+    "files_read_text_file",
+    "files_read_multiple_files",
+    "files_list_directory",
+    "files_directory_tree",
+    "files_search_files",
+    "files_get_file_info",
+    "files_list_allowed_directories",
+    "browser_navigate",
+    "browser_navigate_back",
+    "browser_snapshot",
+    "browser_console_messages",
+    "browser_network_requests",
+    "browser_tabs",
+    "browser_wait_for",
+    "browser_take_screenshot",
+  ]),
   write: new Set(["write_vault", "add_note", "add_reminder"]),
+  /** File writes and moves: always a Yes/No confirm (R9), never auto-allowed. */
+  filewrite: new Set(["files_write_file", "files_edit_file", "files_create_directory", "files_move_file"]),
   destructive: new Set(["delete_note", "delete_reminder", "delete_file", "overwrite_file"]),
   paid: new Set(["paid_call", "run_harness"]),
-  control: new Set(["computer_click", "computer_keys", "computer_open_app"]),
+  control: new Set([
+    "computer_click",
+    "computer_keys",
+    "computer_open_app",
+    "shell_run",
+    "browser_click",
+    "browser_type",
+    "browser_fill_form",
+    "browser_select_option",
+    "browser_hover",
+    "browser_drag",
+    "browser_press_key",
+    "browser_file_upload",
+    "browser_handle_dialog",
+    "browser_evaluate",
+  ]),
 };
 
 export function kindClass(kind) {
@@ -37,9 +75,31 @@ export const MAX_STRING_ARG = 4000;
 // eslint-disable-next-line no-control-regex
 export const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
+/** Path-like arguments that must resolve under the safe roots. */
+const PATH_ARG_KEYS = ["path", "file", "target", "source", "destination", "cwd"];
+
 function pathArgs(action) {
   if (!action || typeof action.args !== "object" || action.args === null) return [];
-  return ["path", "file", "target"].map((key) => action.args[key]).filter((value) => typeof value === "string");
+  const out = [];
+  for (const key of PATH_ARG_KEYS) {
+    const value = action.args[key];
+    if (typeof value === "string") out.push(value);
+    else if (Array.isArray(value)) for (const entry of value) if (typeof entry === "string") out.push(entry);
+  }
+  return out;
+}
+
+/** True when a path resolves inside the Agent drive or the repo folder. */
+export function pathIsSafe(target, deps = {}) {
+  for (const root of [deps.fsRoot || SAFE_ROOT, ...(deps.repoRoot ? [deps.repoRoot] : [])]) {
+    try {
+      resolveSafePath(target, root);
+      return true;
+    } catch {
+      /* try the next root */
+    }
+  }
+  return false;
 }
 
 /**
@@ -59,14 +119,19 @@ export function reviewRules(action, deps = {}) {
     findings.push({ id: "R1", verdict: "block", why: `unknown tool kind "${kind || "(none)"}"` });
   }
 
-  // R2: file paths resolve under the safe root; secret names are off limits.
+  // R2: file paths resolve under the safe roots; secret names are off limits.
   for (const target of pathArgs(action)) {
-    try {
-      resolveSafePath(target, deps.fsRoot || SAFE_ROOT);
-    } catch (error) {
-      findings.push({ id: "R2", verdict: "block", why: `path is outside the safe root (${error instanceof Error ? error.message : String(error)})` });
+    if (!pathIsSafe(target, deps)) {
+      findings.push({ id: "R2", verdict: "block", why: "path is outside the safe roots (/Volumes/Agent and the repo folder)" });
     }
     if (SECRET_SEGMENT.test(target)) {
+      findings.push({ id: "R2", verdict: "block", why: "secrets are off limits" });
+    }
+  }
+  // R2-shell: a shell command must not touch secret paths either.
+  if (kind === "shell_run") {
+    const command = String(args.command || "");
+    if (SHELL_SECRET.test(command)) {
       findings.push({ id: "R2", verdict: "block", why: "secrets are off limits" });
     }
   }
@@ -90,7 +155,7 @@ export function reviewRules(action, deps = {}) {
 
   // R5: an instruction found inside content cannot write, destroy, spend or
   // control. Checked before R3/R4/R6 so this is the rule that is reported.
-  if (origin === "content" && ["write", "destructive", "paid", "control"].includes(cls)) {
+  if (origin === "content" && ["write", "filewrite", "destructive", "paid", "control"].includes(cls)) {
     findings.push({ id: "R5", verdict: "block", why: "an instruction found inside content, not from you" });
   }
 
@@ -129,6 +194,17 @@ export function reviewRules(action, deps = {}) {
     } else if (!WRITE_INTENT.vault.test(userRequest)) {
       findings.push({ id: "R6", verdict: "unsure", why: "you asked to write something, but not clearly to save or remember it" });
     }
+  }
+
+  // R9: file writes, edits and moves always need a Yes/No card, never auto-allow.
+  if (cls === "filewrite") {
+    findings.push({ id: "R9", verdict: "ask", why: "writing or changing files needs your confirmation" });
+  }
+
+  // R10: shell commands always need a Yes/No card (checked before R8 so its
+  // plain-English reason is the one reported).
+  if (kind === "shell_run") {
+    findings.push({ id: "R10", verdict: "ask", why: "running a shell command needs your confirmation" });
   }
 
   // R8: control kinds are always ask (a later slice's deny list may block first).

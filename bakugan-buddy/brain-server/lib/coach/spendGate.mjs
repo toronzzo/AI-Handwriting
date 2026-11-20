@@ -42,13 +42,24 @@ function sumMoneyFile(file, day, field) {
   return total;
 }
 
-/** Sum of paid chat and Harness cost for the local calendar day. */
+/** Sum of paid chat, Harness and tool-task cost for the local calendar day. */
 export function spentTodayUsd(dataDir, now = new Date()) {
   if (!dataDir) return 0;
   const day = dayKeyOf(now instanceof Date ? now.getTime() : Number(now));
   const chat = sumMoneyFile(path.join(dataDir, "history", "chat.jsonl"), day, "costUsd");
   const harness = sumMoneyFile(path.join(dataDir, "spend", "harness.jsonl"), day, "usd");
-  return chat + harness;
+  const tasks = sumMoneyFile(path.join(dataDir, "spend", "tasks.jsonl"), day, "usd");
+  return chat + harness + tasks;
+}
+
+/** Append one tool-task spend line: <dataDir>/spend/tasks.jsonl {t, usd}. */
+export function appendTaskSpend(dataDir, usd, now = new Date()) {
+  const value = Number(usd);
+  if (!dataDir || !Number.isFinite(value) || value <= 0) return;
+  const dir = path.join(dataDir, "spend");
+  fs.mkdirSync(dir, { recursive: true });
+  const line = { t: (now instanceof Date ? now.getTime() : Number(now)) || Date.now(), usd: value };
+  fs.appendFileSync(path.join(dir, "tasks.jsonl"), `${JSON.stringify(line)}\n`);
 }
 
 /** The daily cap from the spend setting; missing/invalid -> DEFAULT_CAP_USD. */
