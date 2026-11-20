@@ -318,18 +318,35 @@ export async function runToolTask(root, task, options = {}) {
   task.updated = Date.now();
   saveTask(root, task);
 
-  await runToolLoop(task, {
-    callModel,
-    review,
-    execute,
-    confirm,
-    save: () => saveTask(root, task),
-    activity: onActivity,
-    maxSteps,
-    confirmTtlMs,
-    now,
-    onLog,
-  });
+  try {
+    await runToolLoop(task, {
+      callModel,
+      review,
+      execute,
+      confirm,
+      save: () => saveTask(root, task),
+      activity: onActivity,
+      maxSteps,
+      confirmTtlMs,
+      now,
+      onLog,
+    });
+  } catch (error) {
+    // Both models down, or the loop itself broke: record it, never hang "running".
+    task.status = "error";
+    task.steps = [
+      ...(task.steps || []),
+      {
+        id: (task.steps ? task.steps.length : 0) + 1,
+        text: "The run failed",
+        status: "error",
+        result: error instanceof Error ? error.message : String(error),
+        tool: null,
+      },
+    ];
+    task.updated = Date.now();
+    saveTask(root, task);
+  }
 
   if (totalUsd > 0) {
     try {

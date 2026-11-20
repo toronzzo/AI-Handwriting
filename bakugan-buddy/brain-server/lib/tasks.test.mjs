@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { addNote } from "./notes.mjs";
 import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./tasks.mjs";
-import { launchTaskRun, planTask, runTask, stepContext, taskRunActive } from "./taskRunner.mjs";
+import { launchTaskRun, planTask, runTask, runToolTask, stepContext, taskRunActive } from "./taskRunner.mjs";
 
 function drive() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "preyas-tasks-"));
@@ -200,5 +200,24 @@ test("a tool step reports itself to the activity hub", () => {
     stepContext(root, task, { id: 4, text: "look", status: "pending", tool: { name: "search_notes", query: "x" } }, { fsRoot: root }),
     /Notes matching/,
   );
+  done();
+});
+
+test("a tool-loop task records an error instead of hanging when both models are down", async () => {
+  const { root, done } = drive();
+  const task = newTask(root, { title: "open example.com", chatId: "c", steps: [], toolLoop: true });
+  const down = async () => {
+    throw new Error("network is down");
+  };
+  const finished = await runToolTask(root, task, {
+    llamaUrl: "http://llama",
+    gatewayUrl: "http://gw",
+    fetchImpl: down,
+    hub: null,
+  });
+  assert.equal(finished.status, "error");
+  assert.equal(finished.steps[finished.steps.length - 1].status, "error");
+  assert.match(finished.steps[finished.steps.length - 1].result, /network is down/);
+  assert.equal(loadTask(root, task.id).status, "error");
   done();
 });
