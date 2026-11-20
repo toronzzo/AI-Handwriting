@@ -115,6 +115,9 @@ jobs:
       - name: Brain OS tests
         run: npm run test:os
 
+      - name: Preyas world sprite export test
+        run: npm run test:preyas-world:node
+
       - name: Install studio (lockfile)
         run: npm ci
         working-directory: bakugan-buddy/studio

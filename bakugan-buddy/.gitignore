@@ -10,6 +10,9 @@ studio/models/**
 *.gguf
 *.onnx
 
+# Godot project cache (Preyas World)
+.godot/
+
 # Private Preyas pack (keep templates)
 characters/preyas/persona.json
 characters/preyas/lore.md
