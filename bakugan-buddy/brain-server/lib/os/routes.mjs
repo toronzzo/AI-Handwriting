@@ -116,7 +116,8 @@ function appendRpgEvent(dataDir, type, data, nowMs, now) {
 
 /**
  * handleOsRoute(ctx) -> true when it answered, false when the path is not one
- * of its routes. ctx = { req, res, url, dataDir, readJson, readBody, now }.
+ * of its routes. ctx = { req, res, url, dataDir, readJson, readBody, now,
+ * capabilities, selfKnowledge, power }.
  */
 export async function handleOsRoute(ctx) {
   const { req, res, url, dataDir } = ctx;
@@ -135,6 +136,55 @@ export async function handleOsRoute(ctx) {
   if (url.pathname === "/v1/persona/versions" && req.method === "GET") {
     // Revision lines only; the persona text never leaves the live file.
     return answered(res, 200, { versions: listVersions(dataDir) });
+  }
+
+  // Self-knowledge (this PR): what Preyas can really do right now, plus the
+  // changelog. Refreshed on every call so About Preyas is not stale.
+  if (url.pathname === "/v1/capabilities" && req.method === "GET") {
+    if (!ctx.capabilities) return answered(res, 503, { error: "capabilities_unavailable" });
+    let snapshot = null;
+    try {
+      snapshot = await ctx.capabilities.refresh();
+    } catch {
+      snapshot = ctx.capabilities.snapshot ? ctx.capabilities.snapshot() : null;
+    }
+    if (!snapshot) return answered(res, 503, { error: "capabilities_unavailable" });
+    const about = ctx.selfKnowledge && typeof ctx.selfKnowledge.about === "function" ? ctx.selfKnowledge.about() : null;
+    return answered(res, 200, { ...snapshot, about });
+  }
+
+  // Power (this PR): status dots and the three buttons in Settings. All of
+  // these sit behind the normal pairing gate in proxy.mjs.
+  if (url.pathname === "/v1/power/status" && req.method === "GET") {
+    if (!ctx.power) return answered(res, 503, { error: "power_unavailable" });
+    return answered(res, 200, await ctx.power.status());
+  }
+
+  if (url.pathname === "/v1/power/restart" && req.method === "POST") {
+    if (!ctx.power) return answered(res, 503, { error: "power_unavailable" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    const result = await ctx.power.restart(String(body.service || ""));
+    return answered(res, result.ok ? 202 : 400, result);
+  }
+
+  if (url.pathname === "/v1/power/off" && req.method === "POST") {
+    if (!ctx.power) return answered(res, 503, { error: "power_unavailable" });
+    const result = await ctx.power.off();
+    return answered(res, result.ok ? 202 : 503, result);
+  }
+
+  if (url.pathname === "/v1/power/autostart" && req.method === "GET") {
+    if (!ctx.power) return answered(res, 503, { error: "power_unavailable" });
+    return answered(res, 200, await ctx.power.autostartStatus());
+  }
+
+  if (url.pathname === "/v1/power/autostart" && req.method === "POST") {
+    if (!ctx.power) return answered(res, 503, { error: "power_unavailable" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    if (typeof body.on !== "boolean") return answered(res, 400, { error: "on_must_be_boolean" });
+    return answered(res, 200, await ctx.power.setAutostart(body.on));
   }
 
   // The brain (slice N2): a snapshot of every neuron, and the live SSE feed.

@@ -113,7 +113,20 @@ jobs:
           bash -n bakugan-buddy/brain-server/transcribe.sh
           bash -n bakugan-buddy/brain-server/speak.sh
           node --check bakugan-buddy/brain-server/lib/speech.mjs
-          node --experimental-strip-types --disable-warning=ExperimentalWarning --test bakugan-buddy/brain-server/lib/memory.test.mjs bakugan-buddy/brain-server/lib/sampling.test.mjs bakugan-buddy/brain-server/lib/history.test.mjs bakugan-buddy/brain-server/lib/import-paths.test.mjs bakugan-buddy/brain-server/lib/modelSwitch.test.mjs bakugan-buddy/brain-server/lib/chatPipe.test.mjs bakugan-buddy/brain-server/lib/coach/skills.test.mjs bakugan-buddy/brain-server/lib/coach/retrieve.test.mjs bakugan-buddy/brain-server/lib/coach/session.test.mjs bakugan-buddy/brain-server/lib/coach/lessons.test.mjs bakugan-buddy/brain-server/lib/coach/escalate.test.mjs bakugan-buddy/brain-server/lib/coach/safety.test.mjs bakugan-buddy/brain-server/lib/art.test.mjs bakugan-buddy/brain-server/lib/activity.test.mjs bakugan-buddy/brain-server/lib/harness/adapter.test.mjs bakugan-buddy/brain-server/lib/harness/estimate.test.mjs bakugan-buddy/brain-server/lib/harness/guard.test.mjs bakugan-buddy/brain-server/lib/harness/runner.test.mjs bakugan-buddy/brain-server/lib/harness/settings.test.mjs bakugan-buddy/brain-server/lib/speech.test.mjs
+          node --check bakugan-buddy/brain-server/lib/capabilities.mjs
+          node --check bakugan-buddy/brain-server/lib/selfKnowledge.mjs
+          node --check bakugan-buddy/brain-server/lib/changelog.mjs
+          node --check bakugan-buddy/brain-server/lib/power.mjs
+          bash -n scripts/preyas.sh
+          bash -n scripts/preyas.test.sh
+          bash -n scripts/install-desktop-launchers.sh
+          bash -n bakugan-buddy/launcher/preyas-on.command
+          bash -n bakugan-buddy/launcher/preyas-off.command
+          bash -n bakugan-buddy/launcher/preyas-restart.command
+          node --experimental-strip-types --disable-warning=ExperimentalWarning --test bakugan-buddy/brain-server/lib/memory.test.mjs bakugan-buddy/brain-server/lib/sampling.test.mjs bakugan-buddy/brain-server/lib/history.test.mjs bakugan-buddy/brain-server/lib/import-paths.test.mjs bakugan-buddy/brain-server/lib/modelSwitch.test.mjs bakugan-buddy/brain-server/lib/chatPipe.test.mjs bakugan-buddy/brain-server/lib/capabilities.test.mjs bakugan-buddy/brain-server/lib/selfKnowledge.test.mjs bakugan-buddy/brain-server/lib/changelog.test.mjs bakugan-buddy/brain-server/lib/power.test.mjs bakugan-buddy/brain-server/lib/coach/skills.test.mjs bakugan-buddy/brain-server/lib/coach/retrieve.test.mjs bakugan-buddy/brain-server/lib/coach/session.test.mjs bakugan-buddy/brain-server/lib/coach/lessons.test.mjs bakugan-buddy/brain-server/lib/coach/escalate.test.mjs bakugan-buddy/brain-server/lib/coach/safety.test.mjs bakugan-buddy/brain-server/lib/art.test.mjs bakugan-buddy/brain-server/lib/activity.test.mjs bakugan-buddy/brain-server/lib/harness/adapter.test.mjs bakugan-buddy/brain-server/lib/harness/estimate.test.mjs bakugan-buddy/brain-server/lib/harness/guard.test.mjs bakugan-buddy/brain-server/lib/harness/runner.test.mjs bakugan-buddy/brain-server/lib/harness/settings.test.mjs bakugan-buddy/brain-server/lib/speech.test.mjs
+
+      - name: Power controller tests (mock processes)
+        run: bash scripts/preyas.test.sh
 
       - name: Install brain-server (MCP servers)
         run: npm ci
