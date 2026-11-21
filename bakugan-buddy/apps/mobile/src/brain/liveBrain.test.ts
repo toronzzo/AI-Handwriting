@@ -14,7 +14,9 @@ import {
   BRAIN_POLL_MS,
   BRAIN_TIMEOUT_MS,
   BrainLiveError,
+  FREE_PROVIDER_ID,
   LOCAL_MODEL_ID,
+  PAID_FALLBACK_ID,
   ROUTER_ID,
   brainSourceLine,
   checkedTimeLabel,
@@ -22,7 +24,9 @@ import {
   fetchLiveBrainMap,
   loadingBrainMap,
   mapHealth,
+  normalizeProviderStatus,
   offlineBrainMap,
+  providerStatusNote,
   staleBrainMap,
 } from "./liveBrain.ts";
 import type { BrainMap } from "./types.ts";
@@ -320,3 +324,105 @@ test("the Brain live source stays local, bounded and credential-free", () => {
   assert.ok(screen.includes("useLiveBrainMap"), "the screen must use the live hook");
   assert.ok(!screen.includes("fetch("), "the screen must not fetch directly");
 });
+// --- free-cloud provider status on the existing live-status nodes -------
+
+function providerRow(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "free-provider",
+    label: "Groq (free plan)",
+    configured: true,
+    available: true,
+    reason: "free cloud provider is ready",
+    checkedAt: CHECKED,
+    ...over,
+  };
+}
+
+function healthWith(providers: unknown): Record<string, unknown> {
+  return { ok: true, service: "bakugan-brain", providers };
+}
+
+test("a configured, healthy free provider shows on the map as fallback, never online", () => {
+  const map = mapHealth({ ...healthWith([providerRow()]) }, CHECKED);
+  const node = findNode(map, FREE_PROVIDER_ID);
+  assert.equal(node.status, "fallback");
+  assert.equal(node.live, true);
+  assert.match(node.statusNote || "", /Configured and reachable/);
+  assert.ok(!/\.\.$/.test(node.statusNote || ""), "no doubled full stop in a status note");
+  assert.equal(node.hint, "Groq (free plan)");
+
+  // The paid node is not part of this PR's provider, so it is not reported
+  // healthy: it reads "planned", never as an available route.
+  const paid = findNode(map, PAID_FALLBACK_ID);
+  assert.equal(paid.status, "planned");
+  assert.match(paid.statusNote || "", /Not configured/);
+});
+
+test("a configured but failing provider is unavailable, and its text is never echoed", () => {
+  const map = mapHealth(
+    {
+      ...healthWith([
+        providerRow({
+          available: false,
+          reason: "the free cloud provider is rate limited right now",
+          detail: "sk-live-abc123 provider says: quota exceeded",
+        }),
+      ]),
+    },
+    CHECKED,
+  );
+  const node = findNode(map, FREE_PROVIDER_ID);
+  assert.equal(node.status, "unavailable");
+  assert.match(node.statusNote || "", /rate limited/);
+  assert.ok(!String(node.statusNote).includes("sk-live"), "no credential reaches the screen");
+  assert.equal(node.hint, "Not available");
+});
+
+test("no provider block means the cloud nodes stay planned", () => {
+  const map = mapHealth({ ok: false, service: "bakugan-brain" }, CHECKED);
+  for (const id of [FREE_PROVIDER_ID, PAID_FALLBACK_ID]) {
+    const node = findNode(map, id);
+    assert.equal(node.status, "planned");
+    assert.equal(node.live, true);
+    assert.match(node.statusNote || "", /Not configured/);
+  }
+});
+
+test("a malformed or placeholder provider row is not configured, never available", () => {
+  const cases: unknown[] = [
+    [{ id: "free-provider", configured: "yes", available: "yes" }],
+    [{ id: "free-provider", configured: true, available: "true" }],
+    [{ id: "free-provider", configured: true }],
+    "not a list",
+    null,
+  ];
+  for (const providers of cases) {
+    const map = mapHealth({ ...healthWith(providers) }, CHECKED);
+    const node = findNode(map, FREE_PROVIDER_ID);
+    assert.notEqual(node.status, "fallback", JSON.stringify(providers));
+    assert.notEqual(node.status, "online", JSON.stringify(providers));
+  }
+});
+
+test("an offline read never leaves a cloud node claiming fallback", () => {
+  const map = offlineBrainMap("unreachable");
+  for (const id of [FREE_PROVIDER_ID, PAID_FALLBACK_ID]) {
+    const node = findNode(map, id);
+    assert.equal(node.status, "planned");
+    assert.equal(node.live, false);
+  }
+});
+
+test("providerStatusNote reads only the normalized fields", () => {
+  const notConfigured = normalizeProviderStatus(null, { id: FREE_PROVIDER_ID, label: "Free cloud", reason: "no key" });
+  assert.equal(notConfigured.configured, false);
+  assert.match(providerStatusNote(notConfigured), /Not configured/);
+
+  const bad = normalizeProviderStatus({ configured: true, available: false, reason: "rate limited!" }, { id: FREE_PROVIDER_ID, label: "X", reason: "r" });
+  assert.match(providerStatusNote(bad), /^Configured, but not available right now — rate limited\.$/);
+
+  const good = normalizeProviderStatus({ configured: true, available: true }, { id: FREE_PROVIDER_ID, label: "X", reason: "r" });
+  assert.equal(good.available, true);
+  assert.match(providerStatusNote(good), /only used when you opt in/);
+});
+

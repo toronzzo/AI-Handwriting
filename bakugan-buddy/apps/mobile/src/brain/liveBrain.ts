@@ -17,7 +17,7 @@
  * `node --experimental-strip-types`.
  */
 import { DEMO_BRAIN_MAP } from "./demoBrains.ts";
-import type { BrainMap, BrainNode, LiveBrainSource } from "./types.ts";
+import type { BrainMap, BrainNode, BrainStatus, LiveBrainSource } from "./types.ts";
 
 /** The proxy's public health route; it also works before pairing. */
 export const HEALTH_PATH = "/v1/health";
@@ -30,6 +30,113 @@ export const MAX_HEALTH_BYTES = 16_384;
 
 export const LOCAL_MODEL_ID = "local-model";
 export const ROUTER_ID = "router";
+/** The two cloud nodes the Brain map already shows, both never probed before. */
+export const FREE_PROVIDER_ID = "free-provider";
+export const PAID_FALLBACK_ID = "paid-fallback";
+
+/**
+ * What one cloud provider reports about itself.
+ *
+ * `configured` is only true when an operator filled in the environment and the
+ * app build could read it; `available` is only true when the provider says it
+ * is enabled and its health check passed. Anything else — not configured, a
+ * placeholder key, a bad setting, a timeout, an offline call, a rate limit, an
+ * unpaired Mac — is shown as not available. Nothing here ever carries a key, a
+ * provider error body or an account detail.
+ */
+export type ProviderStatus = {
+  id: string;
+  /** The provider's own label, or empty when none is configured. */
+  label: string;
+  configured: boolean;
+  available: boolean;
+  /** One short sentence this view may show as the status note. */
+  reason: string;
+  /** ISO time of the health check that produced `available`. */
+  checkedAt?: string | null;
+};
+
+/** The health body read for provider status, when this build exposes it. */
+export type ProviderHealthEntry = {
+  id?: unknown;
+  label?: unknown;
+  configured?: unknown;
+  available?: unknown;
+  reason?: unknown;
+  checkedAt?: unknown;
+};
+
+function notConfigured(id: string, label: string, reason: string): ProviderStatus {
+  return { id, label, configured: false, available: false, reason, checkedAt: null };
+}
+
+/**
+ * Read one provider entry without trusting it. A malformed entry becomes
+ * "not configured", which is the safe reading: the map never upgrades a
+ * status on a shape it does not understand.
+ */
+export function normalizeProviderStatus(
+  raw: ProviderHealthEntry | null | undefined,
+  fallback: { id: string; label: string; reason: string },
+): ProviderStatus {
+  if (!raw || typeof raw !== "object") return notConfigured(fallback.id, fallback.label, fallback.reason);
+  const label = typeof raw.label === "string" && raw.label.trim() ? raw.label.trim() : fallback.label;
+  const configured = raw.configured === true;
+  const available = raw.available === true;
+  const reason = typeof raw.reason === "string" && raw.reason.trim() ? raw.reason.trim() : "";
+  const checkedAt = typeof raw.checkedAt === "string" && raw.checkedAt ? raw.checkedAt : null;
+  if (!configured) return notConfigured(fallback.id, label, reason || fallback.reason);
+  return { id: fallback.id, label, configured: true, available, reason: reason || (available ? "available" : "not available"), checkedAt };
+}
+
+/**
+ * The sentence the detail panel shows for a cloud node. It is written from
+ * the normalized status only, so a provider can never put free text on screen.
+ */
+export function providerStatusNote(status: ProviderStatus): string {
+  if (!status.configured) {
+    return status.reason && status.reason !== status.label
+      ? `Not configured — ${lowerFirst(status.reason)}.`
+      : "Not configured on this Mac. Preyas stays on the local model.";
+  }
+  if (!status.available) {
+    return `Configured, but not available right now — ${lowerFirst(status.reason)}.`;
+  }
+  return `Configured and reachable — ${lowerFirst(status.reason)}. It is only used when you opt in and the router asks for it.`;
+}
+
+/** Lower-case the first letter and drop trailing punctuation, so the caller adds one full stop. */
+function lowerFirst(text: string): string {
+  if (!text) return "no reason given";
+  return (text.charAt(0).toLowerCase() + text.slice(1)).replace(/[.!?\s]+$/, "");
+}
+
+/**
+ * Read the optional provider block out of a health body. Absent is normal —
+ * an older or cloud-disabled Mac simply has no provider to report — and is
+ * not an error. A present but malformed block is also not an error: it just
+ * yields "not configured" rows.
+ */
+export function providerStatuses(health: unknown, checkedAt: string): ProviderStatus[] {
+  const body = health && typeof health === "object" && !Array.isArray(health) ? (health as { providers?: unknown }) : {};
+  const raw = Array.isArray(body.providers) ? body.providers : [];
+  const byId = (id: string): ProviderHealthEntry | undefined =>
+    raw.find((row): row is ProviderHealthEntry => Boolean(row) && typeof row === "object" && (row as ProviderHealthEntry).id === id);
+  const free = normalizeProviderStatus(byId(FREE_PROVIDER_ID), {
+    id: FREE_PROVIDER_ID,
+    label: "Free cloud",
+    reason: "no free cloud provider configured",
+  });
+  const paid = normalizeProviderStatus(byId(PAID_FALLBACK_ID), {
+    id: PAID_FALLBACK_ID,
+    label: "Paid fallback",
+    reason: "no paid fallback configured",
+  });
+  return [
+    free.checkedAt ? free : { ...free, checkedAt },
+    paid.checkedAt ? paid : { ...paid, checkedAt },
+  ];
+}
 
 export type BrainLiveErrorCode =
   | "cancelled"
@@ -59,8 +166,17 @@ export function checkedTimeLabel(iso?: string | null): string {
   return `${hours}:${minutes}`;
 }
 
-/** Update only the two probed nodes, keeping every demo description intact. */
-function buildLiveMap(localOnline: boolean, checkedAt: string): BrainMap {
+/** Which live status a cloud node takes from its provider. */
+function cloudStatus(status: ProviderStatus): BrainStatus {
+  if (!status.configured) return "planned";
+  return status.available ? "fallback" : "unavailable";
+}
+
+/**
+ * Update only the probed nodes, keeping every demo description intact. The two
+ * cloud nodes only ever read "online" when their own health check said so.
+ */
+function buildLiveMap(localOnline: boolean, checkedAt: string, providers: ProviderStatus[]): BrainMap {
   const nodes = DEMO_BRAIN_MAP.nodes.map((node): BrainNode => {
     if (node.id === LOCAL_MODEL_ID) {
       return {
@@ -78,6 +194,18 @@ function buildLiveMap(localOnline: boolean, checkedAt: string): BrainMap {
         status: "online",
         live: true,
         statusNote: "The brain router answered on port 8788.",
+      };
+    }
+    const provider = providers.find((row) => row.id === node.id);
+    if (provider) {
+      const status = cloudStatus(provider);
+      return {
+        ...node,
+        status,
+        live: true,
+        statusNote: providerStatusNote(provider),
+        // A cloud node is never described as a slot once it has a provider.
+        ...(provider.configured ? { hint: provider.available ? provider.label : "Not available" } : {}),
       };
     }
     return { ...node };
@@ -111,7 +239,7 @@ export function mapHealth(body: unknown, checkedAt: string): BrainMap {
   if (typeof health.ok !== "boolean") {
     throw new BrainLiveError("bad-response", "the health answer had no ok flag");
   }
-  return buildLiveMap(health.ok, checkedAt);
+  return buildLiveMap(health.ok, checkedAt, providerStatuses(body, checkedAt));
 }
 
 /** Static map used while the very first live check is running. */
@@ -123,6 +251,8 @@ export function loadingBrainMap(): BrainMap {
     note: "Checking this Mac for live status — the map shows demo data until it answers.",
     core: { ...DEMO_BRAIN_MAP.core },
     nodes: DEMO_BRAIN_MAP.nodes.map((node): BrainNode => {
+      // Only the two nodes the first health read covers are marked as checking;
+      // the cloud nodes keep their configuration wording until a real answer.
       if (node.id === LOCAL_MODEL_ID || node.id === ROUTER_ID) {
         return { ...node, status: "checking", live: false, statusNote: "Checking this Mac now." };
       }
@@ -169,6 +299,10 @@ export function offlineBrainMap(code: BrainLiveErrorCode): BrainMap {
       }
       if (node.id === ROUTER_ID) {
         return { ...node, status: "unavailable", live: false, statusNote: routerNote };
+      }
+      // A cloud node never claims "fallback" while nothing answered.
+      if (node.id === FREE_PROVIDER_ID || node.id === PAID_FALLBACK_ID) {
+        return { ...node, status: "planned", live: false, statusNote: "No live reading — Preyas stays on the local model." };
       }
       return { ...node };
     }),
