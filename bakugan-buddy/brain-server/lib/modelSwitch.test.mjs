@@ -594,6 +594,27 @@ test("tiny returns to the 8B after the idle window in off-grid mode", async (t) 
   }
 });
 
+
+test("restart brings the same model back without a confirm card", async () => {
+  const f = makeSwitch({ healthy: true, freeGb: 2 });
+  try {
+    await f.switcher.request("small", { confirmed: true });
+    await f.drain();
+    assert.equal(f.switcher.state().current, "small");
+    const before = f.spawned.length;
+    const result = await f.switcher.restart();
+    assert.equal(result.ok, true);
+    assert.equal(result.restarting, true);
+    assert.equal(result.needsConfirm, undefined, "an explicit restart never asks again");
+    await f.drain();
+    assert.equal(f.switcher.state().current, "small");
+    assert.equal(f.switcher.state().status, "ready");
+    assert.equal(f.spawned.length, before + 1);
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
 test("a missing tiny file rolls back to the 8B with the usual note", async () => {
   const f = makeSwitch({ healthy: true, freeGb: 40 });
   try {

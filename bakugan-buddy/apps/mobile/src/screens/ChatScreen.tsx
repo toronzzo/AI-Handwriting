@@ -85,6 +85,9 @@ import { HarnessLauncher } from "../harness/HarnessLauncher";
 import { DailyLimit } from "../settings/DailyLimit.tsx";
 import { BitModeSetting } from "../settings/BitMode.tsx";
 import { SoundToggle } from "../settings/SoundToggle.tsx";
+import { PowerPanel } from "../settings/PowerPanel";
+import { AboutPreyas } from "../settings/AboutPreyas";
+import { TURN_OFF_CONFIRM } from "../settings/power";
 import { SoundLab } from "../media/sounds/SoundLab.tsx";
 import { theme } from "../theme";
 
@@ -139,7 +142,7 @@ type ChatDialog =
   | { kind: "paid"; text: string }
   | { kind: "deleteReminders"; reminders: Reminder[] }
   | { kind: "remind"; pending: PendingReminder }
-  | { kind: "restart" }
+  | { kind: "powerOff" }
   | { kind: "briefingTime"; time: string }
   | { kind: "briefingOff" }
   | { kind: "taskConfirm"; taskId: string; stepId: number; token: string; title: string; body: string }
@@ -1123,12 +1126,12 @@ export function ChatScreen({
       busy.current = false;
     }
   }
-  async function restartPreyas() {
+  async function turnOffEverything() {
     try {
-      await brainFetch(`${bag.brainUrl}/v1/restart`, { method: "POST" });
-      setChip("Restarting Preyas…");
+      await brainFetch(`${bag.brainUrl}/v1/power/off`, { method: "POST" });
+      setChip("Preyas is turning off");
     } catch {
-      setChip("Could not restart");
+      setChip("Could not turn off. Is the Mac still awake?");
     }
   }
   async function refreshReminders() {
@@ -2368,16 +2371,16 @@ export function ChatScreen({
                 void saveBriefingSettings({ briefingOn: false });
               },
             }
-          : dialog.kind === "restart"
+          : dialog.kind === "powerOff"
         ? {
-            title: "Restart Preyas?",
-            body: "Stops and starts the brain, model and web app. Takes about a minute.",
-            confirm: "Yes",
-            no: "No",
+            title: TURN_OFF_CONFIRM.title,
+            body: TURN_OFF_CONFIRM.body,
+            confirm: TURN_OFF_CONFIRM.confirm,
+            no: TURN_OFF_CONFIRM.no,
             danger: true,
             run: () => {
               setDialog(null);
-              void restartPreyas();
+              void turnOffEverything();
             },
           }
         : dialog.kind === "model"
@@ -2602,6 +2605,7 @@ export function ChatScreen({
           ) : (
             <Text style={styles.dim}>{healthError || "Checking…"}</Text>
           )}
+          <PowerPanel brainUrl={bag.brainUrl} onTurnOff={() => setDialog({ kind: "powerOff" })} />
           <View style={styles.phoneCard}>
             <Text style={styles.kicker}>MODEL</Text>
             <Text style={styles.dim}>
@@ -2744,12 +2748,7 @@ export function ChatScreen({
             </Text>
             <Text style={styles.dim}>Preyas is a great listener.</Text>
           </View>
-          <Pressable
-            style={[styles.profileBtn, styles.restartBtn]}
-            onPress={() => setDialog({ kind: "restart" })}
-          >
-            <Text style={styles.modalDanger}>Restart Preyas</Text>
-          </Pressable>
+          <AboutPreyas brainUrl={bag.brainUrl} />
           <View style={styles.phoneCard}>
             <Text style={styles.kicker}>ADVANCED</Text>
             <View style={styles.advRow}>
@@ -3800,7 +3799,6 @@ const styles = StyleSheet.create({
   modelBtnDim: { opacity: 0.5 },
   modelBtnText: { color: theme.text, fontSize: 13, fontWeight: "600" },
   modelBtnTextActive: { color: theme.onAccent },
-  restartBtn: { borderColor: theme.danger },
   phoneCard: { marginVertical: 10, padding: 12, ...paperSoft, borderRadius: 14, gap: 6 },
   phoneUrl: { color: theme.accentText, fontSize: 16, fontWeight: "700" },
   reviewQuestion: { color: theme.text, fontSize: 16, fontWeight: "700", lineHeight: 22 },

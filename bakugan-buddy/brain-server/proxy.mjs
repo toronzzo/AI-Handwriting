@@ -117,6 +117,9 @@ import { ART_WRITE_DIR, MAX_ART_BYTES, findArt, isSlot, saveArt } from "./lib/ar
 import { resolveSafePath } from "./lib/safeFs.mjs";
 import { createActivityHub } from "./lib/activity.mjs";
 import { createModelSwitch, LLAMA_PORT, llamaServerRamMb, chatGate } from "./lib/modelSwitch.mjs";
+import { createCapabilities } from "./lib/capabilities.mjs";
+import { createPowerController } from "./lib/power.mjs";
+import { createSelfKnowledge, withSelfKnowledge } from "./lib/selfKnowledge.mjs";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -156,6 +159,34 @@ const modelSwitch = createModelSwitch({
       /* the chat note is a nicety */
     }
   },
+});
+
+const codeRoot = path.join(repoRoot, "bakugan-buddy");
+const changelogPath = path.join(codeRoot, "CHANGELOG_PREYAS.md");
+
+/**
+ * Self-knowledge: what is really available on this Mac, and the changelog.
+ * Built at startup (and refreshed when About Preyas asks), then injected into
+ * the chat system prompt so Preyas answers honestly. The power controller is
+ * the app's side of scripts/preyas.sh.
+ */
+const capabilities = createCapabilities({
+  dataDir,
+  repoRoot: codeRoot,
+  buddyRoot,
+  agentRoot: gatewayRoot,
+  modelsDir: process.env.PREYAS_MODELS_DIR || path.join(buddyRoot, "models"),
+  changelogPath,
+  currentModel: () => {
+    const state = modelSwitch.state();
+    return state.status === "ready" ? state.current : "";
+  },
+  probeTimeoutMs: 1500,
+});
+const selfKnowledge = createSelfKnowledge({ dataDir, changelogPath, capabilities });
+const power = createPowerController({
+  scriptPath: path.join(repoRoot, "scripts", "preyas.sh"),
+  logDir: path.join(gatewayRoot, "logs", "preyas"),
 });
 
 /**
@@ -820,7 +851,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
-    if (await handleOsRoute({ req, res, url, dataDir, readJson, readBody, now: () => Date.now() })) return;
+    if (await handleOsRoute({ req, res, url, dataDir, readJson, readBody, now: () => Date.now(), capabilities, selfKnowledge, power })) return;
 
     // Harness (slice 13) and the ONE daily limit. Only this POST can write the
     // cap, and only with confirm "save"; no model-callable path reaches it.
@@ -931,6 +962,12 @@ const server = http.createServer(async (req, res) => {
       if (!result.ok) {
         return sendJson(res, result.error === "another switch is already running" ? 409 : 400, result);
       }
+      return sendJson(res, 200, result);
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/model/restart") {
+      const result = await modelSwitch.restart();
+      if (!result.ok) return sendJson(res, 409, result);
       return sendJson(res, 200, result);
     }
 
@@ -2010,6 +2047,7 @@ const server = http.createServer(async (req, res) => {
       if (!gate.ok) return sendJson(res, gate.status, { error: gate.error });
       const sampled = withSampling(raw);
       const body = model === "paid" ? sampled : withDriveMap(withNotes(sampled));
+      const bodyWithKnowledge = await withSelfKnowledge(body, selfKnowledge);
       // A local route never reaches the gateway: small, big and huge all go
       // straight to llama. Only a real local-model reply resets the idle
       // auto-return window — paid replies and unanswered calls never do.
@@ -2032,7 +2070,7 @@ const server = http.createServer(async (req, res) => {
         req,
         res,
         target,
-        body,
+        bodyWithKnowledge,
         model === "paid" ? "paid gateway is down" : "llama is down",
         model === "paid" ? CHAT_PROXY_TIMEOUT_MS : modelSwitch.chatTimeoutMs(),
         { neuron, paid, local: !paid, ramPromise, onAnswered: () => modelSwitch.touchLocal(model) },
@@ -2168,6 +2206,7 @@ server.listen(port, host, () => {
   startReminderLoop();
   tidyBriefingChat();
   missedAtStartup();
+  void capabilities.refresh();
   void modelSwitch.detect();
   if (dataDir) {
     try {

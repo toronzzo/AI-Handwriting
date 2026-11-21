@@ -389,6 +389,18 @@ export function createModelSwitch(options = {}) {
     return { ok: true, current: target, status: "loading" };
   }
 
+  /**
+   * Restart the model that should be live (the Settings > Power button).
+   * This is explicit, so it skips the memory card and keeps the same tier.
+   */
+  async function restart() {
+    if (switching) return { ok: false, error: "another switch is already running", current, status };
+    const target = TIERS[current] ? current : DEFAULT_IDLE_MODEL;
+    lastFreeGb = await probeFree().catch(() => null);
+    if (!runSwitch(target)) return { ok: false, error: "another switch is already running", current, status };
+    return { ok: true, restarting: true, current: target, status: "loading" };
+  }
+
   /** Learn which model is live from /props — called once at proxy startup. */
   async function detect() {
     try {
@@ -490,5 +502,5 @@ export function createModelSwitch(options = {}) {
     child = null;
   }
 
-  return { request, detect, refresh, state, touch, touchLocal, chatTimeoutMs, stop };
+  return { request, restart, detect, refresh, state, touch, touchLocal, chatTimeoutMs, stop };
 }

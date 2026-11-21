@@ -67,7 +67,7 @@ test("static files and the pairing endpoint stay open on the LAN", () => {
     const result = authorizeRequest({ path: requestPath, remoteAddress: "192.168.31.40", book: book() });
     assert.equal(result.allow, true, requestPath);
   }
-  for (const requestPath of ["/v1/notes", "/v1/phone", "/v1/restart"]) {
+  for (const requestPath of ["/v1/notes", "/v1/phone", "/v1/restart", "/v1/capabilities", "/v1/power/status", "/v1/power/off", "/v1/model/restart"]) {
     const other = authorizeRequest({ path: requestPath, remoteAddress: "127.0.0.1", book: book() });
     assert.equal(other.allow, false, requestPath);
   }
