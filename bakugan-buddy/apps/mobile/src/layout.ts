@@ -48,6 +48,25 @@ export function chatColumn(width: number): { maxWidth: number; width: "100%" } {
   return { maxWidth: Math.min(theme.size.maxChat, Math.max(0, width)), width: "100%" };
 }
 
+/** Learn / Memory / Settings content: capped on desktop, full width on phone. */
+export const PAGE_MAX = 900;
+
+export function pageColumn(width: number): { maxWidth: number; width: "100%"; alignSelf: "center" } {
+  return {
+    maxWidth: Math.min(PAGE_MAX, Math.max(0, width)),
+    width: "100%",
+    alignSelf: "center",
+  };
+}
+
+/** How many Learn / Memory cards sit in a row on a wide window. */
+export function pageGridColumns(width: number): 1 | 2 {
+  return width >= PAGE_MAX ? 2 : 1;
+}
+
+/** Status / model checks must finish (or fail) well before a poll cycle. */
+export const SETTINGS_PROBE_MS = 5_000;
+
 /** Width of the chats list on a Mac; it disappears once the thread gets tight. */
 export function listWidth(width: number, open: boolean): number {
   if (!isWide(width)) return 0;

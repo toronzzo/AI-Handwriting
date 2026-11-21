@@ -151,13 +151,14 @@ export function DailyLimit() {
         </Text>
       ) : null}
       <Pressable
-        style={[styles.save, !canSave && styles.saveOff]}
+        style={[styles.save, canSave ? styles.saveOn : styles.saveOff]}
         disabled={!canSave}
         onPress={() => void save()}
         accessibilityRole="button"
+        accessibilityState={{ disabled: !canSave }}
         accessibilityLabel="Save the daily limit"
       >
-        <Text style={styles.saveText}>Save</Text>
+        <Text style={[styles.saveText, !canSave && styles.saveTextOff]}>Save</Text>
       </Pressable>
       <Text style={styles.dim} accessibilityLiveRegion="polite">
         {message}
@@ -208,11 +209,13 @@ const styles = StyleSheet.create({
     minHeight: 44,
     marginTop: 12,
     borderRadius: theme.radius.sm,
-    backgroundColor: theme.accent,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 18,
   },
-  saveOff: { opacity: 0.45 },
+  /** Enabled only when the typed amount differs from the saved cap. */
+  saveOn: { backgroundColor: theme.accent, opacity: 1 },
+  saveOff: { backgroundColor: theme.cardSoft, borderWidth: 1, borderColor: theme.lineStrong, opacity: 1 },
   saveText: { color: theme.onAccent, fontSize: theme.type.body, fontWeight: "700" },
+  saveTextOff: { color: theme.dim },
 });

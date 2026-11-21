@@ -59,6 +59,10 @@
         });
       }
     </script>
-    <script type="module" src="/index.js"></script>
+    <!--
+      Do not hardcode a module script here. Expo injects the Metro bundle
+      scripts with the correct MIME type; a static /index.js request would
+      fall back to this HTML page and fail as "module script served as text/html".
+    -->
   </body>
 </html>
