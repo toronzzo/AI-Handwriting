@@ -18,7 +18,20 @@ mkdir -p "$LOG_DIR"
 
 say() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*" | tee -a "$LOG"; }
 
-if pgrep -f "Godot.app/Contents/MacOS/Godot --path .*preyas-world" >/dev/null 2>&1; then
+# Duplicate-launch detection must match the binary the pet REALLY runs:
+# resolve GODOT_BIN to an absolute path and look for it — or its basename,
+# so a renamed build is caught too — followed by --path …preyas-world. The
+# old pattern only knew the default Godot.app path and missed GODOT_BIN
+# overrides, letting a second pet start.
+case "$GODOT_BIN" in
+  /*) : ;;
+  *) GODOT_BIN="$(pwd)/$GODOT_BIN" ;;
+esac
+esc_re() { printf '%s' "$1" | sed 's/[.[\*^$()+?{|]/\\&/g'; }
+GODOT_BIN_RE="$(esc_re "$GODOT_BIN")"
+GODOT_NAME_RE="$(esc_re "$(basename "$GODOT_BIN")")"
+
+if pgrep -f "($GODOT_BIN_RE|$GODOT_NAME_RE) --path .*preyas-world" >/dev/null 2>&1; then
   say "Preyas World is already running."
   exit 0
 fi

@@ -93,6 +93,7 @@ jobs:
           node --check bakugan-buddy/brain-server/lib/select-model.mjs
           bash -n bakugan-buddy/brain-server/setup.sh
           bash -n bakugan-buddy/brain-server/start.sh
+          bash -n bakugan-buddy/launcher/preyas-world.sh
           bash -n bakugan-buddy/brain-server/use-model.sh
           bash -n bakugan-buddy/brain-server/lib/ensure-drive.sh
           bash -c 'source bakugan-buddy/brain-server/lib/ensure-drive.sh
