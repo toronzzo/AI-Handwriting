@@ -6,6 +6,7 @@ import {
   CAP_MAX_USD,
   CAP_MIN_USD,
   PRICE_SETUP_HINT,
+  dailyLimitRequestError,
   formatEstimate,
   formatUsd,
   parseUsd,
@@ -64,4 +65,11 @@ test("todayLine and spendRatio drive the row and the bar", () => {
   assert.equal(spendRatio(0, 0), 0);
   assert.equal(spendRatio(-1, 1), 0);
   assert.equal(spendRatio(Number.NaN, 1), 0);
+});
+
+test("daily limit request errors distinguish a timeout from an unreachable Mac", () => {
+  const timeout = new Error("deadline exceeded");
+  timeout.name = "TimeoutError";
+  assert.equal(dailyLimitRequestError(timeout), "Daily limit timed out. Is Preyas running?");
+  assert.equal(dailyLimitRequestError(new Error("network down")), "The Mac did not answer. Is Preyas running?");
 });

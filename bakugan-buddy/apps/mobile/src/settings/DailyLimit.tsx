@@ -10,12 +10,14 @@ import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { currentBrainUrl } from "../room/brain/brainLink";
 import { brainFetch } from "../room/brain/token";
+import { SETTINGS_PROBE_MS } from "../layout";
 import { Panel } from "../ui/Panel";
 import { theme } from "../theme";
 import {
   CAP_DEFAULT_USD,
   CAP_MAX_USD,
   CAP_MIN_USD,
+  dailyLimitRequestError,
   formatUsd,
   parseUsd,
   spendRatio,
@@ -39,7 +41,9 @@ export function DailyLimit() {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await brainFetch(`${base}/v1/settings/spend`);
+        const response = await brainFetch(`${base}/v1/settings/spend`, {
+          signal: AbortSignal.timeout(SETTINGS_PROBE_MS),
+        });
         if (!response.ok) throw new Error("no numbers");
         const body = (await response.json()) as Partial<SpendNumbers>;
         if (cancelled) return;
@@ -50,8 +54,8 @@ export function DailyLimit() {
         setNumbers(next);
         setText(next.capUsd.toFixed(2));
         setError("");
-      } catch {
-        if (!cancelled) setError("The Mac did not answer. Is Preyas running?");
+      } catch (error) {
+        if (!cancelled) setError(dailyLimitRequestError(error));
       }
     })();
     return () => {
@@ -76,6 +80,7 @@ export function DailyLimit() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ dailyCapUsd: check.value, confirm: "save" }),
+        signal: AbortSignal.timeout(SETTINGS_PROBE_MS),
       });
       const body = (await response.json().catch(() => ({}))) as Partial<SpendNumbers> & { error?: string };
       if (!response.ok) {
@@ -86,8 +91,8 @@ export function DailyLimit() {
       setNumbers({ capUsd, spentTodayUsd: Number(body.spentTodayUsd) || 0 });
       setText(capUsd.toFixed(2));
       setMessage(`Saved. Limit is now ${formatUsd(capUsd)}.`);
-    } catch {
-      setError("The Mac did not answer. Is Preyas running?");
+    } catch (error) {
+      setError(dailyLimitRequestError(error));
     } finally {
       setSaving(false);
     }
