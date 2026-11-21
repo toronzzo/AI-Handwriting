@@ -137,6 +137,27 @@ test("checkCwd follows symlinks so a link cannot escape either", () => {
   assert.equal(checkCwd(root, [root]), fs.realpathSync(root));
 });
 
+test("the working folder cannot be a secret folder, even under a root", () => {
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, "secrets"), { recursive: true });
+  fs.mkdirSync(path.join(root, "agent", "secrets"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".ssh"), { recursive: true });
+  assert.throws(() => checkCwd(path.join(root, "secrets"), [root]), /secrets are off limits/);
+  assert.throws(() => checkCwd(path.join(root, "agent", "secrets"), [root]), /secrets are off limits/);
+  assert.throws(() => checkCwd(path.join(root, ".ssh"), [root]), /secrets are off limits/);
+  // A symlink to a secret folder is refused too: the real path is checked.
+  fs.symlinkSync(path.join(root, "secrets"), path.join(root, "innocent-link"));
+  assert.throws(() => checkCwd(path.join(root, "innocent-link"), [root]), /secrets are off limits/);
+  // A normal folder still works.
+  assert.equal(checkCwd(root, [root]), fs.realpathSync(root));
+});
+
+test("~/ paths expand to the home folder, which is outside every root", () => {
+  const root = tempDir();
+  assert.throws(() => checkCwd("~", [root]), /outside the allowed folders/);
+  assert.throws(() => checkCwd("~/Documents", [root]), /outside the allowed folders/);
+});
+
 test("the module entry points exist next to the brain server", () => {
   const brainDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
   for (const relative of [

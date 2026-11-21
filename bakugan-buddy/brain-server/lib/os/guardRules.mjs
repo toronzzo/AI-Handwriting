@@ -4,7 +4,7 @@
  * the local model is only a tie-breaker for "unsure" and can only tighten.
  */
 import { resolveSafePath, SAFE_ROOT } from "../safeFs.mjs";
-import { SHELL_SECRET } from "./terminalServer.mjs";
+import { SECRET_PATH_SEGMENT, SHELL_SECRET } from "./terminalServer.mjs";
 
 export const KINDS = {
   read: new Set([
@@ -67,7 +67,8 @@ export const WRITE_INTENT = {
   reminder: /(?:^|[^a-zа-яё0-9])(remind|reminder|напомни|напомнить|напоминание)(?=$|[^a-zа-яё0-9])/iu,
 };
 
-export const SECRET_SEGMENT = /(^|\/)(secrets|\.env(\..*)?|.*\.pem|.*\.key|id_rsa.*|.*token.*)($|\/)/i;
+/** Secret segments in a path (the one list, shared with the terminal server). */
+export const SECRET_SEGMENT = SECRET_PATH_SEGMENT;
 export const PATH_SEGMENT_DOTS = /(^|\/)\.\.(\/|$)/;
 /** A URL with a scheme (anything but http/https) is refused; "note: x" is not a URL. */
 export const URL_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -78,8 +79,9 @@ export const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 /** File content may contain newlines and tabs; other control characters stay blocked. */
 export const FILE_CONTENT_CONTROLS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
-/** Path-like arguments that must resolve under the safe roots. */
-const PATH_ARG_KEYS = ["path", "file", "target", "source", "destination", "cwd"];
+/** Path-like arguments that must resolve under the safe roots. `paths` is the
+ * array form (browser uploads, multi-file reads): every entry is checked. */
+const PATH_ARG_KEYS = ["path", "file", "target", "source", "destination", "cwd", "paths"];
 
 function pathArgs(action) {
   if (!action || typeof action.args !== "object" || action.args === null) return [];

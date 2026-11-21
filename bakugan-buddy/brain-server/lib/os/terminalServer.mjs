@@ -2,9 +2,10 @@
  * Preyas's terminal: a tiny MCP server with ONE tool, `run`, which executes a
  * single shell command with a hard timeout and a small output cap. The working
  * folder may only be one of the allowed roots (by default /Volumes/Agent and
- * the repo folder), so a command cannot start in a folder outside the safe
- * areas. Commands that mention secret paths are refused here AND by the guard
- * (defence in depth).
+ * the repo folder), and the real path is checked — `..`, symlinks and `~`
+ * cannot escape, and secret folders (secrets, .env, keys, tokens, .ssh) are
+ * off limits as a starting point. Commands that mention secret paths are
+ * refused here AND by the guard (defence in depth).
  *
  * Run over stdio: `node terminalServer.mjs --allowed-root <dir> ...`
  * Options: --allowed-root <dir> (repeatable), --timeout-ms <ms> (default 60000),
@@ -15,6 +16,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { resolveSafePath } from "../safeFs.mjs";
 
@@ -27,6 +29,12 @@ export const DEFAULT_MAX_OUTPUT = 4_000;
 export const SHELL_SECRET =
   /(^|[\/\s"'`])(secrets|\.env(\..*)?|[a-z0-9_.-]*\.pem|[a-z0-9_.-]*\.key|id_rsa[a-z0-9_.-]*|[a-z0-9_.-]*token[a-z0-9_.-]*)(\/|$|\s|["'`])|(^|[\/\s"'`])~?\/\.ssh([\/\s"'`]|$)/i;
 
+/** Secret-looking segments in a PATH (cwd or upload): the secrets folder,
+ * .env files, keys, tokens and .ssh. guardRules.mjs re-exports this as
+ * SECRET_SEGMENT so both checks are the one same list. */
+export const SECRET_PATH_SEGMENT =
+  /(^|\/)(secrets|\.env(\..*)?|.*\.pem|.*\.key|id_rsa.*|.*token.*|\.ssh)($|\/)/i;
+
 export function checkShellCommand(command) {
   if (typeof command !== "string" || !command.trim()) throw new Error("empty command");
   if (command.length > 4000) throw new Error("command is too long (4000 chars max)");
@@ -36,16 +44,32 @@ export function checkShellCommand(command) {
   return String(command);
 }
 
-/** The cwd must resolve inside one of the allowed roots (symlinks followed). */
+/** "~" and "~/x" mean the user's home folder, like the shell reads them. */
+function expandHome(wanted) {
+  if (wanted === "~") return os.homedir();
+  if (wanted.startsWith("~/")) return path.join(os.homedir(), wanted.slice(2));
+  return wanted;
+}
+
+/**
+ * The cwd must resolve inside one of the allowed roots — `..` segments and
+ * symlinks included (the real path is checked, so a link cannot escape), and
+ * `~` expands to the home folder (which is outside every root and refused).
+ * Secret folders (secrets, .env, keys, tokens, .ssh) are off limits even
+ * inside a root, so a command cannot start there and read them with "cat *".
+ */
 export function checkCwd(cwd, allowedRoots) {
-  const wanted = String(cwd || allowedRoots[0] || process.cwd());
+  const wanted = expandHome(String(cwd || allowedRoots[0] || process.cwd()));
+  if (SECRET_PATH_SEGMENT.test(wanted)) throw new Error("secrets are off limits");
   for (const root of allowedRoots) {
+    let resolved;
     try {
-      const resolved = resolveSafePath(wanted, root);
-      if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) return resolved;
+      resolved = resolveSafePath(wanted, root);
     } catch {
-      /* try the next root */
+      continue;
     }
+    if (SECRET_PATH_SEGMENT.test(resolved)) throw new Error("secrets are off limits");
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) return resolved;
   }
   throw new Error(`the working folder "${wanted}" is outside the allowed folders`);
 }
