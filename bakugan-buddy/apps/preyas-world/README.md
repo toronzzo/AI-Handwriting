@@ -40,10 +40,15 @@ Quit from the right-click menu.
 
 ## Tests
 
+From the repo root:
+
 ```
-/Applications/Godot.app/Contents/MacOS/Godot --headless --path apps/preyas-world --script res://tests/run_tests.gd
-node --experimental-strip-types --disable-warning=ExperimentalWarning --test bakugan-buddy/apps/preyas-world/tests/export.test.mjs
+npm run test:preyas-world           # Node sprite-export test + headless Godot checks
+GODOT_BIN=/path/to/godot npm run test:preyas-world:gdscript  # Godot checks only
 ```
+
+CI runs both halves: the Node sprite-export test and the GDScript check suite
+under headless Godot (the Linux Godot 4.7.2 build is downloaded in the step).
 
 The logic lives in plain scripts with no node dependencies (`scripts/walker.gd`,
 `scripts/mood.gd`, `scripts/sprite_data.gd`, `scripts/texture_builder.gd`) so

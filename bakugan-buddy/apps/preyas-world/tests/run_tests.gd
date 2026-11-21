@@ -2,7 +2,9 @@ extends SceneTree
 ## Preyas World test runner.
 ##
 ## Run (from the repo root):
-##   Godot --headless --path apps/preyas-world --script res://tests/run_tests.gd
+##   npm run test:preyas-world:gdscript
+## or directly:
+##   Godot --headless --path bakugan-buddy/apps/preyas-world --script res://tests/run_tests.gd
 ##
 ## Exit code 0 when every check passes, 1 otherwise. The tests only touch the
 ## pure scripts (walker, mood mapping, night check, sprite JSON parsing), so
@@ -59,7 +61,8 @@ func _walking_tests() -> void:
 	w_right.x = 190.0
 	w_right.advance(1.0, 96.0, 4.0, 200.0, steady)
 	check(w_right.direction == -1.0, "turns around at the right edge")
-	check(w_right.x == 200.0 - 96.0, "sits at the right edge after turning")
+	check(w_right.x == 200.0, "sits at the right edge after turning")
+	check(w_right.x + 96.0 == 200.0 + 96.0, "turning keeps the sprite right edge on the real right edge")
 
 	var w_edge := WalkerScript.new()
 	w_edge.x = 10.0
@@ -82,7 +85,8 @@ func _walking_tests() -> void:
 
 	var w_drag := WalkerScript.new()
 	w_drag.drag_to(5000.0, 96.0, 4.0, 400.0)
-	check(w_drag.x == 400.0 - 96.0, "drag clamps to the right edge")
+	check(w_drag.x == 400.0, "drag clamps to the right edge")
+	check(w_drag.x + 96.0 == 400.0 + 96.0, "dragging keeps the sprite right edge on the real right edge")
 	w_drag.drag_to(-50.0, 96.0, 4.0, 400.0)
 	check(w_drag.x == 4.0, "drag clamps to the left edge")
 	w_drag.set_sleeping(true)

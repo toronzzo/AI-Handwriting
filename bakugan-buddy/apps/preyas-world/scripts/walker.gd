@@ -42,8 +42,10 @@ func advance(dt: float, width: float, min_x: float, max_x: float, rng) -> void:
 			_turn_at_edges(width, min_x, max_x)
 
 ## Drag the sprite so its left edge sits at `new_x`, clamped to the walkway.
+## `max_x` is the maximum LEFT edge, so the sprite's right edge may reach
+## `max_x + width` (the real right edge of the walkway).
 func drag_to(new_x: float, width: float, min_x: float, max_x: float) -> void:
-	x = clampf(new_x, min_x, maxf(min_x, max_x - width))
+	x = clampf(new_x, min_x, maxf(min_x, max_x))
 	phase_timer = 0.0
 
 ## Drop: go back to walking from the drop point.
@@ -62,8 +64,11 @@ func set_sleeping(sleeping: bool) -> void:
 func _turn_at_edges(width: float, min_x: float, max_x: float) -> void:
 	if max_x <= min_x:
 		return
-	if x + width > max_x:
-		x = max_x - width
+	# `max_x` is the maximum LEFT edge, so the sprite's right edge may reach
+	# `max_x + width`. Clamp to `max_x` itself, not `max_x - width` — stopping
+	# `width` points short would make him jump left well before the edge.
+	if x > max_x:
+		x = max_x
 		direction = -1.0
 	elif x < min_x:
 		x = min_x
