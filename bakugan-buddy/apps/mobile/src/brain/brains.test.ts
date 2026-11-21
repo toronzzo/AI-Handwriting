@@ -13,16 +13,23 @@ import {
   STATUS_LABEL,
   STATUS_TOKEN,
 } from "./brainGeometry.ts";
-import { DEMO_BRAIN_MAP } from "./demoBrains.ts";
+import { DEMO_BRAIN_MAP, demoBrainSource } from "./demoBrains.ts";
 import type { BrainStatus } from "./types.ts";
 
 test("the map has a core and exactly the six first brains", () => {
   assert.equal(DEMO_BRAIN_MAP.isDemo, true);
+  assert.equal(DEMO_BRAIN_MAP.mode, "demo");
+  assert.equal(DEMO_BRAIN_MAP.checkedAt, null);
+  assert.match(DEMO_BRAIN_MAP.note, /Demo data/);
   assert.equal(DEMO_BRAIN_MAP.nodes.length, 6);
   assert.deepEqual(
     DEMO_BRAIN_MAP.nodes.map((node) => node.id),
     ["local-model", "paid-fallback", "free-provider", "router", "drawing", "memory"],
   );
+});
+
+test("the demo source still returns the static map behind the seam", () => {
+  assert.equal(demoBrainSource.get(), DEMO_BRAIN_MAP);
 });
 
 test("every node carries a status, a hint and a description", () => {
@@ -31,12 +38,15 @@ test("every node carries a status, a hint and a description", () => {
     assert.ok(node.name.length > 0, node.id + " name");
     assert.ok(node.hint.length > 0, node.id + " hint");
     assert.ok(node.description.length > 20, node.id + " description");
-    assert.ok(["online", "fallback", "planned", "unavailable"].includes(node.status), node.id + " status");
+    assert.ok(
+      ["online", "fallback", "planned", "unavailable", "offline", "checking"].includes(node.status),
+      node.id + " status",
+    );
   }
 });
 
 test("every status maps to a theme token and a plain label", () => {
-  const statuses: BrainStatus[] = ["online", "fallback", "planned", "unavailable"];
+  const statuses: BrainStatus[] = ["online", "fallback", "planned", "unavailable", "offline", "checking"];
   for (const status of statuses) {
     assert.ok(STATUS_TOKEN[status] in { good: 1, accent: 1, off: 1, note: 1 }, status + " token");
     assert.ok(STATUS_LABEL[status].length > 0, status + " label");

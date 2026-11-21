@@ -1,15 +1,19 @@
 /**
- * Demo / configuration data for the Brain view (first foundation).
+ * Demo / configuration data for the Brain view.
  *
- * These are the six brains the task asked to show, labelled clearly as
- * static configuration. A future live router/model-status source will read
- * the same `BrainMap` shape from the brain-server and swap in here, so this
- * file is the only thing that changes.
+ * These are the six brains the map shows, labelled clearly as static
+ * configuration. The live source (see `liveBrain.ts`) reads the Mac's health
+ * and copies this map's shape and descriptions, updating only the local model
+ * and router statuses. When a live read is not possible the map falls back to
+ * this data instead of claiming anything is online.
  */
 import type { BrainMap, BrainSource } from "./types.ts";
 
 export const DEMO_BRAIN_MAP: BrainMap = {
   isDemo: true,
+  mode: "demo",
+  checkedAt: null,
+  note: "Demo data — these statuses are examples, not a live reading.",
   core: {
     id: "preyas-core",
     name: "Preyas",
@@ -70,7 +74,7 @@ export const DEMO_BRAIN_MAP: BrainMap = {
   ],
 };
 
-/** The static source the screen uses today. */
+/** The static source the live hook starts from and falls back to. */
 export const demoBrainSource: BrainSource = {
   get(): BrainMap {
     return DEMO_BRAIN_MAP;

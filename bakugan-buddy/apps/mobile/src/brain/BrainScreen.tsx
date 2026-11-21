@@ -6,8 +6,8 @@ import { theme } from "../theme";
 import { Panel } from "../ui/Panel";
 import { Stripe } from "../ui/Stripe";
 import { usePalette } from "../usePalette";
-import { demoBrainSource } from "./demoBrains.ts";
 import { withAlpha } from "../palette.ts";
+import { brainSourceLine } from "./liveBrain.ts";
 import {
   BRAIN_CX,
   BRAIN_CY,
@@ -17,8 +17,9 @@ import {
   STATUS_TOKEN,
   type StatusToken,
 } from "./brainGeometry.ts";
-import type { BrainNode } from "./types.ts";
+import type { BrainDataMode, BrainNode } from "./types.ts";
 import { useIdlePulse } from "./useIdlePulse.ts";
+import { useLiveBrainMap } from "./useLiveBrainMap.ts";
 
 /** The little circle that marks one node's status. */
 function statusColour(palette: Record<string, string>, token: StatusToken): string {
@@ -26,13 +27,34 @@ function statusColour(palette: Record<string, string>, token: StatusToken): stri
 }
 
 /**
+ * The source badge: live, demo, checking, or the last good reading.
+ * All four use existing theme tokens; none uses the danger colour.
+ */
+function badgeFor(mode: BrainDataMode): { label: string; background: string; colour: string } {
+  switch (mode) {
+    case "live":
+      return { label: "LIVE", background: theme.accent, colour: theme.onAccent };
+    case "stale":
+      return { label: "LAST CHECK", background: theme.track, colour: theme.text };
+    case "offline":
+      return { label: "OFFLINE · DEMO", background: theme.track, colour: theme.text };
+    case "loading":
+      return { label: "CHECKING", background: theme.track, colour: theme.text };
+    default:
+      return { label: "DEMO DATA", background: theme.accent, colour: theme.onAccent };
+  }
+}
+
+/**
  * The Brain view: a central Preyas node with the six connected brains around
- * it. Read-only — tapping a node opens a short description, nothing is wired
- * to the real router yet. The map breathes faintly while visible, and sits
- * still under reduced motion or a hidden tab.
+ * it. Read-only — tapping a node opens a short description. The local model
+ * and router show real status when the Mac answers; otherwise the map keeps
+ * the static descriptions and says plainly that it is demo data. The map
+ * breathes faintly while visible, and sits still under reduced motion or a
+ * hidden tab.
  */
 export function BrainScreen() {
-  const map = demoBrainSource.get();
+  const map = useLiveBrainMap();
   const palette = usePalette();
   const { width } = useWindowDimensions();
   const wide = isWide(width);
@@ -49,22 +71,27 @@ export function BrainScreen() {
   const coreR = 34 * breathe;
   const linkPulse = 1 - pulse * 0.35;
 
-  const demoTag = map.isDemo ? (
-    <View style={styles.demoTag}>
-      <Text style={styles.demoTagText}>DEMO DATA</Text>
-    </View>
-  ) : null;
+  const badge = badgeFor(map.mode);
+  const mapSummary =
+    map.mode === "live" ? "Live status" : map.mode === "stale" ? "Last known status" : "Demo status";
 
   const mapPanel = (
     <Panel style={styles.mapPanel}>
       <View style={styles.headerRow}>
         <Text style={styles.heading} accessibilityRole="header">BRAIN</Text>
-        {demoTag}
+        <View
+          style={[styles.badge, { backgroundColor: badge.background }]}
+          accessible
+          accessibilityLabel={`Data source: ${badge.label}`}
+        >
+          <Text style={[styles.badgeText, { color: badge.colour }]}>{badge.label}</Text>
+        </View>
       </View>
       <Text style={styles.subtitle}>
         Preyas's brains at a glance — tap a node to see what it does.
       </Text>
-      <View accessible accessibilityLabel={`Brain map. ${map.core.name} at the centre, ${map.nodes.length} connected brains.`}>
+      <Text style={styles.mapNote}>{map.note}</Text>
+      <View accessible accessibilityLabel={`${mapSummary}. Brain map. ${map.core.name} at the centre, ${map.nodes.length} connected brains.`}>
         <Svg viewBox={`0 0 ${BRAIN_VIEW} ${BRAIN_VIEW}`} style={styles.chart} accessibilityElementsHidden>
           {/* link back to the core, drawn first so the dots paint over it */}
           {map.nodes.map((node, i) => {
@@ -137,7 +164,9 @@ export function BrainScreen() {
         <Text style={styles.detailName}>{selected.name}</Text>
       </View>
       <Text style={styles.detailStatus}>{STATUS_LABEL[selected.status]}</Text>
+      {selected.statusNote ? <Text style={styles.detailNote}>{selected.statusNote}</Text> : null}
       <Text style={styles.detailBody}>{selected.description}</Text>
+      <Text style={styles.detailSource}>{brainSourceLine(map, selected)}</Text>
       <View style={styles.detailStripe}>
         <Stripe height={4} width={56} />
       </View>
@@ -206,16 +235,15 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: "uppercase",
   },
-  subtitle: { color: theme.dim, fontSize: theme.type.caption, marginBottom: 8 },
+  subtitle: { color: theme.dim, fontSize: theme.type.caption, marginBottom: 4 },
+  mapNote: { color: theme.faint, fontSize: 11, lineHeight: 16, marginBottom: 8 },
 
-  demoTag: {
-    backgroundColor: theme.accent,
+  badge: {
     borderRadius: 5,
     paddingVertical: 2,
     paddingHorizontal: 8,
   },
-  demoTagText: {
-    color: theme.onAccent,
+  badgeText: {
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 1.1,
@@ -234,7 +262,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     color: theme.text,
   },
-  detailStatus: { color: theme.accent, fontSize: theme.type.caption, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10 },
+  detailStatus: { color: theme.accent, fontSize: theme.type.caption, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 },
+  detailNote: { color: theme.text, fontSize: theme.type.body, lineHeight: theme.lead, marginBottom: 10 },
   detailBody: { color: theme.dim, fontSize: theme.type.body, lineHeight: theme.lead },
+  detailSource: { color: theme.faint, fontSize: 11, lineHeight: 15, marginTop: 12 },
   detailStripe: { marginTop: 14 },
 });
