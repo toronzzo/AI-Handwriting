@@ -79,6 +79,7 @@ export async function llamaServerRamMb(execImpl = execFile, port = LLAMA_PORT) {
  * "Compute error". 24 layers fits and still answers (slowly, see the card).
  */
 export const TIERS = {
+  tiny: { id: "tiny", file: "Qwen3.5-0.8B-Q4_K_M.gguf", context: 16384, weightsGb: 0.6, ngl: 99 },
   small: { id: "small", file: "Huihui-Qwen3-8B-abliterated-v2.Q4_K_M.gguf", context: 16384, weightsGb: 5.0, ngl: 99 },
   big: { id: "big", file: "Huihui-Qwen3-14B-abliterated-v2.Q4_K_M.gguf", context: 16384, weightsGb: 9.0, ngl: 99 },
   huge: { id: "huge", file: "Qwen3-30B-A3B.Q3_K_M.gguf", context: 8192, weightsGb: 14.7, ngl: 24 },

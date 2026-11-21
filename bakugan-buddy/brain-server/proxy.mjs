@@ -29,6 +29,7 @@ import { driveMapPrompt, isDriveQuestion, isScanDriveCommand, whereIsQuery } fro
 import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
 import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
+import { proxyOfflineArticle, proxyOfflineImage, searchOffline } from "./lib/offlineSearch.mjs";
 import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
 import { collectStatus, restartArgs } from "./lib/status.mjs";
 import { collectUserNotes, ensureObsidianConfig, exportVault, searchVault, saveToVault, VAULT_DIR } from "./lib/vault.mjs";
@@ -780,12 +781,21 @@ const server = http.createServer(async (req, res) => {
   }
   const url = new URL(req.url || "/", `http://${host}`);
 
+  // An <img> tag cannot send our header, so the offline proxy GETs may carry
+  // the token in the query; every other route must use the header.
+  const requestToken = requestTokenFor({
+    path: url.pathname,
+    method: req.method,
+    headerToken: req.headers["x-preyas-token"] || "",
+    queryToken: url.searchParams.get("token") || "",
+  });
+
   // All API clients, including local callers, must pair once.
   const gate = authorizeRequest({
     path: url.pathname,
     method: req.method,
     remoteAddress: req.socket?.remoteAddress || "",
-    token: req.headers["x-preyas-token"] || "",
+    token: requestToken,
     book: dataDir ? readDevices(dataDir) : { devices: [] },
     pairing,
   });
@@ -796,7 +806,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (gate.device && dataDir) {
     try {
-      touchDevice(readDevices(dataDir), req.headers["x-preyas-token"] || "");
+      touchDevice(readDevices(dataDir), requestToken);
     } catch {
       /* last-seen is a nicety */
     }
@@ -1487,6 +1497,55 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ ok: true, saved }));
         return;
       }
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/offline/search") {
+      const query = (url.searchParams.get("q") || "").trim();
+      if (!query) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "q is required", ok: false, results: [] }));
+        return;
+      }
+      const step = activity.begin(activityRun(req), "search_offline", query);
+      const result = await searchOffline(query);
+      if (result.ok) step.done(query);
+      else step.fail(query);
+      res.writeHead(result.ok ? 200 : 503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/offline/image") {
+      const pathValue = (url.searchParams.get("path") || "").trim();
+      const image = await proxyOfflineImage(pathValue);
+      if (!image.ok) {
+        res.writeHead(image.status || 404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "offline image unavailable" }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": image.type, "Cache-Control": "private, max-age=86400" });
+      res.end(image.buffer);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/offline/article") {
+      const article = await proxyOfflineArticle((url.searchParams.get("path") || "").trim());
+      if (!article.ok) {
+        res.writeHead(article.status || 404, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Offline article unavailable");
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": article.type,
+        "Cache-Control": "private, max-age=3600",
+        // The proxied HTML is untrusted pack content: the sandbox gives it an
+        // opaque origin and blocks scripts, so it can never reach the pairing
+        // token or call the brain's own API from this page.
+        "Content-Security-Policy": "sandbox; script-src 'none'",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end(article.buffer);
+      return;
     }
 
     if (req.method === "GET" && url.pathname === "/v1/search") {

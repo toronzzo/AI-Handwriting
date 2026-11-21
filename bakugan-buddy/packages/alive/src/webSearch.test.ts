@@ -8,10 +8,61 @@ import {
   parseDuckDuckGoHtml,
   searchQueryFrom,
   shouldWebSearch,
+  shouldOfflineSearch,
   sourcesPrompt,
   unwrapDuckDuckGoUrl,
   withSources,
 } from "./webSearch.ts";
+
+test("offline library topics prefer Kiwix", () => {
+  assert.equal(shouldOfflineSearch("What planet is Mars"), true);
+  assert.equal(shouldOfflineSearch("how to fix a toaster"), true);
+  assert.equal(shouldOfflineSearch("step-by-step repair for a bicycle"), true);
+  assert.equal(shouldOfflineSearch("hello Preyas"), false);
+});
+
+test("encyclopedic and astronomy questions route to the offline library", () => {
+  for (const ask of [
+    "what is a supernova",
+    "tell me about the Andromeda galaxy",
+    "who was Galileo",
+    "explain orbital mechanics",
+    "how do I replace an iPhone battery",
+    "ifixit guide for a MacBook fan",
+    "what is the closest star",
+  ]) {
+    assert.equal(shouldOfflineSearch(ask), true, ask + " should look offline first");
+  }
+});
+
+test("offline conditions route to the library even without topic words", () => {
+  for (const ask of ["offline: what causes an eclipse", "I have no internet, tell me about Jupiter", "answer without wifi"]) {
+    assert.equal(shouldOfflineSearch(ask), true, ask + " should look offline first");
+  }
+});
+
+test("ordinary chat, code help and long pastes stay off the offline path", () => {
+  for (const ask of [
+    "hello Preyas",
+    "tell me a story",
+    "use big",
+    "write a function that sorts a list",
+    "how do I feel about today",
+  ]) {
+    assert.equal(shouldOfflineSearch(ask), false, ask + " should keep its existing path");
+  }
+  const pasted = "what is this\n".repeat(40);
+  assert.equal(shouldOfflineSearch(pasted), false, "a long paste is not a lookup");
+});
+
+test("normal live questions still use web search exactly as before", () => {
+  // Choosing the offline library must not change the web rules themselves.
+  for (const ask of ["latest news about the election", "/search mars landing", "what's the current price of bitcoin"]) {
+    assert.equal(shouldWebSearch(ask), true, ask + " should still be a web question");
+  }
+  assert.equal(shouldWebSearch("hi Preyas"), false);
+  assert.equal(shouldWebSearch("tell me a story"), false);
+});
 
 test("plain questions do not search; fresh-information requests do", () => {
   assert.equal(shouldWebSearch("hi Preyas"), false);

@@ -6,6 +6,8 @@ import {
   Switch,
   Text,
   TextInput,
+  Image,
+  Modal,
   useWindowDimensions,
   View,
   type NativeScrollEvent,
@@ -29,7 +31,7 @@ import {
 } from "../../../../packages/alive/src/chatTurn.ts";
 import type { MicPhase } from "../../../../packages/alive/src/speech.ts";
 import { currentBrainUrl, readBrainHost } from "../room/brain/brainLink";
-import { brainFetch, isUnauthorized, pairWithCode } from "../room/brain/token";
+import { brainFetch, isUnauthorized, pairWithCode, readToken } from "../room/brain/token";
 import { isValidPairingCode, microphoneAvailable, normalizePairingCode } from "../../../../packages/alive/src/phone.ts";
 import { isWhisperHallucination, resetSpeech, transcribeClip } from "../../../../packages/alive/src/speech.ts";
 import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../../../packages/alive/src/notes.ts";
@@ -42,9 +44,11 @@ import { matchDocuments, parseDocumentRequest } from "../../../../packages/alive
 import { formatDue, parseReminder, type Reminder } from "../../../../packages/alive/src/reminders.ts";
 import { isShortAffirmation, wantsThinking } from "../../../../packages/alive/src/chatTurn.ts";
 import { HUGE_TIMEOUT_MS, MODEL_LABELS, SWITCHING_CHAT_MESSAGE, parseModelCommand, type LocalModelId } from "../../../../packages/alive/src/modelSwitch.ts";
+import { offlineSourceView } from "../../../../packages/alive/src/offlineSources.ts";
 import {
   citedSourceEntries,
   shouldWebSearch,
+  shouldOfflineSearch,
   searchQueryFrom,
   withSources,
   type SearchResult,
@@ -121,6 +125,7 @@ type ModelStatus = {
   rollback?: { target: LocalModelId; note: string; at: number } | null;
 };
 const MODEL_BUTTONS: { id: LocalModelId; short: string }[] = [
+  { id: "tiny", short: "Tiny 0.8B" },
   { id: "small", short: "Small 8B" },
   { id: "big", short: "Big 14B" },
   { id: "huge", short: "Huge 30B" },
@@ -329,6 +334,8 @@ export function ChatScreen({
   const [notesQuery, setNotesQuery] = useState("");
   const [editing, setEditing] = useState<{ id: string; text: string; kind: NoteKind } | null>(null);
   const [chip, setChip] = useState("");
+  /** Enlarged offline picture, or null when nothing is zoomed. */
+  const [zoomImage, setZoomImage] = useState("");
   const notesStamp = useRef(0);
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [searching, setSearching] = useState(false);
@@ -1441,6 +1448,25 @@ export function ChatScreen({
       setSearching(false);
     }
   }
+  /** Prefer the local Kiwix library for encyclopedic/how-to questions. */
+  async function runOfflineSearch(text: string, runId = ""): Promise<{ query: string; results: SearchResult[] }> {
+    const query = searchQueryFrom(text) || text.trim();
+    const sink = runId ? runsRef.current.get(runId) : undefined;
+    const stepId = sink ? sink.pushLocal({ kind: "tool", tool: "search_offline", label: "Searched offline library", detail: query, status: "running" }) : "";
+    try {
+      const res = await brainFetch(
+        `${bag.brainUrl}/v1/offline/search?q=${encodeURIComponent(query)}`,
+        runId ? { headers: { "x-preyas-run": runId } } : undefined,
+      );
+      const body = (await res.json()) as { ok?: boolean; results?: SearchResult[]; error?: string };
+      if (!body.ok || !body.results?.length) return { query, results: [] };
+      return { query, results: body.results.slice(0, 5) };
+    } catch {
+      return { query, results: [] };
+    } finally {
+      if (sink && stepId) sink.markDone(stepId);
+    }
+  }
   function watchTask(id: string) {
     if (taskPoll.current) clearInterval(taskPoll.current);
     taskPoll.current = setInterval(() => {
@@ -2030,12 +2056,17 @@ export function ChatScreen({
       if (!askPaid) {
         let sources: SearchResult[] = [];
         let searchQuery = "";
-        if (shouldWebSearch(trimmed)) {
+        if (shouldOfflineSearch(trimmed)) {
+          const found = await runOfflineSearch(trimmed, runId);
+          sources = found.results;
+          searchQuery = found.query;
+        }
+        if (!sources.length && shouldWebSearch(trimmed)) {
           const found = await runWebSearch(trimmed, runId);
           sources = found.results;
           searchQuery = found.query;
-          if (!sources.length && isCurrent()) setChip("Web search found nothing");
         }
+        if (!sources.length && isCurrent() && (shouldOfflineSearch(trimmed) || shouldWebSearch(trimmed))) setChip("No library or web results");
         const think = thinkForced || wantsThinking(trimmed);
         if (think && isCurrent()) setThinking(true);
         const local = await ask("local", history, trimmed, isCurrent, sources, searchQuery, think, runId).finally(() => {
@@ -3042,18 +3073,41 @@ export function ChatScreen({
                       ) : null}
                       {message.sources?.length ? (
                         <View style={styles.sources}>
-                          {citedSourceEntries(message.content, message.sources).map(({ n, source }) => (
-                            <Pressable
-                              key={`${source.url}-${n}`}
-                              onPress={() => {
-                                if (typeof window !== "undefined" && window.open) window.open(source.url, "_blank", "noopener");
-                              }}
-                            >
-                              <Text style={styles.sourceLink} numberOfLines={1}>
-                                [{n}] {source.title}
-                              </Text>
-                            </Pressable>
-                          ))}
+                          {citedSourceEntries(message.content, message.sources).map(({ n, source }) => {
+                            const view = offlineSourceView(source, bag.brainUrl, readToken());
+                            return (
+                              <View key={`${source.url}-${n}`}>
+                                {view.imageUrl ? (
+                                  <Pressable
+                                    accessibilityRole="imagebutton"
+                                    accessibilityLabel={`Enlarge picture for ${view.title}`}
+                                    onPress={() => setZoomImage(view.imageUrl)}
+                                  >
+                                    <Image
+                                      source={{ uri: view.imageUrl }}
+                                      style={styles.offlineSourceImage}
+                                      resizeMode="cover"
+                                    />
+                                  </Pressable>
+                                ) : null}
+                                <Pressable
+                                  onPress={() => {
+                                    if (typeof window !== "undefined" && window.open) {
+                                      window.open(view.articleUrl || source.url, "_blank", "noopener");
+                                    }
+                                  }}
+                                >
+                                  <Text style={styles.sourceLink} numberOfLines={2}>
+                                    [{n}] {view.tag ? (
+                                      <Text style={styles.offlineSourceTag}>{view.tag}</Text>
+                                    ) : null}
+                                    {view.tag ? " " : ""}
+                                    {view.title}
+                                  </Text>
+                                </Pressable>
+                              </View>
+                            );
+                          })}
                         </View>
                       ) : null}
                       <Text style={styles.time}>{clock(message.t)}{mine ? (read ? "  ✓✓" : "  ✓") : ""}</Text>
@@ -3127,6 +3181,21 @@ export function ChatScreen({
                   <Text style={styles.jumpText}>Jump to latest ↓</Text>
                 </Pressable>
               </View>
+            ) : null}
+            {zoomImage ? (
+              <Modal visible transparent animationType="fade" onRequestClose={() => setZoomImage("")}>
+                <Pressable
+                  style={styles.zoomBackdrop}
+                  onPress={() => setZoomImage("")}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close picture"
+                >
+                  <Image source={{ uri: zoomImage }} style={styles.zoomImage} resizeMode="contain" />
+                  <Pressable style={styles.zoomClose} onPress={() => setZoomImage("")}>
+                    <Text style={styles.zoomCloseText}>Close</Text>
+                  </Pressable>
+                </Pressable>
+              </Modal>
             ) : null}
             {/* In normal flow right above the composer, so it can never cover it. */}
             <View style={styles.previewRow} pointerEvents="box-none">
@@ -3715,6 +3784,25 @@ const styles = StyleSheet.create({
   savePoints: { marginTop: 8, alignSelf: "flex-start", ...ghost, borderRadius: 12, paddingHorizontal: 10 },
   savePointsText: { color: theme.text, fontSize: 12, fontWeight: "600", paddingVertical: theme.space.xs },
   sourceLink: { color: theme.accentText, fontSize: 12, textDecorationLine: "underline" },
+  offlineSourceTag: { color: theme.faint, fontSize: 11 },
+  offlineSourceImage: { width: "100%", height: 180, borderRadius: 12, marginBottom: 6, backgroundColor: theme.off },
+  zoomBackdrop: {
+    flex: 1,
+    backgroundColor: theme.scrim,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: theme.space.md,
+  },
+  zoomImage: { width: "100%", height: "82%" },
+  zoomClose: {
+    ...ghost,
+    marginTop: theme.space.md,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    minHeight: 44,
+    justifyContent: "center",
+  },
+  zoomCloseText: { color: theme.onAccent, fontSize: 13, fontWeight: "600" },
   thinkToggle: { color: theme.faint, fontSize: 11, marginTop: 6, minHeight: 36, textAlignVertical: "center" },
   thinkBody: { color: theme.dim, fontSize: 12, marginTop: 4 },
   note: { color: theme.note, fontSize: 13 },
