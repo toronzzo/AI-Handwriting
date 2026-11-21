@@ -5,7 +5,8 @@
 
 export type ConfirmAction =
   | { kind: "delete_notes"; count: number }
-  | { kind: "paid"; costUsd?: number; promptChars?: number };
+  | { kind: "paid"; costUsd?: number; promptChars?: number }
+  | { kind: "slow_model"; target: "big" | "huge"; freeGb: number | null };
 
 export type ConfirmCard = {
   kind: ConfirmAction["kind"];
@@ -35,6 +36,27 @@ export function confirmFor(action: ConfirmAction): ConfirmCard {
       kind: "paid",
       title: "Ask DeepSeek for this?",
       body: `About ${formatUsd(cost)}. Your notes and the local model stay free.`,
+      yes: "Yes",
+      no: "No",
+      danger: false,
+    };
+  }
+  if (action.kind === "slow_model") {
+    const big = action.target === "big";
+    const name = big ? "big (Qwen3 14B)" : "huge (Qwen3 30B)";
+    const free =
+      typeof action.freeGb === "number" && Number.isFinite(action.freeGb)
+        ? `The Mac has about ${action.freeGb} GB free right now. `
+        : "";
+    return {
+      kind: "slow_model",
+      title: `Load the ${name} model?`,
+      body:
+        free +
+        (big
+          ? "The 14B model is slow on 16 GB: replies can take a minute and macOS will swap."
+          : "The 30B model is very slow on 16 GB: replies can take minutes and macOS will swap.") +
+        " Keep going?",
       yes: "Yes",
       no: "No",
       danger: false,
