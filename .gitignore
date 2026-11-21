@@ -20,6 +20,9 @@ characters/preyas/
 !**/persona.template.json
 !**/lore.template.md
 !**/examples.template.jsonl
+# The one reviewed sound folder: Preyas Tier-0 reaction cues, each listed in
+# its SFX_CREDITS.md with a checksum. Every other .wav/.mp3 stays ignored.
+!bakugan-buddy/apps/mobile/assets/sounds/*.wav
 
 # Private character pack (templates stay tracked)
 bakugan-buddy/characters/preyas/persona.json

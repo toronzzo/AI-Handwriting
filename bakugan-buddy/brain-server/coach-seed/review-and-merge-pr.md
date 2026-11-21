@@ -33,9 +33,10 @@ Fail-hint: A check failed? Paste the failing check name and its last lines here.
 Do: Open the "Files changed" tab, or run the command below.
 Command: `gh pr diff <n> --name-only`
 Why: The prompt lists the files it may touch. Anything else needs a reason.
-Check: The files match the "FILES" part of the prompt. There is no .env, no secrets/ file, no .gguf or .onnx model, no .wav or .mp3 audio.
-Expect: /^(?!.*(\.env|secrets\/|\.gguf|\.onnx|\.wav|\.mp3)).*$/s
+Check: The files match the "FILES" part of the prompt. There is no .env, no secrets/ file, no .gguf or .onnx model, no .mp3 audio, and no .wav except the one deliberately reviewed folder named below.
+Expect: /^(?!.*(\.env|secrets\/|\.gguf|\.onnx|\.mp3|(?<!bakugan-buddy\/apps\/mobile\/assets\/sounds\/)[^/]*\.wav)).*$/s
 Fail-hint: A file you did not expect is in the list? Paste the list here before going on.
+WAV exception: `.wav` is allowed only directly in `bakugan-buddy/apps/mobile/assets/sounds/` (the reviewed Tier-0 reaction sounds), only when the same PR lists each file in `assets/sounds/SFX_CREDITS.md` and the folder holds 12 files or fewer. A .wav anywhere else, or one with no credits row, still stops the review.
 
 ### 4. Check that GitHub can merge it
 Do: On the PR page, look above the merge button.
