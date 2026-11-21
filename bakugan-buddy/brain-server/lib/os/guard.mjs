@@ -8,7 +8,7 @@
 import crypto from "node:crypto";
 import { decide, kindClass, reviewRules } from "./guardRules.mjs";
 import { appendGuardLog } from "./guardLog.mjs";
-import { resolveNavPrivacy } from "./privateHost.mjs";
+import { traceNavigation } from "./privateHost.mjs";
 
 export const APPROVAL_TTL_MS = 60_000;
 
@@ -97,17 +97,19 @@ export function llamaJudge({ llamaUrl, fetchImpl = fetch } = {}) {
  * ask. Destructive, paid and control actions never reach the model.
  */
 export async function reviewAction(action, deps = {}) {
-  // A browser navigation resolves its hostname first (DNS included) so the
-  // rules can ask before a private address opens; everything else skips it.
+  // A browser navigation follows its redirect chain first, resolving each
+  // hop's hostname (DNS included), so the rules can ask before a private
+  // address opens; everything else skips it. Any failure fails closed:
+  // an unresolvable host is treated as private and the card is asked.
   let nav = null;
   if (String(action?.kind || "") === "browser_navigate") {
     const url = action?.args?.url;
     if (typeof url === "string" && url.trim()) {
-      const resolver = typeof deps.resolveNav === "function" ? deps.resolveNav : resolveNavPrivacy;
+      const resolver = typeof deps.resolveNav === "function" ? deps.resolveNav : traceNavigation;
       try {
         nav = await resolver(url);
       } catch {
-        nav = null; // a failed lookup fails open; the navigation will fail too
+        nav = { private: true, host: "unknown", address: null }; // fail closed
       }
     }
   }

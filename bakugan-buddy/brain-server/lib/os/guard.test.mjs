@@ -61,13 +61,14 @@ test("reviewAction resolves the navigation hostname before the rules", async () 
     resolveNav: async () => ({ private: false, host: "innocent.example.com" }),
   });
   assert.equal(publicResolved.verdict, "allow");
-  // A broken resolver fails open: the navigation itself will fail at the browser.
+  // A broken resolver fails closed: the card is asked, never skipped.
   const broken = await reviewAction(navAction, {
     resolveNav: async () => {
       throw new Error("dns down");
     },
   });
-  assert.equal(broken.verdict, "allow");
+  assert.equal(broken.verdict, "ask");
+  assert.equal(broken.rule, "R11");
   // Other kinds never resolve a hostname.
   const snapshot = await reviewAction(
     { kind: "browser_snapshot", args: {}, userRequest: "read it", origin: "user", source: "task" },

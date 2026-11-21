@@ -11,6 +11,7 @@ import {
   loadMcpConfig,
   MCP_IDLE_MS,
   MAX_TOOL_RESULT_CHARS,
+  snapshotPageUrl,
   splitToolName,
   toOpenAiTools,
 } from "./mcp.mjs";
@@ -191,5 +192,72 @@ test("every curated browser tool is a known guard kind", async () => {
   for (const name of names) {
     const known = Object.values(KINDS).some((set) => set.has(name));
     assert.ok(known, `${name} is missing from guard KINDS`);
+  }
+});
+
+test("snapshotPageUrl reads the page URL out of a snapshot", () => {
+  assert.equal(snapshotPageUrl("### Page\n- Page URL: https://example.com/contact\n- Page Title: Hi"), "https://example.com/contact");
+  assert.equal(snapshotPageUrl("ran browser_snapshot"), "");
+  assert.equal(snapshotPageUrl(""), "");
+});
+
+test("a navigation that ends on a private address is stopped after the load", async () => {
+  const config = defaultMcpConfig({ repoRoot: tempDir(), dataDir: tempDir() });
+  config.servers.files.enabled = false;
+  config.servers.shell.enabled = false;
+  let checks = 0;
+  const hub = createMcpHub({
+    config,
+    connect: async () => ({
+      listTools: async () => [],
+      callTool: async (name) => {
+        if (name === "browser_navigate") return { content: [{ type: "text", text: "navigated" }] };
+        if (name === "browser_snapshot") {
+          return { content: [{ type: "text", text: "### Page\n- Page URL: http://192.168.31.1/secret\n- Page Title: Private" }] };
+        }
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+      close: async () => {},
+    }),
+    navCheck: async (url) => {
+      checks += 1;
+      return { private: true, host: "192.168.31.1", address: null };
+    },
+  });
+  try {
+    const text = await hub.callTool("browser_navigate", { url: "https://public.example/" });
+    assert.match(text, /Blocked by the guard/);
+    assert.match(text, /192\.168\.31\.1/);
+    assert.match(text, /Stop and ask/);
+    assert.equal(checks, 1, "the final URL was re-checked after the load");
+  } finally {
+    await hub.stop();
+  }
+});
+
+test("a navigation ending on a public final URL passes through", async () => {
+  const config = defaultMcpConfig({ repoRoot: tempDir(), dataDir: tempDir() });
+  config.servers.files.enabled = false;
+  config.servers.shell.enabled = false;
+  const hub = createMcpHub({
+    config,
+    connect: async () => ({
+      listTools: async () => [],
+      callTool: async (name) => {
+        if (name === "browser_navigate") return { content: [{ type: "text", text: "navigated" }] };
+        if (name === "browser_snapshot") {
+          return { content: [{ type: "text", text: "### Page\n- Page URL: https://final.example/done\n- Page Title: Fine" }] };
+        }
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+      close: async () => {},
+    }),
+    navCheck: async () => ({ private: false, host: "final.example", address: null }),
+  });
+  try {
+    const text = await hub.callTool("browser_navigate", { url: "https://public.example/" });
+    assert.equal(text, "navigated");
+  } finally {
+    await hub.stop();
   }
 });

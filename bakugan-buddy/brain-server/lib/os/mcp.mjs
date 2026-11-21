@@ -21,6 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSafePath, SAFE_ROOT } from "../safeFs.mjs";
 import { browserToolSpecs, BROWSER_TOOL_NAMES } from "./browserTools.mjs";
+import { resolveNavPrivacy } from "./privateHost.mjs";
 import { DEFAULT_MAX_OUTPUT, DEFAULT_TIMEOUT_MS } from "./terminalServer.mjs";
 
 export const MCP_IDLE_MS = 5 * 60_000;
@@ -231,6 +232,13 @@ export function flattenToolResult(result, maxChars = MAX_TOOL_RESULT_CHARS) {
   return text.slice(0, maxChars);
 }
 
+/** The page URL from a browser_snapshot result ("- Page URL: https://…"). */
+export function snapshotPageUrl(snapshotText) {
+  const text = String(snapshotText || "");
+  const match = text.match(/- Page URL:\s*(\S+)/) || text.match(/\bPage URL:\s*(\S+)/);
+  return match ? match[1].replace(/[)\].,;]+$/, "") : "";
+}
+
 /** Strip JSON-Schema-only keys so the schemas work as OpenAI parameters. */
 export function toOpenAiTools(specs) {
   return specs.map((spec) => {
@@ -272,6 +280,7 @@ export function createMcpHub(options = {}) {
     schedule = (fn, ms) => setTimeout(fn, ms),
     clearTimer = (timer) => clearTimeout(timer),
     log = () => {},
+    navCheck = resolveNavPrivacy,
   } = options;
 
   const state = new Map(); // module -> { connection, broken }
@@ -390,7 +399,26 @@ export function createMcpHub(options = {}) {
         connection = await ensure(split.module);
       }
       const result = await connection.callTool(split.tool, args || {});
-      return flattenToolResult(result, MAX_TOOL_RESULT_CHARS);
+      const text = flattenToolResult(result, MAX_TOOL_RESULT_CHARS);
+      // After a navigation the page may have followed redirects the
+      // pre-flight could not see (a rebinding host can change its answer):
+      // re-check the FINAL page URL and refuse to go on when it ended on a
+      // private address. A failed navigation has no new page to check.
+      if (split.module === "browser" && split.tool === "browser_navigate" && !(result && result.isError) && typeof navCheck === "function") {
+        try {
+          const snapshot = await connection.callTool("browser_snapshot", {});
+          const finalUrl = snapshotPageUrl(flattenToolResult(snapshot, MAX_TOOL_RESULT_CHARS));
+          if (finalUrl) {
+            const nav = await navCheck(finalUrl).catch(() => ({ private: true, host: "unknown", address: null }));
+            if (nav.private) {
+              return `Blocked by the guard: the page ended on ${finalUrl} (${nav.host || "a private address"}). Stop and ask your partner before continuing.`;
+            }
+          }
+        } catch {
+          /* a snapshot failure must not block the navigation result */
+        }
+      }
+      return text;
     },
 
     /** Stop the browser after an idle timeout without touching the rest. */
