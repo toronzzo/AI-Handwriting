@@ -311,3 +311,89 @@ test("labelForTool names the common tools for the task panel", () => {
   assert.equal(labelForTool("browser_navigate", { url: "https://example.com" }), "Open https://example.com");
   assert.equal(labelForTool("browser_click", { element: "Login" }), 'Click "Login"');
 });
+
+test("every model call and tool run lights the hands neuron up", async () => {
+  const task = makeTask();
+  const events = [];
+  const brain = { emit: (event) => events.push(event) };
+  let ms = 1_000;
+  let calls = 0;
+  const deps = baseDeps({
+    brain,
+    now: () => (ms += 10),
+    callModel: async (log, { allowTools }) => {
+      if (!allowTools) return { answer: "all done", model: "deepseek-flash", usage: { prompt_tokens: 12, completion_tokens: 8 } };
+      calls += 1;
+      if (calls > 1) return { answer: "all done", model: "deepseek-flash", usage: { prompt_tokens: 12, completion_tokens: 8 } };
+      return { toolCalls: [READ], model: "deepseek-flash", usage: { prompt_tokens: 10, completion_tokens: 4 } };
+    },
+  });
+  const finished = await runToolLoop(task, deps);
+  assert.equal(finished.status, "done");
+
+  const hands = events.filter((event) => event.neuron === "hands");
+  assert.deepEqual(
+    hands.map((event) => (event.detail ? `${event.state}:${event.detail}` : event.state)),
+    [
+      "thinking",
+      "done:deepseek-flash",
+      "thinking:Read /Volumes/Agent/agent/notes/a.md",
+      "done:Read /Volumes/Agent/agent/notes/a.md",
+      "thinking",
+      "done:deepseek-flash",
+    ],
+  );
+  for (const event of hands.filter((row) => row.state === "done" && row.detail === "deepseek-flash")) {
+    assert.equal(typeof event.tps, "number");
+    assert.ok(event.tps > 0, `tps reported: ${event.tps}`);
+    assert.equal(typeof event.costUsd, "number");
+    assert.ok(event.costUsd > 0, `paid cost reported: ${event.costUsd}`);
+  }
+});
+
+test("a broken tool reports hands error, and a broken model call too", async () => {
+  const task = makeTask();
+  const events = [];
+  const brain = { emit: (event) => events.push(event) };
+  const deps = baseDeps({
+    brain,
+    callModel: async () => {
+      throw new Error("model down");
+    },
+  });
+  await assert.rejects(() => runToolLoop(task, deps), /model down/);
+  assert.equal(events.filter((event) => event.neuron === "hands" && event.state === "error").length, 1);
+
+  const task2 = makeTask();
+  const events2 = [];
+  let calls2 = 0;
+  const deps2 = baseDeps({
+    brain: { emit: (event) => events2.push(event) },
+    callModel: async (log, { allowTools }) => {
+      calls2 += 1;
+      if (!allowTools || calls2 > 1) return { answer: "ok", model: "preyas", usage: {} };
+      return { toolCalls: [WRITE], model: "preyas", usage: {} };
+    },
+    execute: async () => {
+      throw new Error("no disk");
+    },
+  });
+  const finished2 = await runToolLoop(task2, deps2);
+  assert.equal(finished2.status, "done");
+  const toolError = events2.filter((event) => event.state === "error");
+  assert.equal(toolError.length, 1);
+  assert.match(toolError[0].detail, /Write/);
+});
+
+test("localChat keeps the llama usage so the loop can report tokens/sec", async () => {
+  const fake = async () => ({
+    ok: true,
+    json: async () => ({
+      choices: [{ message: { content: '{"answer":"yes"}' } }],
+      usage: { prompt_tokens: 11, completion_tokens: 3 },
+    }),
+  });
+  const result = await localChat({ llamaUrl: "http://fake", fetchImpl: fake });
+  assert.equal(result.answer, "yes");
+  assert.deepEqual(result.usage, { prompt_tokens: 11, completion_tokens: 3 });
+});

@@ -52,12 +52,14 @@ function makeSwitch(options = {}) {
   // Idle-timer tests let the module use its own clock and setTimeout, which
   // node:test mock timers then control. All other tests use the fake clock.
   const ownClock = options.ownClock === true;
+  const events = [];
   const switcher = createModelSwitch({
     modelsDir: models,
     port: 8790,
     llamaBin: "/fake/llama-server",
     template: null,
     dataDir: "",
+    brain: { emit: (event) => events.push(event) },
     fetchImpl: async (url) => {
       if (String(url).includes("/health")) {
         return { ok: state.healthy };
@@ -104,6 +106,7 @@ function makeSwitch(options = {}) {
     killed,
     state,
     clock,
+    events,
     drain: async () => {
       for (let i = 0; i < 20; i++) {
         await Promise.resolve();
@@ -354,6 +357,58 @@ test("the proxy timeout grows with the tier", async () => {
     await f2.drain();
     assert.equal(f2.switcher.chatTimeoutMs(), 300_000);
     fs.rmSync(f2.models, { recursive: true, force: true });
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
+test("use big: chat-big lights loading, chat-small goes off, then chat-big is off", async () => {
+  const f = makeSwitch({ healthy: true, freeGb: 40 });
+  try {
+    const result = await f.switcher.request("big", { confirmed: true });
+    assert.equal(result.ok, true);
+    await f.drain();
+    assert.equal(f.switcher.state().status, "ready");
+
+    const neurons = f.events.map((event) => `${event.neuron}:${event.state}`);
+    assert.ok(neurons.includes("chat-big:loading"), neurons.join(", "));
+    assert.ok(neurons.includes("chat-small:off"), neurons.join(", "));
+    assert.ok(neurons.includes("chat-big:off"), neurons.join(", "));
+
+    const bigLoading = f.events.findIndex((event) => event.neuron === "chat-big" && event.state === "loading");
+    const smallOff = f.events.findIndex((event) => event.neuron === "chat-small" && event.state === "off");
+    assert.ok(bigLoading >= 0 && smallOff > bigLoading, "big loads first, then small turns off");
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
+test("a switch that fails reports error on the target neuron", async () => {
+  const f = makeSwitch({ healthy: true, freeGb: 40 });
+  try {
+    fs.rmSync(path.join(f.models, "Huihui-Qwen3-14B-abliterated-v2.Q4_K_M.gguf"));
+    const result = await f.switcher.request("big", { confirmed: true });
+    assert.equal(result.ok, true, "the switch still starts");
+    await f.drain();
+    assert.equal(f.switcher.state().status, "error");
+    assert.ok(f.events.some((event) => event.neuron === "chat-big" && event.state === "error"));
+    assert.ok(f.events.some((event) => event.neuron === "chat-big" && event.state === "loading"));
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
+test("a switch with everything already loaded emits nothing", async () => {
+  const f = makeSwitch({ healthy: true, freeGb: 40 });
+  try {
+    await f.switcher.request("small", { confirmed: true });
+    await f.drain();
+    assert.equal(f.switcher.state().status, "ready");
+    f.events.length = 0;
+    const again = await f.switcher.request("small", { confirmed: true });
+    assert.equal(again.unchanged, true);
+    await f.drain();
+    assert.equal(f.events.length, 0, "no new feed lines for a no-op request");
   } finally {
     fs.rmSync(f.models, { recursive: true, force: true });
   }

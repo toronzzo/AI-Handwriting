@@ -11,6 +11,7 @@
  *     {"tool":...,"args":...} / {"answer":...} shape (no native tool support).
  */
 import { TOOL_LOOP_MAX_STEPS } from "../../../packages/alive/src/tasks.ts";
+import { paidCostUsd, tokensPerSec } from "./brainUsage.mjs";
 
 export { TOOL_LOOP_MAX_STEPS };
 
@@ -187,9 +188,10 @@ export async function localChat({ llamaUrl, model = "preyas", messages, fetchImp
   if (!res.ok) throw new Error(`local model answered ${res.status}`);
   const json = await res.json();
   const raw = String(json?.choices?.[0]?.message?.content || "").replace(/<think>[\s\S]*?<\/think>/gi, "");
+  const usage = json && typeof json.usage === "object" ? json.usage : {};
   const parsed = parseLocalReply(raw);
-  if (parsed.toolCalls) return { toolCalls: parsed.toolCalls, usage: {} };
-  if (parsed.answer) return { answer: parsed.answer, usage: {} };
+  if (parsed.toolCalls) return { toolCalls: parsed.toolCalls, usage };
+  if (parsed.answer) return { answer: parsed.answer, usage };
   throw new Error("local model answered in an unreadable way");
 }
 
@@ -247,6 +249,8 @@ export function trimLocalLog(log, maxChars = MAX_LOCAL_CONTEXT_CHARS) {
  *   execute(name, args) -> result string
  *   confirm(task, step, pending) -> "yes" | "no" | "expired"
  *   save(), maxSteps, activity (optional { begin, done, fail })
+ *   brain (optional { emit }) — the hands neuron reports every model call and
+ *   every tool run into it (thinking/done/error); without one, nothing emits.
  */
 export async function runToolLoop(task, deps) {
   const {
@@ -260,6 +264,7 @@ export async function runToolLoop(task, deps) {
     onLog = null,
     confirmTtlMs = 5 * 60_000,
     now = () => Date.now(),
+    brain = null,
   } = deps;
 
   const log = [
@@ -273,6 +278,27 @@ export async function runToolLoop(task, deps) {
     log.push({ kind: "toolcall", index: step.id, name: step.tool.name, args: step.tool.args || {} });
     log.push({ kind: "toolresult", index: step.id, name: step.tool.name, text: String(step.result || "") });
   }
+
+  /** The hands neuron's feed; the loop never fails because of it. */
+  const feed = (event) => {
+    if (!brain || typeof brain.emit !== "function") return;
+    try {
+      brain.emit(event);
+    } catch {
+      /* the feed is a nicety */
+    }
+  };
+
+  /** tokens/sec and paid cost for one finished model call. */
+  const modelDoneStats = (response, startedAt) => {
+    const usage = response && typeof response.usage === "object" ? response.usage : null;
+    const end = now();
+    const paid = usage && String(response.model) === "deepseek-flash";
+    return {
+      tps: usage ? tokensPerSec(usage, startedAt, end) : null,
+      costUsd: paid ? paidCostUsd(usage, end) : null,
+    };
+  };
 
   const mark = (step, tool) => {
     if (!activity || !tool) return null;
@@ -288,13 +314,17 @@ export async function runToolLoop(task, deps) {
 
   const runOne = async (step, name, args) => {
     const started = mark(step, { name, args });
+    const label = labelForTool(name, args);
+    feed({ neuron: "hands", state: "thinking", detail: label });
     try {
       const raw = await execute(name, args);
       const result = String(raw ?? "").slice(0, MAX_TOOL_RESULT_CHARS);
       if (started) started.done();
+      feed({ neuron: "hands", state: "done", detail: label });
       return result;
     } catch (error) {
       if (started) started.fail();
+      feed({ neuron: "hands", state: "error", detail: label });
       return `Tool error: ${error instanceof Error ? error.message : String(error)}`.slice(0, MAX_TOOL_RESULT_CHARS);
     }
   };
@@ -324,7 +354,23 @@ export async function runToolLoop(task, deps) {
   }
 
   while (used < maxSteps) {
-    const response = await callModel(log, { allowTools: true });
+    const modelStartedAt = now();
+    feed({ neuron: "hands", state: "thinking" });
+    let response;
+    try {
+      response = await callModel(log, { allowTools: true });
+    } catch (error) {
+      feed({ neuron: "hands", state: "error", detail: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+    const modelStats = modelDoneStats(response, modelStartedAt);
+    feed({
+      neuron: "hands",
+      state: "done",
+      tps: modelStats.tps,
+      costUsd: modelStats.costUsd,
+      detail: response && response.model ? String(response.model) : null,
+    });
     if (response.answer) {
       task.answer = String(response.answer).slice(0, 2000);
       task.status = "done";
@@ -410,9 +456,20 @@ export async function runToolLoop(task, deps) {
   // All steps used: one final answer without tools.
   const finalLog = [{ kind: "system", text: FINAL_SYSTEM }, ...log.filter((entry) => entry.kind !== "system")];
   try {
+    const finalStartedAt = now();
+    feed({ neuron: "hands", state: "thinking" });
     const final = await callModel(finalLog, { allowTools: false });
+    const finalStats = modelDoneStats(final, finalStartedAt);
+    feed({
+      neuron: "hands",
+      state: "done",
+      tps: finalStats.tps,
+      costUsd: finalStats.costUsd,
+      detail: final && final.model ? String(final.model) : null,
+    });
     task.answer = String(final.answer || "I ran out of steps before I could finish this task.").slice(0, 2000);
-  } catch {
+  } catch (error) {
+    feed({ neuron: "hands", state: "error", detail: error instanceof Error ? error.message : String(error) });
     task.answer = "I ran out of steps before I could finish this task.";
   }
   task.status = "done";
