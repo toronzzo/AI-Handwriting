@@ -6,9 +6,10 @@
  * "yes" only for write-class actions that the rules left "unsure".
  */
 import crypto from "node:crypto";
+import net from "node:net";
 import { decide, kindClass, reviewRules } from "./guardRules.mjs";
 import { appendGuardLog } from "./guardLog.mjs";
-import { traceNavigation } from "./privateHost.mjs";
+import { resolveNavPrivacy, urlHost } from "./privateHost.mjs";
 
 export const APPROVAL_TTL_MS = 60_000;
 
@@ -97,19 +98,33 @@ export function llamaJudge({ llamaUrl, fetchImpl = fetch } = {}) {
  * ask. Destructive, paid and control actions never reach the model.
  */
 export async function reviewAction(action, deps = {}) {
-  // A browser navigation follows its redirect chain first, resolving each
-  // hop's hostname (DNS included), so the rules can ask before a private
-  // address opens; everything else skips it. Any failure fails closed:
-  // an unresolvable host is treated as private and the card is asked.
+  // Resolve only the requested destination here. Redirects and subresources
+  // are checked on their actual browser requests by the pinned-address proxy.
+  // Any DNS failure fails closed so an unresolvable initial host is asked.
   let nav = null;
+  let privateDestination = null;
   if (String(action?.kind || "") === "browser_navigate") {
     const url = action?.args?.url;
     if (typeof url === "string" && url.trim()) {
-      const resolver = typeof deps.resolveNav === "function" ? deps.resolveNav : traceNavigation;
+      const resolver = typeof deps.resolveNav === "function" ? deps.resolveNav : resolveNavPrivacy;
       try {
         nav = await resolver(url);
       } catch {
         nav = { private: true, host: "unknown", address: null }; // fail closed
+      }
+      if (nav?.private) {
+        const privateHop = Array.isArray(nav.hops) ? nav.hops.find((hop) => hop.private) : null;
+        const targetUrl = String(privateHop?.url || url);
+        const host = urlHost(targetUrl) || String(nav.host || "unknown");
+        try {
+          const parsed = new URL(targetUrl.includes("://") ? targetUrl : `http://${targetUrl}`);
+          const port = Number(parsed.port) || (parsed.protocol === "https:" ? 443 : 80);
+          const address = String(privateHop?.address || nav.address || (net.isIP(host) ? host : ""));
+          privateDestination = { url: targetUrl, host, port, address };
+          nav = { ...nav, privateDestination };
+        } catch {
+          /* invalid targets remain guarded; the proxy will fail closed */
+        }
       }
     }
   }
@@ -153,6 +168,7 @@ export async function reviewAction(action, deps = {}) {
     needsConfirm: verdict.verdict === "ask",
     model,
   };
+  if (privateDestination?.address) result.privateDestinations = [privateDestination];
 
   if (deps.dataDir) {
     try {

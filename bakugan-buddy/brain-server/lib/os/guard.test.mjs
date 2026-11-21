@@ -53,10 +53,21 @@ test("reviewAction resolves the navigation hostname before the rules", async () 
     source: "task",
   };
   const privateResolved = await reviewAction(navAction, {
-    resolveNav: async () => ({ private: true, host: "innocent.example.com", address: "10.0.0.5" }),
+    resolveNav: async () => ({
+      private: true,
+      host: "innocent.example.com",
+      address: "10.0.0.5",
+      hops: [{ url: "https://innocent.example.com/", host: "innocent.example.com", address: "10.0.0.5", private: true }],
+    }),
   });
   assert.equal(privateResolved.verdict, "ask");
   assert.equal(privateResolved.rule, "R11");
+  assert.deepEqual(privateResolved.privateDestinations, [{
+    url: "https://innocent.example.com/",
+    host: "innocent.example.com",
+    port: 443,
+    address: "10.0.0.5",
+  }]);
   const publicResolved = await reviewAction(navAction, {
     resolveNav: async () => ({ private: false, host: "innocent.example.com" }),
   });

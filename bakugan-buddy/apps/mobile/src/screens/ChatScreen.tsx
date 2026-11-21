@@ -41,7 +41,7 @@ import { useCoach } from "../coach/useCoach";
 import { matchDocuments, parseDocumentRequest } from "../../../../packages/alive/src/documents.ts";
 import { formatDue, parseReminder, type Reminder } from "../../../../packages/alive/src/reminders.ts";
 import { isShortAffirmation, wantsThinking } from "../../../../packages/alive/src/chatTurn.ts";
-import { MODEL_LABELS, parseModelCommand, type LocalModelId } from "../../../../packages/alive/src/modelSwitch.ts";
+import { HUGE_TIMEOUT_MS, MODEL_LABELS, SWITCHING_CHAT_MESSAGE, parseModelCommand, type LocalModelId } from "../../../../packages/alive/src/modelSwitch.ts";
 import {
   citedSourceEntries,
   shouldWebSearch,
@@ -116,6 +116,7 @@ type ModelStatus = {
   idleMinutesLeft: number;
   port: number;
   tiers: Record<LocalModelId, ModelTier>;
+  rollback?: { target: LocalModelId; note: string; at: number } | null;
 };
 const MODEL_BUTTONS: { id: LocalModelId; short: string }[] = [
   { id: "small", short: "Small 8B" },
@@ -337,6 +338,8 @@ export function ChatScreen({
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+  /** The `at` of the last rollback note already shown, so it appears once. */
+  const rollbackSeenRef = useRef(0);
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [vault, setVault] = useState<{ path: string; obsidianUrl: string; notes: number; lastSync: number } | null>(null);
   const [driveMap, setDriveMap] = useState<{ scanned: number; files: number; folders: number; models: number } | null>(null);
@@ -987,6 +990,16 @@ export function ChatScreen({
       if (!res.ok) return null;
       const body = (await res.json()) as ModelStatus;
       setModelStatus(body);
+      // A failed big/huge switch rolls back to the 8B on the server, which
+      // posts "couldn't load, back on small" into the newest chat. Pull that
+      // line onto the screen once per rollback, without clobbering a reply
+      // that is still being generated.
+      if (body.rollback && body.rollback.note && body.rollback.at > rollbackSeenRef.current) {
+        rollbackSeenRef.current = body.rollback.at;
+        if (!busy.current && activeIdRef.current) {
+          void loadChat(activeIdRef.current);
+        }
+      }
       return body;
     } catch {
       return null;
@@ -1845,10 +1858,12 @@ export function ChatScreen({
       timeoutMs:
         route === "paid"
           ? 45_000
-          : think
-            ? THINK_TIMEOUT_MS
-            : modelStatus?.current === "huge"
-              ? 240_000
+          : // Huge takes the one shared budget the proxy also uses for its
+            // load and reply timeouts, so the two never race.
+            modelStatus?.current === "huge"
+            ? HUGE_TIMEOUT_MS
+            : think
+              ? THINK_TIMEOUT_MS
               : modelStatus?.current === "big"
                 ? 120_000
                 : LOCAL_TIMEOUT_MS,
@@ -2023,7 +2038,11 @@ export function ChatScreen({
           allowPaidOnFailure: escalate,
         });
         if (route.route === "local") {
-          setNote("Preyas didn't answer. You can ask a paid model if it's on.");
+          setNote(
+            local.error === SWITCHING_CHAT_MESSAGE
+              ? SWITCHING_CHAT_MESSAGE
+              : "Preyas didn't answer. You can ask a paid model if it's on.",
+          );
           return;
         }
       }

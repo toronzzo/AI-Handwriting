@@ -219,7 +219,11 @@ export function reviewRules(action, deps = {}) {
   // verdict arrives through deps.nav, which the guard fills by resolving the
   // URL's hostname (so a public name pointing at a private IP asks too).
   if (kind === "browser_navigate" && deps.nav && deps.nav.private) {
-    findings.push({ id: "R11", verdict: "ask", why: `opening ${deps.nav.host || "a local or private address"} needs your confirmation` });
+    const destination = deps.nav.privateDestination;
+    const target = destination
+      ? `${destination.host}:${destination.port}${destination.address ? ` (${destination.address})` : ""}`
+      : deps.nav.host || "a local or private address";
+    findings.push({ id: "R11", verdict: "ask", why: `opening ${target} needs your confirmation` });
   }
 
   // R8: control kinds are always ask (a later slice's deny list may block first).

@@ -23,6 +23,7 @@ import {
   upsertDayMessage,
 } from "./lib/chats.mjs";
 import { clipTooShort, isWhisperHallucination } from "../packages/alive/src/speech.ts";
+import { isCanonicalMood } from "../packages/mood/src/index.ts";
 import { notesContext, queryForRetrieval } from "../packages/alive/src/notes.ts";
 import { driveMapPrompt, isDriveQuestion, isScanDriveCommand, whereIsQuery } from "../packages/alive/src/driveMap.ts";
 import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
@@ -99,11 +100,11 @@ import {
 } from "./lib/harness/settings.mjs";
 import { handleOsRoute } from "./lib/os/routes.mjs";
 import { sharedBrain } from "./lib/os/neurons.mjs";
-import { paidCostUsd, parseJsonUsage, parseSseUsage, tokensPerSec } from "./lib/os/brainUsage.mjs";
+import { CHAT_PROXY_TIMEOUT_MS, pipeChatCompletion } from "./lib/chatPipe.mjs";
 import { ART_WRITE_DIR, MAX_ART_BYTES, findArt, isSlot, saveArt } from "./lib/art.mjs";
 import { resolveSafePath } from "./lib/safeFs.mjs";
 import { createActivityHub } from "./lib/activity.mjs";
-import { createModelSwitch, LLAMA_PORT, llamaServerRamMb } from "./lib/modelSwitch.mjs";
+import { createModelSwitch, LLAMA_PORT, llamaServerRamMb, chatGate } from "./lib/modelSwitch.mjs";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -125,6 +126,24 @@ const modelSwitch = createModelSwitch({
   modelsDir: process.env.PREYAS_MODELS_DIR || path.join(buddyRoot, "models"),
   dataDir: dataDir || undefined,
   template: path.join(path.dirname(fileURLToPath(import.meta.url)), "templates", "qwen3.jinja"),
+  onRollback: (note) => {
+    // A failed big/huge switch brings the 8B back; say so in the newest chat
+    // so it survives a reload, like reminder lines do.
+    if (!dataDir) return;
+    try {
+      const newest = newestChat(dataDir);
+      if (newest) {
+        appendMessage(dataDir, newest.id, {
+          role: "assistant",
+          who: "preyas",
+          model: "preyas",
+          content: note,
+        });
+      }
+    } catch {
+      /* the chat note is a nicety */
+    }
+  },
 });
 
 /**
@@ -398,122 +417,6 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-const CHAT_PROXY_TIMEOUT_MS = Number(process.env.BRAIN_UPSTREAM_TIMEOUT_MS || 90_000);
-
-/**
- * Pipe one model response, but stop paying for generation after the client
- * leaves. With `events` (brain slice N2) the passthrough also reports
- * thinking/done/error into the brain, reading usage tokens from the very
- * bytes it forwards — a response is never changed for the feed.
- */
-async function pipeChatCompletion(req, res, target, body, downError, timeoutMs = CHAT_PROXY_TIMEOUT_MS, events = null) {
-  const controller = new AbortController();
-  let timedOut = false;
-  let clientClosed = false;
-  let upstream = null;
-  const startedAt = Date.now();
-  const MAX_BUFFER = 4 * 1024 * 1024; // enough to hold a usage chunk, never a whole stream
-  const chunks = [];
-  let buffered = 0;
-  const streamed = (() => {
-    try {
-      return JSON.parse(String(body)).stream === true;
-    } catch {
-      return false;
-    }
-  })();
-  const brainOut = (record) => {
-    if (!events || !events.neuron) return;
-    try {
-      brain.emit({ ...record, neuron: events.neuron });
-    } catch {
-      /* the feed is a nicety */
-    }
-  };
-  const finishEvents = async (ok) => {
-    if (!events) return;
-    if (!ok) {
-      brainOut({ state: "error", detail: `upstream answered ${upstream ? upstream.status : "?"}` });
-      return;
-    }
-    const text = Buffer.concat(chunks).toString("utf8");
-    const usage = streamed ? parseSseUsage(text) : parseJsonUsage(text);
-    const stats = usage
-      ? { tps: tokensPerSec(usage, startedAt, Date.now()), costUsd: events.paid ? paidCostUsd(usage, Date.now()) : null }
-      : {};
-    const ramMb =
-      events.local && events.ramPromise
-        ? await Promise.race([events.ramPromise, new Promise((resolve) => setTimeout(() => resolve(null), 800))])
-        : null;
-    brainOut({ state: "done", ...stats, ramMb });
-  };
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
-  const onClose = () => {
-    if (!res.writableEnded) {
-      clientClosed = true;
-      controller.abort();
-    }
-  };
-  res.on("close", onClose);
-  try {
-    try {
-      upstream = await fetch(target, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body,
-        signal: controller.signal,
-      });
-    } catch {
-      if (clientClosed) return;
-      brainOut({ state: "error", detail: timedOut ? "model timed out" : downError });
-      sendJson(res, timedOut ? 504 : 503, { error: timedOut ? "model timed out" : downError });
-      return;
-    }
-    res.writeHead(upstream.status, {
-      "Content-Type": upstream.headers.get("content-type") || "text/event-stream",
-      "Cache-Control": "no-cache",
-    });
-    if (!upstream.body) {
-      const text = await upstream.text();
-      if (buffered < MAX_BUFFER) {
-        chunks.push(Buffer.from(text));
-        buffered += text.length;
-      }
-      await finishEvents(upstream.ok);
-      res.end(text);
-      return;
-    }
-    const reader = upstream.body.getReader();
-    for (;;) {
-      const step = await reader.read();
-      if (step.done || clientClosed) break;
-      if (buffered < MAX_BUFFER) {
-        chunks.push(step.value);
-        buffered += step.value.length;
-      }
-      res.write(step.value);
-    }
-    if (clientClosed) {
-      brainOut({ state: "off", detail: "stopped: the client left" });
-    } else {
-      await finishEvents(upstream.ok);
-      res.end();
-    }
-  } catch {
-    if (!clientClosed && !res.writableEnded) {
-      if (!res.headersSent) sendJson(res, timedOut ? 504 : 503, { error: timedOut ? "model timed out" : downError });
-      else res.end();
-    }
-  } finally {
-    clearTimeout(timer);
-    res.off("close", onClose);
-    controller.abort();
-  }
-}
-
 
 let memoryBook = null;
 function book() {
@@ -521,6 +424,13 @@ function book() {
   if (!memoryBook) memoryBook = openMemory(path.join(dataDir, "memory", "facts.sqlite"));
   return memoryBook;
 }
+
+/**
+ * The last canonical mood the app reported with a moment (POST /v1/facts).
+ * Desktop Preyas reads it back through GET /v1/mood; null means "no mood yet".
+ */
+let lastMood = null;
+let lastMoodSeenAt = 0;
 
 function extractLater(payload) {
   const events = Array.isArray(payload.events) ? payload.events : [];
@@ -1038,9 +948,26 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/v1/facts") {
       const payload = await readJson(req);
+      if (isCanonicalMood(payload.mood)) {
+        lastMood = payload.mood;
+        lastMoodSeenAt = Date.now();
+      }
       res.writeHead(202, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
       extractLater(payload);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/mood") {
+      // Read-only: the mood the app last reported, or neutral before the
+      // first report. Desktop Preyas polls this; it never writes.
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          mood: lastMood ?? "neutral",
+          seenAt: lastMoodSeenAt ? new Date(lastMoodSeenAt).toISOString() : null,
+        }),
+      );
       return;
     }
 
@@ -1971,14 +1898,15 @@ const server = http.createServer(async (req, res) => {
       } catch {
         model = "";
       }
+      // While a model switch is loading the local server is being replaced:
+      // refuse local chat with a clear message (paid traffic is unaffected).
+      const gate = chatGate(model, modelSwitch.state());
+      if (!gate.ok) return sendJson(res, gate.status, { error: gate.error });
       const sampled = withSampling(raw);
       const body = model === "paid" ? sampled : withDriveMap(withNotes(sampled));
-      // Any chat is activity for the idle auto-return. A local route never
-      // reaches the gateway: small, big and huge all go straight to llama.
-      modelSwitch.touch();
-      if (model !== "paid" && modelSwitch.state().status === "loading") {
-        return sendJson(res, 503, { error: "the model is loading — try again in a moment" });
-      }
+      // A local route never reaches the gateway: small, big and huge all go
+      // straight to llama. Only a real local-model reply resets the idle
+      // auto-return window — paid replies and unanswered calls never do.
       const target =
         model === "paid"
           ? "http://127.0.0.1:4000/v1/chat/completions"
@@ -1994,13 +1922,14 @@ const server = http.createServer(async (req, res) => {
       });
       const ramPromise = paid ? null : llamaServerRamMb().catch(() => null);
       await pipeChatCompletion(
+        brain,
         req,
         res,
         target,
         body,
         model === "paid" ? "paid gateway is down" : "llama is down",
         model === "paid" ? CHAT_PROXY_TIMEOUT_MS : modelSwitch.chatTimeoutMs(),
-        { neuron, paid, local: !paid, ramPromise },
+        { neuron, paid, local: !paid, ramPromise, onAnswered: () => modelSwitch.touchLocal(model) },
       );
       return;
     }

@@ -5,6 +5,13 @@
  *   (flash attention, one slot, thinking handled per-request by the caller);
  * - big/huge can demand a Yes/No heads-up based on free memory;
  * - after 20 idle minutes on big or huge, Preyas comes back to the 8B;
+ *   only a real local-model reply resets that window (never paid, never a
+ *   request that got no answer);
+ * - a big or huge switch that fails to become healthy (crash, bad file,
+ *   timeout) rolls back: the 8B is restarted and a "back on small" note is
+ *   exposed so the app can say so in the chat;
+ * - while a switch is loading, local chat requests are refused with a clear
+ *   "switching models" message (see chatGate);
  * - no route here ever touches the paid gateway — local stays local.
  *
  * Everything slow or side-effectful is injectable, so the lifecycle and the
@@ -14,13 +21,29 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
-import { MODEL_LABELS, switchNeedsConfirm } from "../../packages/alive/src/modelSwitch.ts";
+import { HUGE_TIMEOUT_MS, MODEL_LABELS, SWITCHING_CHAT_MESSAGE, switchNeedsConfirm } from "../../packages/alive/src/modelSwitch.ts";
 import { sharedBrain } from "./os/neurons.mjs";
 
 export const LLAMA_PORT = 8790;
 export const IDLE_RETURN_MS = 20 * 60_000;
 export const DEFAULT_IDLE_MODEL = "small";
-export const LOAD_TIMEOUT_MS = { small: 180_000, big: 300_000, huge: 600_000 };
+/** The load budget per tier; the huge one is the one shared value the app also uses. */
+export const LOAD_TIMEOUT_MS = { small: 180_000, big: 300_000, huge: HUGE_TIMEOUT_MS };
+/** Shown in chat when a big or huge switch fails and the 8B comes back. */
+export const ROLLBACK_NOTE = "couldn't load, back on small";
+
+/**
+ * The chat route's gate: while a switch is loading the local model is being
+ * replaced, so a local chat would hang — refuse it with a clear message.
+ * Paid traffic does not touch the local server and keeps working.
+ */
+export function chatGate(model, switchState) {
+  const paid = model === "paid";
+  if (!paid && switchState.status === "loading") {
+    return { ok: false, status: 503, error: SWITCHING_CHAT_MESSAGE };
+  }
+  return { ok: true, paid };
+}
 
 /** Resident memory of one pid in MB (ps reports rss in KB); null when unreadable. */
 export function ramOfPid(pid, execImpl = execFile) {
@@ -107,6 +130,7 @@ export function createModelSwitch(options = {}) {
     log = (line) => console.warn(`model: ${line}`),
     idleReturnMs = IDLE_RETURN_MS,
     brain = null,
+    onRollback = null,
   } = options;
 
   const feed = brain ?? sharedBrain();
@@ -128,6 +152,7 @@ export function createModelSwitch(options = {}) {
   let childExited = false;
   let switching = false;
   let idleTimer = null;
+  let rollbackNote = null; // { target, note, at } — set when a big/huge switch fails
 
   function clearIdleTimer() {
     if (idleTimer !== null) {
@@ -262,8 +287,9 @@ export function createModelSwitch(options = {}) {
     return args;
   }
 
-  function runSwitch(target) {
+  function runSwitch(target, opts = {}) {
     if (switching) return false;
+    const isRollback = opts.rollback === true;
     switching = true;
     void (async () => {
       clearIdleTimer();
@@ -274,6 +300,7 @@ export function createModelSwitch(options = {}) {
       if (current !== target) {
         emitBrain({ neuron: `chat-${current}`, state: "off", detail: `switching to ${target}` });
       }
+      let rollbackAfter = false;
       try {
         const gguf = path.join(modelsDir, tier.file);
         if (!fs.existsSync(gguf)) throw new Error(`model file is not on the drive: ${gguf}`);
@@ -311,17 +338,34 @@ export function createModelSwitch(options = {}) {
         status = "ready";
         error = null;
         lastActivity = now();
+        if (!isRollback) rollbackNote = null;
         // Loaded and idle reads as "off" in the brain view; thinking only
         // lights up while a reply is being generated.
         emitBrain({ neuron: `chat-${target}`, state: "off", ramMb: await probeRamMb() });
         scheduleIdle();
+        if (isRollback && rollbackNote) {
+          log(`rollback: ${rollbackNote.note}`);
+          try {
+            onRollback?.(rollbackNote.note);
+          } catch {
+            /* the chat note is a nicety */
+          }
+        }
       } catch (err) {
         status = "error";
         error = err instanceof Error ? err.message : String(err);
         emitBrain({ neuron: `chat-${target}`, state: "error", detail: error });
         log(`switch to ${target} failed: ${error}`);
+        if (target !== DEFAULT_IDLE_MODEL) {
+          rollbackNote = { target, note: ROLLBACK_NOTE, at: now() };
+          rollbackAfter = true;
+        }
       } finally {
         switching = false;
+        if (rollbackAfter) {
+          log(`switch to ${target} failed — bring the ${DEFAULT_IDLE_MODEL} model back`);
+          void request(DEFAULT_IDLE_MODEL, { confirmed: true, rollback: true });
+        }
       }
     })();
     return true;
@@ -340,7 +384,7 @@ export function createModelSwitch(options = {}) {
     if (!confirmed && switchNeedsConfirm(target, lastFreeGb)) {
       return { ok: false, needsConfirm: true, target, freeGb: lastFreeGb, current, status };
     }
-    if (!runSwitch(target)) return { ok: false, error: "another switch is already running", current, status };
+    if (!runSwitch(target, { rollback: opts.rollback === true })) return { ok: false, error: "another switch is already running", current, status };
     return { ok: true, current: target, status: "loading" };
   }
 
@@ -404,6 +448,7 @@ export function createModelSwitch(options = {}) {
           { label: MODEL_LABELS[tier.id], context: tier.context, weightsGb: tier.weightsGb },
         ]),
       ),
+      rollback: rollbackNote,
     };
   }
 
@@ -413,10 +458,21 @@ export function createModelSwitch(options = {}) {
     scheduleIdle();
   }
 
+  /**
+   * Only a real local-model reply counts as activity: paid traffic never
+   * touches the local model, and a request that never got an answer (the
+   * model is down or still loading) must not hold a big model open.
+   */
+  function touchLocal(model) {
+    if (model === "paid" || status !== "ready") return false;
+    touch();
+    return true;
+  }
+
   /** How long one reply may take through the proxy for the current tier. */
   function chatTimeoutMs() {
     if (status !== "ready") return 90_000;
-    if (current === "huge") return 300_000;
+    if (current === "huge") return HUGE_TIMEOUT_MS;
     if (current === "big") return 150_000;
     return 90_000;
   }
@@ -433,5 +489,5 @@ export function createModelSwitch(options = {}) {
     child = null;
   }
 
-  return { request, detect, refresh, state, touch, chatTimeoutMs, stop };
+  return { request, detect, refresh, state, touch, touchLocal, chatTimeoutMs, stop };
 }

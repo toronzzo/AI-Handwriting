@@ -6,12 +6,15 @@
  *
  *   files_*   -> @modelcontextprotocol/server-filesystem
  *   shell_*   -> lib/os/terminalServer.mjs (our tiny terminal server)
- *   browser_* -> @playwright/mcp (official Playwright MCP server)
+ * browser_* -> @playwright/mcp (official Playwright MCP server, behind the
+ *              private-network request proxy)
  *
  * Memory rules (16 GB Mac): the Playwright server is started ONLY when a
  * browser tool is first used, and it is stopped after 5 minutes without a
  * browser call. Its tool schemas are static (browserTools.mjs, pinned to the
  * installed @playwright/mcp version) so listing tools never starts it.
+ * The browser process uses a loopback proxy that checks and pins every
+ * HTTP(S) destination before opening its socket.
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -21,7 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSafePath, SAFE_ROOT } from "../safeFs.mjs";
 import { browserToolSpecs, BROWSER_TOOL_NAMES } from "./browserTools.mjs";
-import { resolveNavPrivacy } from "./privateHost.mjs";
+import { createPrivateNetworkProxy } from "./privateNetworkProxy.mjs";
 import { DEFAULT_MAX_OUTPUT, DEFAULT_TIMEOUT_MS } from "./terminalServer.mjs";
 
 export const MCP_IDLE_MS = 5 * 60_000;
@@ -164,6 +167,9 @@ export function spawnArgs(moduleName, serverConfig, { dataDir = "" } = {}) {
     };
   }
   const outputDir = serverConfig.outputDir || path.join(dataDir || os.tmpdir(), "mcp", "shots");
+  const proxyArgs = serverConfig.proxyServer
+    ? ["--proxy-server", serverConfig.proxyServer, "--proxy-bypass", "<-loopback>"]
+    : [];
   return {
     command: process.execPath,
     args: [
@@ -179,7 +185,8 @@ export function spawnArgs(moduleName, serverConfig, { dataDir = "" } = {}) {
       "--timeout-action",
       "15000",
       "--timeout-navigation",
-      "60000",
+      "300000",
+      ...proxyArgs,
     ],
   };
 }
@@ -232,13 +239,6 @@ export function flattenToolResult(result, maxChars = MAX_TOOL_RESULT_CHARS) {
   return text.slice(0, maxChars);
 }
 
-/** The page URL from a browser_snapshot result ("- Page URL: https://…"). */
-export function snapshotPageUrl(snapshotText) {
-  const text = String(snapshotText || "");
-  const match = text.match(/- Page URL:\s*(\S+)/) || text.match(/\bPage URL:\s*(\S+)/);
-  return match ? match[1].replace(/[)\].,;]+$/, "") : "";
-}
-
 /** Strip JSON-Schema-only keys so the schemas work as OpenAI parameters. */
 export function toOpenAiTools(specs) {
   return specs.map((spec) => {
@@ -280,10 +280,12 @@ export function createMcpHub(options = {}) {
     schedule = (fn, ms) => setTimeout(fn, ms),
     clearTimer = (timer) => clearTimeout(timer),
     log = () => {},
-    navCheck = resolveNavPrivacy,
   } = options;
 
   const state = new Map(); // module -> { connection, broken }
+  const privateProxy = createPrivateNetworkProxy();
+  let browserTaskContext = null;
+  const browserTaskWaiters = [];
   let browserTimer = null;
 
   function serverConfig(moduleName) {
@@ -298,11 +300,16 @@ export function createMcpHub(options = {}) {
     if (existing && existing.starting) return existing.starting;
     const starting = (async () => {
       try {
-        const connection = await connect(moduleName, cfg, { env, dataDir });
+        const effectiveConfig = moduleName === "browser"
+          ? { ...cfg, proxyServer: await privateProxy.start() }
+          : cfg;
+        if (moduleName === "browser") privateProxy.setTaskContext(browserTaskContext);
+        const connection = await connect(moduleName, effectiveConfig, { env, dataDir });
         state.set(moduleName, { connection });
         log(`mcp: ${moduleName} server started`);
         return connection;
       } catch (error) {
+        if (moduleName === "browser") await privateProxy.close();
         state.delete(moduleName);
         const message = error instanceof Error ? error.message : String(error);
         log(`mcp: ${moduleName} server failed: ${message}`);
@@ -336,6 +343,7 @@ export function createMcpHub(options = {}) {
       browserTimer = null;
     }
     await stopOne("browser");
+    await privateProxy.close();
   }
 
   /** Reset the 5-minute idle clock after every browser call. */
@@ -351,6 +359,33 @@ export function createMcpHub(options = {}) {
 
   return {
     config,
+
+    async setBrowserTaskContext(context) {
+      const taskId = String(context?.taskId || "");
+      if (!context) throw new Error("a browser task context is required");
+      await new Promise((resolve) => {
+        const acquire = () => {
+          browserTaskContext = { ...context, taskId };
+          privateProxy.setTaskContext(browserTaskContext);
+          resolve();
+        };
+        if (browserTaskContext) browserTaskWaiters.push(acquire);
+        else acquire();
+      });
+      let released = false;
+      return () => {
+        if (released || browserTaskContext?.taskId !== taskId) return;
+        released = true;
+        browserTaskContext = null;
+        privateProxy.setTaskContext(null);
+        const next = browserTaskWaiters.shift();
+        if (next) next();
+      };
+    },
+
+    approveBrowserDestination(destination, taskId) {
+      return privateProxy.approveDestination(destination, taskId);
+    },
 
     /**
      * Tool specs for the model: live files + shell tools, static browser
@@ -399,26 +434,7 @@ export function createMcpHub(options = {}) {
         connection = await ensure(split.module);
       }
       const result = await connection.callTool(split.tool, args || {});
-      const text = flattenToolResult(result, MAX_TOOL_RESULT_CHARS);
-      // After a navigation the page may have followed redirects the
-      // pre-flight could not see (a rebinding host can change its answer):
-      // re-check the FINAL page URL and refuse to go on when it ended on a
-      // private address. A failed navigation has no new page to check.
-      if (split.module === "browser" && split.tool === "browser_navigate" && !(result && result.isError) && typeof navCheck === "function") {
-        try {
-          const snapshot = await connection.callTool("browser_snapshot", {});
-          const finalUrl = snapshotPageUrl(flattenToolResult(snapshot, MAX_TOOL_RESULT_CHARS));
-          if (finalUrl) {
-            const nav = await navCheck(finalUrl).catch(() => ({ private: true, host: "unknown", address: null }));
-            if (nav.private) {
-              return `Blocked by the guard: the page ended on ${finalUrl} (${nav.host || "a private address"}). Stop and ask your partner before continuing.`;
-            }
-          }
-        } catch {
-          /* a snapshot failure must not block the navigation result */
-        }
-      }
-      return text;
+      return flattenToolResult(result, MAX_TOOL_RESULT_CHARS);
     },
 
     /** Stop the browser after an idle timeout without touching the rest. */
@@ -432,6 +448,9 @@ export function createMcpHub(options = {}) {
         browserTimer = null;
       }
       for (const moduleName of MODULES) await stopOne(moduleName);
+      await privateProxy.close();
+      browserTaskContext = null;
+      browserTaskWaiters.length = 0;
     },
   };
 }
