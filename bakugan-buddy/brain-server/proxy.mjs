@@ -31,6 +31,12 @@ import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
 import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
 import { collectStatus, restartArgs } from "./lib/status.mjs";
+import {
+  collectProviderHealth,
+  healthPayloadHasSecrets,
+  mergeProviderEnv,
+  parseEnvText,
+} from "./lib/providerHealth.mjs";
 import { collectUserNotes, ensureObsidianConfig, exportVault, searchVault, saveToVault, VAULT_DIR } from "./lib/vault.mjs";
 import { buildDriveMap, loadDriveMap, DRIVE_ROOT } from "./lib/driveMap.mjs";
 import {
@@ -844,22 +850,57 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/v1/health") {
       let llama = false;
+      const healthController = new AbortController();
+      const healthTimer = setTimeout(() => healthController.abort(), 3_500);
       try {
         const probe = await fetch(`${llamaUrl}/health`, { signal: AbortSignal.timeout(2_000) });
         llama = probe.ok;
       } catch {
         llama = false;
       }
+
+      // Additive providers block for the Brain view. Secrets stay off the wire:
+      // only configured/available/reason flags, never keys or raw provider text.
+      let envText = "";
+      const secretDirs = [gatewayRoot, dataDir].filter(Boolean);
+      for (let i = 0; i < secretDirs.length && !envText; i++) {
+        try {
+          envText = fs.readFileSync(path.join(secretDirs[i], "secrets", ".env"), "utf8");
+        } catch {
+          envText = "";
+        }
+      }
+      const providerEnv = mergeProviderEnv(process.env, parseEnvText(envText));
+      let providers = [];
+      try {
+        providers = await collectProviderHealth({
+          localOnline: llama,
+          env: providerEnv,
+          envText,
+          fetchImpl: fetch,
+          signal: healthController.signal,
+        });
+      } catch {
+        // A cancelled or failed provider probe must not break the classic health
+        // shape: older clients only need ok/service/model/warn/llama.
+        providers = [];
+      } finally {
+        clearTimeout(healthTimer);
+      }
+
+      const body = {
+        ok: llama,
+        service: "bakugan-brain",
+        model: label,
+        warn,
+        llama: llamaUrl,
+        ...(providers.length ? { providers } : {}),
+      };
+      if (healthPayloadHasSecrets(body, [providerEnv.GROQ_API_KEY, providerEnv.PREYAS_FREE_CLOUD_KEY, providerEnv.DEEPSEEK_API_KEY])) {
+        delete body.providers;
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          ok: llama,
-          service: "bakugan-brain",
-          model: label,
-          warn,
-          llama: llamaUrl,
-        }),
-      );
+      res.end(JSON.stringify(body));
       return;
     }
 

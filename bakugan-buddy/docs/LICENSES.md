@@ -31,6 +31,12 @@ Use only what matches personal / eventual Play Store distribution. **Re-verify**
 |---|---|---|---|
 | Chatterbox / F5-TTS / CosyVoice2 | Expressive TTS | Check each (often Apache-2.0 / MIT) | Reference-clip acting; no show-voice clones for public |
 
+## Optional cloud fallback (opt-in, off by default)
+
+| Component | Role | License / terms | Notes |
+| --- | --- | --- | --- |
+| GroqCloud API (Free plan) | Optional free-cloud fallback | Groq's own service terms | Hosted inference only; no model weights are bundled or redistributed. Inputs and outputs are not retained by default; see `PREYAS_FREE_CLOUD.md`. |
+
 ## Content / legal
 
 - **Bakugan** names, designs, and show voices: © Spin Master / Sega. Personal fan build: inspired OK. **Public release: original packs only** unless licensed.
