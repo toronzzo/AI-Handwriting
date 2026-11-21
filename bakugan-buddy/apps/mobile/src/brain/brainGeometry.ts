@@ -29,6 +29,8 @@ export const STATUS_TOKEN: Record<BrainStatus, StatusToken> = {
   fallback: "accent",
   planned: "off",
   unavailable: "note",
+  offline: "off",
+  checking: "note",
 };
 
 /** A short, plain word for the detail panel's status line. */
@@ -37,6 +39,8 @@ export const STATUS_LABEL: Record<BrainStatus, string> = {
   fallback: "Fallback",
   planned: "Planned",
   unavailable: "Unavailable",
+  offline: "Offline",
+  checking: "Checking",
 };
 
 /**
