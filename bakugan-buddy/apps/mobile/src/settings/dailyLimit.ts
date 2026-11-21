@@ -10,6 +10,13 @@ export const CAP_MIN_USD = 0.1;
 export const CAP_MAX_USD = 20;
 export const CAP_DEFAULT_USD = 1;
 
+export function dailyLimitRequestError(error: unknown): string {
+  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+    return "Daily limit timed out. Is Preyas running?";
+  }
+  return "The Mac did not answer. Is Preyas running?";
+}
+
 /** What the Harness card says when no price is configured on the Mac. */
 export const PRICE_SETUP_HINT =
   "Set HARNESS_USD_PER_MTOK_IN and _OUT in brain.env (check the DeepSeek price page)";
