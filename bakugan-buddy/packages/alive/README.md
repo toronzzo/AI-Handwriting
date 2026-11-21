@@ -46,3 +46,26 @@ Noticed things wait out `NOTICE_MS` before they count. Looking away early resets
 ## Body
 
 Play the GLB clip from `frame.clip` (`idle`, `happy`, `closed`), then add `bob`, `hop`, `roll`, `flap`, `headTilt`, and `look`. Those offsets are clamped in `POSE_LIMITS`. Bob and hop are never negative. `flap` is a few degrees on top of a clip that was already checked for intersections, and it is zero on the closed clip.
+
+## Router foundation
+
+`router.ts` is the flag-gated decision layer for a later chat integration. It
+is not wired into chat yet: the existing `chooseRoute` path stays in charge.
+Everything below defaults off.
+
+| Flag | Meaning |
+| --- | --- |
+| `PREYAS_ROUTER=1` or `EXPO_PUBLIC_PREYAS_ROUTER=1` | Turns the router on. |
+| `PREYAS_ROUTER_MODE=prefer-local` | Local only; never leaves the Mac. |
+| `PREYAS_ROUTER_MODE=fallback-on-local-unavailable` | Local first, then one dedicated fallback only with cloud opt-in. |
+| `PREYAS_ROUTER_MODE=manual` | Exactly the provider named by `PREYAS_ROUTER_PROVIDER`. |
+| `PREYAS_ROUTER_ALLOW_CLOUD=1` | Explicit opt-in for any cloud route. |
+
+Each flag also has an `EXPO_PUBLIC_` variant for the app build
+(`EXPO_PUBLIC_PREYAS_ROUTER_MODE`, and so on).
+
+The only active provider is the local health probe (`GET /v1/health` on the
+brain proxy). `free-cloud` and `fallback` are typed, disabled placeholders;
+there are no provider keys or cloud calls in this package. Missing, invalid,
+demo, offline and timed-out providers are treated as unavailable, and
+free-cloud slots are never chosen automatically.
