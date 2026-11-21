@@ -80,6 +80,8 @@ import { useActivity, type ActivitySink } from "../activity/useActivity";
 import { HarnessLauncher } from "../harness/HarnessLauncher";
 import { DailyLimit } from "../settings/DailyLimit.tsx";
 import { BitModeSetting } from "../settings/BitMode.tsx";
+import { SoundToggle } from "../settings/SoundToggle.tsx";
+import { SoundLab } from "../media/sounds/SoundLab.tsx";
 import { theme } from "../theme";
 
 /** Web lets the sky show through the shell; the iPhone paints the page colour. */
@@ -2597,6 +2599,8 @@ export function ChatScreen({
           </Pressable>
           <DailyLimit />
           <BitModeSetting />
+          <SoundToggle />
+          {typeof __DEV__ !== "undefined" && __DEV__ ? <SoundLab /> : null}
           <View style={styles.phoneCard}>
             <Text style={styles.kicker}>VAULT</Text>
             <Text style={styles.dim}>
