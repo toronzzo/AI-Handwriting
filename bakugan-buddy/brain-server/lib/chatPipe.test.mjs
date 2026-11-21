@@ -145,6 +145,36 @@ test("200 headers then a client that leaves never resets the idle window", async
   }
 });
 
+test("a client that leaves while the reply finishes flushing never resets the idle window", async () => {
+  const server = await startUpstream((req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(CONTENT_CHUNK);
+    res.write("data: [DONE]\n\n");
+    res.end(); // the upstream completed: the reply is fully buffered
+  });
+  try {
+    let answered = 0;
+    let resolveRam;
+    const ramPromise = new Promise((resolve) => (resolveRam = resolve));
+    const { running, res, brainRecords } = runPipe(server, {
+      neuron: "chat-small",
+      local: true,
+      paid: false,
+      ramPromise, // the flush is still awaiting this when the client leaves
+      onAnswered: () => (answered += 1),
+    });
+    await waitFor(() => res.chunks.length > 0, 2000);
+    await new Promise((resolve) => setImmediate(resolve));
+    res.emit("close"); // the user left during the final flush
+    resolveRam(123);
+    await running;
+    assert.equal(answered, 0, "the reply never reached the user, so it is not activity");
+    assert.ok(!brainRecords.some((record) => record.state === "done"), "the brain never saw it as done");
+  } finally {
+    server.close();
+  }
+});
+
 test("a completed stream without answer content never resets the idle window", async () => {
   const server = await startUpstream((req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" });

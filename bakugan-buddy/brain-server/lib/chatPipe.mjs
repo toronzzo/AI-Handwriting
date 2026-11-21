@@ -6,9 +6,10 @@
  *   brain, reading usage tokens from the very bytes it forwards — a response
  *   is never changed for the feed.
  * - `events.onAnswered` fires once, only when the stream ran to the end and
- *   really carried answer content: a timeout, a client that left mid-reply,
- *   an empty reply or an error never counts as chat activity (the idle
- *   auto-return window resets only on a real answer).
+ *   really carried answer content: a timeout, a client that left mid-reply
+ *   (even while the final flush was still awaiting the RAM probe), an empty
+ *   reply or an error never counts as chat activity (the idle auto-return
+ *   window resets only on a real answer).
  *
  * Kept out of proxy.mjs so the wire behaviour is testable with a fake
  * upstream and a fake response.
@@ -95,6 +96,13 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
       events.local && events.ramPromise
         ? await Promise.race([events.ramPromise, new Promise((resolve) => setTimeout(() => resolve(null), 800))])
         : null;
+    // Race guard: the client may have left while we awaited the RAM probe.
+    // A reply the user never received is not chat activity, and the brain
+    // must not record it as done.
+    if (clientClosed) {
+      brainOut({ state: "off", detail: "stopped: the client left" });
+      return;
+    }
     // Only a fully received reply with real answer content is chat activity:
     // the 200 headers alone, a timeout, a client that left, or an empty
     // reply must never reset the idle auto-return window.
