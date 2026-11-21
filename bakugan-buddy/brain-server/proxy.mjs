@@ -23,6 +23,7 @@ import {
   upsertDayMessage,
 } from "./lib/chats.mjs";
 import { clipTooShort, isWhisperHallucination } from "../packages/alive/src/speech.ts";
+import { isCanonicalMood } from "../packages/mood/src/index.ts";
 import { notesContext, queryForRetrieval } from "../packages/alive/src/notes.ts";
 import { driveMapPrompt, isDriveQuestion, isScanDriveCommand, whereIsQuery } from "../packages/alive/src/driveMap.ts";
 import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
@@ -423,6 +424,13 @@ function book() {
   if (!memoryBook) memoryBook = openMemory(path.join(dataDir, "memory", "facts.sqlite"));
   return memoryBook;
 }
+
+/**
+ * The last canonical mood the app reported with a moment (POST /v1/facts).
+ * Desktop Preyas reads it back through GET /v1/mood; null means "no mood yet".
+ */
+let lastMood = null;
+let lastMoodSeenAt = 0;
 
 function extractLater(payload) {
   const events = Array.isArray(payload.events) ? payload.events : [];
@@ -940,9 +948,26 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/v1/facts") {
       const payload = await readJson(req);
+      if (isCanonicalMood(payload.mood)) {
+        lastMood = payload.mood;
+        lastMoodSeenAt = Date.now();
+      }
       res.writeHead(202, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
       extractLater(payload);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/mood") {
+      // Read-only: the mood the app last reported, or neutral before the
+      // first report. Desktop Preyas polls this; it never writes.
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          mood: lastMood ?? "neutral",
+          seenAt: lastMoodSeenAt ? new Date(lastMoodSeenAt).toISOString() : null,
+        }),
+      );
       return;
     }
 
