@@ -117,6 +117,7 @@ type ChatDialog =
   | { kind: "restart" }
   | { kind: "briefingTime"; time: string }
   | { kind: "briefingOff" }
+  | { kind: "taskConfirm"; taskId: string; stepId: number; token: string; title: string; body: string }
   | { kind: "deleteDeck"; id: string; title: string };
 type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string; briefingDay?: string };
 /** "Briefing 2026-11-07" is how an old briefing message started. */
@@ -333,6 +334,8 @@ export function ChatScreen({
   const [searchNote, setSearchNote] = useState("");
   const [openSteps, setOpenSteps] = useState<Record<number, boolean>>({});
   const taskPoll = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Task ids whose final answer already landed in the chat. */
+  const announcedTaskAnswers = useRef<Set<string>>(new Set());
   /** Live Activity: one run per message, the id of the one on screen, and its poll. */
   const runsRef = useRef(new Map<string, ActivitySink>());
   const [lastRunId, setLastRunId] = useState("");
@@ -1292,17 +1295,64 @@ export function ChatScreen({
           if (!res.ok) return;
           const body = (await res.json()) as { task?: TaskRecord };
           if (!body.task) return;
-          setTask(body.task);
-          if (body.task.status === "done" || body.task.status === "error") {
+          const current = body.task;
+          setTask(current);
+          if (current.status === "done" || current.status === "error") {
             if (taskPoll.current) clearInterval(taskPoll.current);
             taskPoll.current = null;
             setLastRunActive(false);
+            // The loop's final answer lands in the chat once.
+            if (current.answer && !announcedTaskAnswers.current.has(current.id)) {
+              announcedTaskAnswers.current.add(current.id);
+              const reply: Shown = {
+                t: Date.now(),
+                role: "assistant",
+                content: current.answer,
+                who: current.model === "deepseek-flash" ? "paid" : "preyas",
+                model: current.model === "deepseek-flash" ? "deepseek-flash" : "preyas",
+              };
+              messagesRef.current = [...messagesRef.current, reply];
+              setMessages(messagesRef.current);
+              void remember(reply, current.chatId || activeIdRef.current || "");
+            }
+            return;
+          }
+          // A paused tool step waits for a Yes/No card.
+          const waiting = current.steps.find((step) => step.pendingConfirm && step.pendingConfirm.answered == null);
+          if (current.status === "paused" && waiting && waiting.pendingConfirm) {
+            setDialog((open) => {
+              if (open && open.kind === "taskConfirm" && open.stepId === waiting.id) return open;
+              if (open) return open; // never steal another dialog
+              return {
+                kind: "taskConfirm",
+                taskId: current.id,
+                stepId: waiting.id,
+                token: waiting.pendingConfirm!.token,
+                title: "May I run this?",
+                body: `${waiting.text}\n\n${waiting.pendingConfirm!.why}`,
+              };
+            });
           }
         } catch {
           /* the poll is best effort */
         }
       })();
     }, 1200);
+  }
+  /** Answer a tool-confirm card; the running task picks the result up. */
+  async function answerTaskConfirm(taskId: string, stepId: number, token: string, yes: boolean) {
+    try {
+      const res = await brainFetch(`${bag.brainUrl}/v1/tasks/${encodeURIComponent(taskId)}/confirm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stepId, token, yes }),
+      });
+      if (!res.ok) {
+        setChip(yes ? "That step expired before you answered." : "The step was already answered.");
+      }
+    } catch {
+      setChip("I could not reach the brain with your answer.");
+    }
   }
   async function runTaskFlow(text: string) {
     busy.current = true;
@@ -2099,6 +2149,18 @@ export function ChatScreen({
               void refreshReminders();
             },
           }
+        : dialog.kind === "taskConfirm"
+          ? {
+              title: dialog.title,
+              body: dialog.body,
+              confirm: "Yes",
+              no: "No",
+              danger: false,
+              run: () => {
+                setDialog(null);
+                void answerTaskConfirm(dialog.taskId, dialog.stepId, dialog.token, true);
+              },
+            }
         : dialog.kind === "rename"
       ? {
           title: "Rename chat",
@@ -2764,19 +2826,23 @@ export function ChatScreen({
                     <View key={step.id} style={styles.stepRow}>
                       <Pressable onPress={() => setOpenSteps((open) => ({ ...open, [step.id]: !open[step.id] }))}>
                         <Text style={styles.stepTitle}>
-                          {step.status === "done" ? "✓" : step.status === "running" ? "…" : step.status === "error" ? "!" : "•"}{" "}
+                          {step.status === "done" ? "✓" : step.status === "running" || step.status === "paused" ? "…" : step.status === "error" ? "!" : "•"}{" "}
                           {step.id}. {step.text}
                         </Text>
                       </Pressable>
-                      {openSteps[step.id] && step.result ? (
+                      {step.status === "paused" ? (
+                        <Text style={styles.stepResult}>Waiting for your Yes or No…</Text>
+                      ) : openSteps[step.id] && step.result ? (
                         <Text style={styles.stepResult}>{step.result}</Text>
                       ) : null}
                     </View>
                   ))}
                   {task.status === "paused" || task.status === "error" ? (
-                    <Pressable style={styles.resumeBtn} onPress={() => void resumeTask(task.id)}>
-                      <Text style={styles.resumeText}>Resume</Text>
-                    </Pressable>
+                    task.steps.some((step) => step.pendingConfirm && step.pendingConfirm.answered == null) ? null : (
+                      <Pressable style={styles.resumeBtn} onPress={() => void resumeTask(task.id)}>
+                        <Text style={styles.resumeText}>Resume</Text>
+                      </Pressable>
+                    )
                   ) : null}
                 </View>
               ) : null}
@@ -3051,7 +3117,15 @@ export function ChatScreen({
               <Text style={styles.modalBody}>{confirmDialog.body}</Text>
             )}
             <View style={styles.modalRow}>
-              <Pressable onPress={() => setDialog(null)}>
+              <Pressable
+                onPress={() => {
+                  setDialog(null);
+                  // "No" on a tool-confirm card must reach the running task.
+                  if (dialog?.kind === "taskConfirm") {
+                    void answerTaskConfirm(dialog.taskId, dialog.stepId, dialog.token, false);
+                  }
+                }}
+              >
                 <Text style={styles.modalCancel}>{confirmDialog.no}</Text>
               </Pressable>
               <Pressable onPress={confirmDialog.run}>

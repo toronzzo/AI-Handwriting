@@ -83,7 +83,8 @@ import {
 } from "./lib/reminders.mjs";
 import { answerFromDocument, keyPointsFrom, summarizeDocument } from "./lib/docSummary.mjs";
 import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./lib/tasks.mjs";
-import { launchTaskRun, planTask, taskRunActive } from "./lib/taskRunner.mjs";
+import { launchTaskRun, taskRunActive } from "./lib/taskRunner.mjs";
+import { createMcpHub, loadMcpConfig } from "./lib/os/mcp.mjs";
 import { createCoach } from "./lib/coach/engine.mjs";
 import { capUsd, spentTodayUsd } from "./lib/coach/spendGate.mjs";
 import { createHarnessRunner } from "./lib/harness/runner.mjs";
@@ -110,6 +111,29 @@ const host = process.env.BRAIN_HOST || "0.0.0.0";
 const dataDir = process.env.BAKUGAN_DATA_DIR || "";
 const gatewayRoot = process.env.AGENT_DRIVE_ROOT || "/Volumes/Agent/agent";
 const buddyRoot = "/Volumes/Agent/BakuganBuddy";
+/** The repo folder (AI-Handwriting), the second safe root for MCP file tools. */
+const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+
+/**
+ * One MCP hub for the whole brain process. Created lazily (it only spawns
+ * the cheap files/shell servers on first tool use; Playwright stays off
+ * until a browser tool is really called). All child servers die with the
+ * proxy because their stdio closes.
+ */
+let mcpHub = null;
+function getMcpHub() {
+  if (!mcpHub && dataDir) {
+    const { config, warnings } = loadMcpConfig(dataDir, { repoRoot });
+    for (const line of warnings) console.warn(`mcp: ${line}`);
+    mcpHub = createMcpHub({ config, dataDir, log: (line) => console.warn(line) });
+  }
+  return mcpHub;
+}
+
+/** The options every tool-loop task run needs. */
+function taskRunOptions() {
+  return { llamaUrl, onActivity: activity, hub: getMcpHub(), repoRoot };
+}
 
 function syncHistory() {
   if (!dataDir) return;
@@ -529,14 +553,10 @@ async function extractNotesForChat(chatId) {
   }
 }
 
-/** Plan a task, save it, then run it in the background. */
+/** Create a tool-loop task, save it, then run it in the background. */
 async function startTask(title, chatId) {
-  const seed = searchNotes(dataDir, title, 4)
-    .map((note) => `- ${note.text}`)
-    .join("\n");
-  const steps = await planTask(llamaUrl, title, seed);
-  const task = newTask(dataDir, { title, chatId, steps });
-  const run = launchTaskRun(dataDir, task, { llamaUrl, onActivity: activity });
+  const task = newTask(dataDir, { title, chatId, steps: [], toolLoop: true });
+  const run = launchTaskRun(dataDir, task, taskRunOptions());
   if (run) void run.catch(() => {});
   return task;
 }
@@ -1498,7 +1518,7 @@ const server = http.createServer(async (req, res) => {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: `could not plan the task: ${message}` }));
+          res.end(JSON.stringify({ error: `could not start the task: ${message}` }));
         }
         return;
       }
@@ -1532,7 +1552,7 @@ const server = http.createServer(async (req, res) => {
             task.status = "planned";
             task.updated = Date.now();
             saveTask(dataDir, task);
-            const run = launchTaskRun(dataDir, task, { llamaUrl, onActivity: activity });
+            const run = launchTaskRun(dataDir, task, taskRunOptions());
             if (!run) {
               sendJson(res, 409, { error: "task is already running", task: loadTask(dataDir, task.id) || task });
               return;

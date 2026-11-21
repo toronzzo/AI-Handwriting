@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { handleOsRoute } from "./routes.mjs";
 import { readEvents } from "./events.mjs";
+import { loadTask, newTask, saveTask } from "../tasks.mjs";
 
 function fakeRes() {
   const out = { status: 0, headers: {}, body: "" };
@@ -296,6 +297,84 @@ test("route: a food event through POST /v1/events/log ticks meal in GET /v1/rpg/
     const body = JSON.parse(today.out.body);
     assert.equal(body.quests.find((quest) => quest.id === "meal").done, true);
     assert.equal(body.areaXp.body, 8, "3 XP for the food plus the +5 meal bonus");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Tool-loop confirm route (harness/mcp-hands) ---
+
+function pausedTask(root) {
+  const task = newTask(root, { title: "create a file", chatId: "c1", steps: [], toolLoop: true });
+  task.status = "paused";
+  task.steps = [
+    {
+      id: 1,
+      text: "Run printf hi",
+      status: "paused",
+      tool: { name: "shell_run", args: { command: "printf hi" } },
+      pendingConfirm: { token: "tok-123", why: "running a shell command needs your confirmation", expiresAt: Date.now() + 60_000, answered: null },
+    },
+  ];
+  saveTask(root, task);
+  return task;
+}
+
+test("route: POST /v1/tasks/:id/confirm answers a pending card", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "os-confirm-"));
+  try {
+    const task = pausedTask(dir);
+    const yes = fakeRes();
+    await handleOsRoute({
+      ...ctx({ pathname: `/v1/tasks/${task.id}/confirm`, dataDir: dir, method: "POST", body: JSON.stringify({ stepId: 1, token: "tok-123", yes: true }) }),
+      res: yes.res,
+    });
+    assert.equal(yes.out.status, 200);
+    const body = JSON.parse(yes.out.body);
+    assert.equal(body.ok, true);
+    assert.equal(loadTask(dir, task.id).steps[0].pendingConfirm.answered, "yes");
+
+    // The token is single-use: a second answer is refused.
+    const again = fakeRes();
+    await handleOsRoute({
+      ...ctx({ pathname: `/v1/tasks/${task.id}/confirm`, dataDir: dir, method: "POST", body: JSON.stringify({ stepId: 1, token: "tok-123", yes: false }) }),
+      res: again.res,
+    });
+    assert.equal(again.out.status, 409);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("route: a wrong token is refused and an expired card is 410", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "os-confirm-bad-"));
+  try {
+    const task = pausedTask(dir);
+    const bad = fakeRes();
+    await handleOsRoute({
+      ...ctx({ pathname: `/v1/tasks/${task.id}/confirm`, dataDir: dir, method: "POST", body: JSON.stringify({ stepId: 1, token: "wrong", yes: true }) }),
+      res: bad.res,
+    });
+    assert.equal(bad.out.status, 409);
+    assert.equal(loadTask(dir, task.id).steps[0].pendingConfirm.answered, null);
+
+    const expired = pausedTask(dir);
+    // The route clock is pinned to 2026-11-18T23:00Z in this test file's ctx().
+    expired.steps[0].pendingConfirm.expiresAt = Date.parse("2026-11-18T23:00:00.000Z") - 1000;
+    saveTask(dir, expired);
+    const late = fakeRes();
+    await handleOsRoute({
+      ...ctx({ pathname: `/v1/tasks/${expired.id}/confirm`, dataDir: dir, method: "POST", body: JSON.stringify({ stepId: 1, token: "tok-123", yes: true }) }),
+      res: late.res,
+    });
+    assert.equal(late.out.status, 410);
+
+    const missing = fakeRes();
+    await handleOsRoute({
+      ...ctx({ pathname: `/v1/tasks/nope/confirm`, dataDir: dir, method: "POST", body: JSON.stringify({ stepId: 1, token: "t", yes: true }) }),
+      res: missing.res,
+    });
+    assert.equal(missing.out.status, 404);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

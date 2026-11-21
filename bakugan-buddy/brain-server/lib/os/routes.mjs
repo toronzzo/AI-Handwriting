@@ -22,6 +22,8 @@ import { shotFilePath, validShotId } from "./computerLog.mjs";
 import { createMacAdapter } from "./computerMac.mjs";
 import { createLocalProposer, createPaidProposer } from "./computerPropose.mjs";
 import { createComputerSession } from "./computerSession.mjs";
+import { loadTask, saveTask } from "../tasks.mjs";
+import { confirmTaskStep } from "../taskRunner.mjs";
 
 function sendJson(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -124,6 +126,27 @@ export async function handleOsRoute(ctx) {
   if (url.pathname === "/v1/persona/versions" && req.method === "GET") {
     // Revision lines only; the persona text never leaves the live file.
     return answered(res, 200, { versions: listVersions(dataDir) });
+  }
+
+  // The Yes/No card answer for a paused tool-loop step. Reads nothing else
+  // and executes nothing; the running task loop does the work.
+  const confirmRoute = url.pathname.match(/^\/v1\/tasks\/([^/]+)\/confirm$/);
+  if (confirmRoute && req.method === "POST") {
+    if (!dataDir) return answered(res, 503, { error: "drive_missing" });
+    const body = await readJsonOr(res, ctx);
+    if (body === null) return true;
+    const task = loadTask(dataDir, decodeURIComponent(confirmRoute[1]));
+    if (!task) return answered(res, 404, { error: "task not found" });
+    const result = confirmTaskStep(task, Number(body.stepId), {
+      yes: Boolean(body.yes),
+      token: String(body.token || ""),
+      now: () => nowMs,
+    });
+    if (!result.ok) {
+      return answered(res, result.error === "expired" ? 410 : 409, result);
+    }
+    saveTask(dataDir, task);
+    return answered(res, 200, { ok: true, task });
   }
 
   if (url.pathname === "/v1/events/log" && req.method === "POST") {

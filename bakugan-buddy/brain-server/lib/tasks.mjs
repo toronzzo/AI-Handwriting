@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { TASK_MAX_STEPS } from "../../packages/alive/src/tasks.ts";
+import { TASK_MAX_STEPS, TOOL_LOOP_MAX_STEPS } from "../../packages/alive/src/tasks.ts";
 
 const ID_RE = /^[A-Za-z0-9_-]+$/;
 
@@ -40,31 +40,38 @@ export function saveTask(root, task) {
 }
 
 export function normalizeTask(raw) {
-  const steps = Array.isArray(raw?.steps) ? raw.steps.slice(0, TASK_MAX_STEPS) : [];
+  const toolLoop = Boolean(raw?.toolLoop);
+  const cap = toolLoop ? TOOL_LOOP_MAX_STEPS : TASK_MAX_STEPS;
+  const steps = Array.isArray(raw?.steps) ? raw.steps.slice(0, cap) : [];
   return {
     id: String(raw?.id || ""),
     title: String(raw?.title || ""),
     chatId: String(raw?.chatId || ""),
     status: ["planned", "running", "paused", "done", "error"].includes(raw?.status) ? raw.status : "planned",
+    toolLoop,
+    answer: typeof raw?.answer === "string" ? raw.answer : undefined,
+    model: typeof raw?.model === "string" ? raw.model : undefined,
     steps: steps.map((step, index) => ({
       id: Number(step?.id) || index + 1,
       text: String(step?.text || ""),
-      status: ["pending", "running", "done", "error"].includes(step?.status) ? step.status : "pending",
+      status: ["pending", "running", "paused", "done", "error"].includes(step?.status) ? step.status : "pending",
       result: typeof step?.result === "string" ? step.result : undefined,
       tool: step?.tool && typeof step.tool === "object" ? step.tool : null,
+      pendingConfirm: step?.pendingConfirm && typeof step.pendingConfirm === "object" ? step.pendingConfirm : null,
     })),
     created: Number(raw?.created) || Date.now(),
     updated: Number(raw?.updated) || Date.now(),
   };
 }
 
-export function newTask(root, { title, chatId = "", steps }) {
+export function newTask(root, { title, chatId = "", steps = [], toolLoop = false }) {
   const now = Date.now();
   const task = normalizeTask({
     id: randomUUID(),
     title,
     chatId,
     status: "planned",
+    toolLoop,
     steps: steps.map((step, index) => ({
       id: index + 1,
       text: step.text,

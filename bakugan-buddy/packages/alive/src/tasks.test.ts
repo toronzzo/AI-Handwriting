@@ -32,6 +32,21 @@ test("multi-step requests are recognised, questions are not", () => {
   assert.equal(looksLikeTask("what did I say about the dentist?"), false);
 });
 
+test("tool requests are recognised: files, folders, URLs and commands", () => {
+  assert.equal(looksLikeTask("list the files in my Data Warehouses folder"), true);
+  assert.equal(looksLikeTask("create test.txt in /Volumes/Agent/agent/tmp saying hi"), true);
+  assert.equal(looksLikeTask("open example.com and tell me the title"), true);
+  assert.equal(looksLikeTask("open https://en.wikipedia.org/wiki/Bakugan and summarise it"), true);
+  assert.equal(looksLikeTask("edit the notes about taxes"), true);
+  assert.equal(looksLikeTask("find my notes about the dentist"), true);
+  // Not tool requests: no file, folder or URL in sight.
+  assert.equal(looksLikeTask("how do I open a jar?"), false);
+  assert.equal(looksLikeTask("write a poem about the sea"), false);
+  assert.equal(looksLikeTask("delete my Instagram account"), false);
+  assert.equal(looksLikeTask("check the weather in Warsaw"), false);
+  assert.equal(looksLikeTask("tell me a story"), false);
+});
+
 test("the status line names the current step", () => {
   assert.equal(taskStatusLine(task()), "Working on it: step 2 of 3…");
   assert.equal(taskStatusLine(task({ status: "planned" })), "Planning 3 steps…");

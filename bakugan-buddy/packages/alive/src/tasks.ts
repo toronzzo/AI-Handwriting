@@ -9,9 +9,17 @@
 export type TaskTool =
   | { name: "search_notes"; query: string }
   | { name: "list_files"; path: string }
-  | { name: "read_file"; path: string };
+  | { name: "read_file"; path: string }
+  | { name: string; args: Record<string, unknown> };
 
-export type TaskStepStatus = "pending" | "running" | "done" | "error";
+export type TaskStepStatus = "pending" | "running" | "paused" | "done" | "error";
+
+export type PendingConfirm = {
+  token: string;
+  why: string;
+  expiresAt: number;
+  answered: "yes" | "no" | "expired" | null;
+};
 
 export type TaskStep = {
   id: number;
@@ -19,6 +27,7 @@ export type TaskStep = {
   status: TaskStepStatus;
   result?: string;
   tool?: TaskTool | null;
+  pendingConfirm?: PendingConfirm | null;
 };
 
 export type TaskStatus = "planned" | "running" | "paused" | "done" | "error";
@@ -31,15 +40,32 @@ export type TaskRecord = {
   steps: TaskStep[];
   created: number;
   updated: number;
+  /** Tool-loop tasks: the model drives tools, one per step, up to 15. */
+  toolLoop?: boolean;
+  /** The final answer of a finished tool-loop task, shown in the chat. */
+  answer?: string;
+  /** The model that ran the loop: "deepseek-flash" or "preyas". */
+  model?: string;
 };
 
 export const TASK_MAX_STEPS = 6;
+
+/** Tool-loop tasks run at most this many tool calls before the final answer. */
+export const TOOL_LOOP_MAX_STEPS = 15;
 
 const TASK_STARTERS = [
   "plan", "summarize", "summarise", "review", "organize", "organise", "prepare",
   "compile", "outline", "compare", "audit", "research", "collect", "gather",
   "make a list", "make a plan", "build a plan", "put together",
+  "list", "find", "show", "open", "create", "write", "edit", "delete",
+  "remove", "run", "check",
 ];
+
+/** A URL (http/https, www, or a bare domain) makes a request a tool task. */
+const URL_HINT = /(https?:\/\/|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|dev|ru|pl|edu|gov|app|site)\b)/i;
+
+/** A file-ish thing the tools can act on. */
+const FILE_HINT = /\b(?:files?|folders?|director\w*|drive|notes?|documents?|file)\b|\/volumes\/agent|\.(?:txt|md|json|pdf|csv|log|html|py|ts|mjs)\b/i;
 
 /**
  * True for a request that needs several steps. Deliberately conservative: a
@@ -49,6 +75,8 @@ export function looksLikeTask(raw: string): boolean {
   const text = String(raw ?? "").trim().toLowerCase();
   if (!text) return false;
   if (/^task\s*[:\-]/.test(text)) return true;
+  // A URL always goes to the tool loop (the browser can open it).
+  if (URL_HINT.test(text)) return true;
   const starter = TASK_STARTERS.some(
     (word) => text === word || text.startsWith(`${word} `) || text.startsWith(`${word}:`),
   );
@@ -56,6 +84,8 @@ export function looksLikeTask(raw: string): boolean {
   // A one-word "plan?" is a question about planning, not a request to plan.
   if (text.endsWith("?")) return false;
   if (text.length < 12) return false;
+  // A clear file action ("create test.txt in …") is always a tool task.
+  if (/(?:create|write|save|edit|delete|remove|rename|move|run)\b/.test(text) && FILE_HINT.test(text)) return true;
   // Chat questions often start with "summarize" or "explain step by step". Task
   // mode is only worth its extra model calls when notes/files or an explicit
   // multi-step request make several steps likely.
@@ -118,9 +148,10 @@ export function parsePlan(raw: string): { text: string; tool: TaskTool | null }[
 
 /** A step name for a plan that named only a tool. */
 export function toolLabel(tool: TaskTool): string {
-  if (tool.name === "search_notes") return `Search my notes for "${tool.query}"`;
-  if (tool.name === "list_files") return `List ${tool.path}`;
-  return `Read ${tool.path}`;
+  const row = tool as { name: string; query?: unknown; path?: unknown; args?: Record<string, unknown> };
+  if (row.name === "search_notes") return `Search my notes for "${String(row.query ?? "")}"`;
+  if (row.name === "list_files") return `List ${String(row.path ?? "")}`;
+  return `Read ${String(row.path ?? "")}`;
 }
 
 export function parseTool(raw: unknown): TaskTool | null {
@@ -129,11 +160,15 @@ export function parseTool(raw: unknown): TaskTool | null {
   const name = String(row.name ?? "");
   if (name === "search_notes") {
     const query = String(row.query ?? "").trim();
-    return query ? { name, query: query.slice(0, 120) } : null;
+    return query ? { name: "search_notes", query: query.slice(0, 120) } : null;
   }
-  if (name === "list_files" || name === "read_file") {
+  if (name === "list_files") {
     const path = String(row.path ?? "").trim();
-    return path ? { name, path: path.slice(0, 400) } : null;
+    return path ? { name: "list_files", path: path.slice(0, 400) } : null;
+  }
+  if (name === "read_file") {
+    const path = String(row.path ?? "").trim();
+    return path ? { name: "read_file", path: path.slice(0, 400) } : null;
   }
   return null;
 }
