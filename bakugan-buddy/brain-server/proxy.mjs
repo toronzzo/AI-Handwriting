@@ -29,7 +29,7 @@ import { driveMapPrompt, isDriveQuestion, isScanDriveCommand, whereIsQuery } fro
 import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
 import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
-import { proxyOfflineImage, searchOffline } from "./lib/offlineSearch.mjs";
+import { proxyOfflineArticle, proxyOfflineImage, searchOffline } from "./lib/offlineSearch.mjs";
 import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
 import { collectStatus, restartArgs } from "./lib/status.mjs";
 import { collectUserNotes, ensureObsidianConfig, exportVault, searchVault, saveToVault, VAULT_DIR } from "./lib/vault.mjs";
@@ -781,12 +781,21 @@ const server = http.createServer(async (req, res) => {
   }
   const url = new URL(req.url || "/", `http://${host}`);
 
+  // An <img> tag cannot send our header, so the offline proxy GETs may carry
+  // the token in the query; every other route must use the header.
+  const requestToken = requestTokenFor({
+    path: url.pathname,
+    method: req.method,
+    headerToken: req.headers["x-preyas-token"] || "",
+    queryToken: url.searchParams.get("token") || "",
+  });
+
   // All API clients, including local callers, must pair once.
   const gate = authorizeRequest({
     path: url.pathname,
     method: req.method,
     remoteAddress: req.socket?.remoteAddress || "",
-    token: req.headers["x-preyas-token"] || url.searchParams.get("token") || "",
+    token: requestToken,
     book: dataDir ? readDevices(dataDir) : { devices: [] },
     pairing,
   });
@@ -797,7 +806,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (gate.device && dataDir) {
     try {
-      touchDevice(readDevices(dataDir), req.headers["x-preyas-token"] || "");
+      touchDevice(readDevices(dataDir), requestToken);
     } catch {
       /* last-seen is a nicety */
     }
@@ -1520,24 +1529,22 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/v1/offline/article") {
-      const pathValue = (url.searchParams.get("path") || "").trim();
-      if (!pathValue.startsWith("/")) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "bad offline article path" }));
+      const article = await proxyOfflineArticle((url.searchParams.get("path") || "").trim());
+      if (!article.ok) {
+        res.writeHead(article.status || 404, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Offline article unavailable");
         return;
       }
-      try {
-        const articleUrl = new URL(pathValue, process.env.PREYAS_KIWIX_URL || "http://127.0.0.1:8791");
-        if (!["127.0.0.1", "localhost"].includes(articleUrl.hostname)) throw new Error("remote article");
-        const article = await fetch(articleUrl.href, { signal: AbortSignal.timeout(8000) });
-        if (!article.ok) throw new Error("article unavailable");
-        const type = String(article.headers.get("content-type") || "text/html");
-        res.writeHead(200, { "Content-Type": type, "Cache-Control": "private, max-age=3600" });
-        res.end(Buffer.from(await article.arrayBuffer()));
-      } catch {
-        res.writeHead(404, { "Content-Type": "text/plain" });
-        res.end("Offline article unavailable");
-      }
+      res.writeHead(200, {
+        "Content-Type": article.type,
+        "Cache-Control": "private, max-age=3600",
+        // The proxied HTML is untrusted pack content: the sandbox gives it an
+        // opaque origin and blocks scripts, so it can never reach the pairing
+        // token or call the brain's own API from this page.
+        "Content-Security-Policy": "sandbox; script-src 'none'",
+        "X-Content-Type-Options": "nosniff",
+      });
+      res.end(article.buffer);
       return;
     }
 

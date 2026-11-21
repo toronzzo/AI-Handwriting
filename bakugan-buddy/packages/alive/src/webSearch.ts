@@ -16,10 +16,41 @@ export type SearchResult = {
   sourceLabel?: string;
 };
 
+/** Astronomy, reference and repair words that the offline packs cover well. */
+const OFFLINE_TOPICS =
+  /\b(astronom\w*|telescop\w*|supernova\w*|nebula\w*|constellation\w*|asteroid\w*|comet\w*|eclipse\w*|planet\w*|galax\w*|orbit\w*|solar system|milky way|black hole|jupiter|saturn|venus|mercury|neptune|uranus|pluto|mars|moon|wikipedia|encyclopedi\w*|ifixit|teardown|repair|replace\w*|disassembl\w*)\b/i;
+
+/** A how-to or "what is" style question that a reference pack can answer. */
+const OFFLINE_QUESTION =
+  /\b(how (do|can|would) i\b|how to\b|what is\b|what are\b|what's\b|who (is|was)\b|when (was|did)\b|where is\b|explain\b|tell me about\b|step[- ]by[- ]step|guide to)\b/i;
+
+/** The user says the internet is gone, so only the local library can answer. */
+const OFFLINE_HINT = /\b(offline|no (internet|wifi|connection)|without (internet|wifi)|from (the )?(library|encyclopedia))\b/i;
+
+/**
+ * Questions about Preyas, feelings or the user's own life are answered by the
+ * persona or memory, not looked up in an encyclopedia.
+ */
+const PRESONAL_OR_MEMORY =
+  /\b(i feel|i am feeling|how do i feel|how are you|who are you|your (name|favorite|memory)|do you remember|remember when|my (day|day was|schedule|notes)|feel about)\b/i;
+
+/**
+ * Should this turn try the offline Kiwix library first?
+ *
+ * True for explicit offline requests and for encyclopedic or how-to questions
+ * that the installed packs cover. Ordinary chatting, code help and questions
+ * about Preyas' own memory stay on their existing paths.
+ */
 export function shouldOfflineSearch(raw: string): boolean {
   const text = String(raw ?? "").trim();
   if (!text) return false;
-  return /\b(astronomy|planet|star|galaxy|moon|Mars|Jupiter|Saturn|Wikipedia|encyclopedia|ifixit|repair|how do I fix|how to fix|step-by-step|diy)\b/i.test(text);
+  if (PRESONAL_OR_MEMORY.test(text)) return false;
+  if (OFFLINE_HINT.test(text)) return true;
+  const ask = OFFLINE_TOPICS.test(text) || OFFLINE_QUESTION.test(text);
+  if (!ask) return false;
+  // A long pasted block is work to summarise, not a question to look up.
+  if (text.length > 400) return false;
+  return true;
 }
 
 const PRIVATE_V4: readonly RegExp[] = [

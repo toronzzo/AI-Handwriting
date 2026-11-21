@@ -8,7 +8,11 @@ __pycache__/
 
 # Bakugan Buddy — never commit models, anime audio, or private packs
 *.gguf
+*.gguf.part
 *.onnx
+# Offline Kiwix packs and checksum sidecars live on the Agent drive, never here
+*.zim
+*.zim.sha256
 *.wav
 *.mp3
 *.mp4

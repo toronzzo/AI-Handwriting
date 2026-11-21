@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { HUGE_TIMEOUT_MS, SWITCHING_CHAT_MESSAGE } from "../../packages/alive/src/modelSwitch.ts";
-import { chatGate, createModelSwitch, freeMemoryGb, IDLE_RETURN_MS, LOAD_TIMEOUT_MS, ROLLBACK_NOTE } from "./modelSwitch.mjs";
+import { chatGate, createModelSwitch, DEFAULT_IDLE_MODEL, freeMemoryGb, IDLE_RETURN_MS, LOAD_TIMEOUT_MS, ROLLBACK_NOTE } from "./modelSwitch.mjs";
 
 /** Poll a condition with real timers (for the crash-rollback test). */
 async function waitFor(cond, timeoutMs) {
@@ -538,4 +538,76 @@ test("chatGate: a local chat during a switch gets the clear message", () => {
   assert.equal(chatGate("paid", loading).ok, true, "paid traffic does not touch the local server");
   assert.equal(chatGate("preyas", { status: "ready", current: "small" }).ok, true);
   assert.equal(chatGate("preyas", { status: "down", current: "small" }).ok, true, "down keeps the old 503 path");
+});
+
+test("tiny is a registered tier that loads the Qwen3.5 0.8B file at 16K", async () => {
+  const f = makeSwitch({ healthy: true, freeGb: 40 });
+  try {
+    const res = await f.switcher.request("tiny", { confirmed: true });
+    await f.drain();
+    assert.equal(res.ok, true, "tiny loads without a memory card");
+    assert.equal(f.spawned.length, 1);
+    const { args } = f.spawned[0];
+    assert.equal(args[args.indexOf("-m") + 1], path.join(f.models, "Qwen3.5-0.8B-Q4_K_M.gguf"));
+    assert.equal(args[args.indexOf("-c") + 1], "16384", "the tiny tier uses a 16K context");
+    assert.equal(args[args.indexOf("--parallel") + 1], "1");
+    assert.equal(args[args.indexOf("--host") + 1], "127.0.0.1");
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
+test("tiny is never the default: the 8B is the idle model and the default tier", () => {
+  assert.equal(DEFAULT_IDLE_MODEL, "small");
+  assert.notEqual(DEFAULT_IDLE_MODEL, "tiny");
+});
+
+test("switching back from tiny to the 8B works like any other switch", async () => {
+  const f = makeSwitch({ healthy: true, freeGb: 40 });
+  try {
+    await f.switcher.request("tiny", { confirmed: true });
+    await f.drain();
+    assert.equal(f.switcher.state().current, "tiny");
+    await f.switcher.request("small", { confirmed: true });
+    await f.drain();
+    assert.equal(f.switcher.state().current, "small");
+    const last = f.spawned[f.spawned.length - 1];
+    assert.equal(last.args[last.args.indexOf("-m") + 1], path.join(f.models, "Huihui-Qwen3-8B-abliterated-v2.Q4_K_M.gguf"));
+    assert.equal(f.spawned[0].child.killed, "SIGTERM", "the tiny server is stopped first");
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
+test("tiny returns to the 8B after the idle window in off-grid mode", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = makeSwitch({ healthy: true, freeGb: 40, ownClock: true });
+  try {
+    await f.switcher.request("tiny", { confirmed: true });
+    await f.drain();
+    assert.equal(f.switcher.state().current, "tiny");
+    t.mock.timers.tick(IDLE_RETURN_MS + 1_000);
+    await f.drain();
+    assert.equal(f.switcher.state().current, "small", "idle time brings the 8B back");
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
+test("a missing tiny file rolls back to the 8B with the usual note", async () => {
+  const f = makeSwitch({ healthy: true, freeGb: 40 });
+  try {
+    // The script was never run, so the tiny file is simply not there.
+    fs.rmSync(path.join(f.models, "Qwen3.5-0.8B-Q4_K_M.gguf"));
+    await f.switcher.request("tiny", { confirmed: true });
+    await f.drain();
+    // request() accepts the switch up front; the failure shows on the state.
+    const st = f.switcher.state();
+    assert.equal(st.status, "ready");
+    assert.equal(st.current, "small", "the 8B is running again");
+    assert.equal(st.rollback?.note, ROLLBACK_NOTE);
+    assert.equal(f.spawned.length, 1, "only the 8B was started");
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
 });

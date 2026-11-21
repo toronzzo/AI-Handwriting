@@ -8,6 +8,7 @@ import net from "node:net";
 export const OFFLINE_KIWIX_URL = "http://127.0.0.1:8791";
 export const OFFLINE_SEARCH_TIMEOUT_MS = 8000;
 export const OFFLINE_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+export const OFFLINE_ARTICLE_MAX_BYTES = 4 * 1024 * 1024;
 
 function text(value) {
   return String(value ?? "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim();
@@ -79,7 +80,7 @@ export async function searchOffline(query, options = {}) {
     const json = await res.json();
     const results = parseKiwixSearchJson(json, limit).map((item) => ({
       ...item,
-      url: `/offline/article?path=${encodeURIComponent(item.url)}`,
+      url: `/v1/offline/article?path=${encodeURIComponent(item.url)}`,
       imageUrl: item.imageUrl
         ? `/v1/offline/image?path=${encodeURIComponent(item.imageUrl)}`
         : undefined,
@@ -96,13 +97,56 @@ export async function searchOffline(query, options = {}) {
   }
 }
 
+/** True only for kiwix-serve itself: loopback host on the expected port. */
 export function isLoopbackUrl(raw, allowedPort = 8791) {
+  if (!String(raw || "").trim()) return false;
   try {
-    const url = new URL(String(raw || ""), OFFLINE_KIWIX_URL);
-    return ["127.0.0.1", "localhost"].includes(url.hostname) && (!url.port || Number(url.port) === allowedPort);
+    const url = new URL(String(raw), OFFLINE_KIWIX_URL);
+    if (!["127.0.0.1", "localhost"].includes(url.hostname)) return false;
+    // No port means port 80, which is some other local server, not kiwix.
+    return Number(url.port) === allowedPort;
   } catch {
     return false;
   }
+}
+
+/**
+ * Fetch one Kiwix article through the brain server so kiwix-serve never faces
+ * the LAN. The path must stay a root-relative path on the loopback server and
+ * the body is capped so a huge page cannot exhaust memory.
+ */
+export async function proxyOfflineArticle(pathValue, options = {}) {
+  const {
+    baseUrl = process.env.PREYAS_KIWIX_URL || OFFLINE_KIWIX_URL,
+    fetchImpl = fetch,
+    timeoutMs = 8000,
+    maxBytes = OFFLINE_ARTICLE_MAX_BYTES,
+  } = options;
+  const path = String(pathValue || "");
+  if (!path.startsWith("/") || path.startsWith("//")) return { ok: false, status: 400 };
+  let url;
+  try {
+    url = new URL(path, baseUrl);
+  } catch {
+    return { ok: false, status: 400 };
+  }
+  if (!isLoopbackUrl(url.href, Number(url.port || 8791))) return { ok: false, status: 400 };
+  let res;
+  try {
+    res = await fetchImpl(url.href, {
+      headers: { accept: "text/html,application/xhtml+xml" },
+      signal: AbortSignal.timeout(timeoutMs),
+      redirect: "error",
+    });
+  } catch {
+    return { ok: false, status: 502 };
+  }
+  if (!res.ok) return { ok: false, status: res.status === 404 ? 404 : 502 };
+  const buffer = Buffer.from(await res.arrayBuffer());
+  if (buffer.byteLength > maxBytes) return { ok: false, status: 413 };
+  const declared = String(res.headers?.get?.("content-type") || "").toLowerCase();
+  const type = /^text\/html|^application\/xhtml\+xml/.test(declared) ? "text/html; charset=utf-8" : declared || "text/html; charset=utf-8";
+  return { ok: true, status: 200, type, buffer };
 }
 
 export async function proxyOfflineImage(pathValue, options = {}) {

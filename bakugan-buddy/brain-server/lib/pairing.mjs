@@ -103,6 +103,21 @@ export function currentCode(state, now = Date.now()) {
 }
 
 /**
+ * Routes a browser loads by itself (an <img> tag, a link in a new tab) cannot
+ * set the X-Preyas-Token header, so these read-only GETs may carry the device
+ * token in the query string instead. Every other route must use the header so
+ * tokens stay out of request logs, history and shared links.
+ */
+export const QUERY_TOKEN_PATHS = new Set(["/v1/offline/image", "/v1/offline/article"]);
+
+/** The token a request carries, given its method, path and header. */
+export function requestToken({ path: requestPath = "/", method = "GET", headerToken = "", queryToken = "" } = {}) {
+  if (headerToken) return headerToken;
+  if (method === "GET" && QUERY_TOKEN_PATHS.has(String(requestPath))) return queryToken || "";
+  return "";
+}
+
+/**
  * Decide what to do with one request.
  *
  * Returns `{ allow: true }`, `{ allow: false, status: 401 | 429, error }`, so the

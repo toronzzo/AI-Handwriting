@@ -12,6 +12,7 @@ export const KINDS = {
     "list_files",
     "search_notes",
     "search_vault",
+    "offline_search",
     "files_read_text_file",
     "files_read_multiple_files",
     "files_list_directory",

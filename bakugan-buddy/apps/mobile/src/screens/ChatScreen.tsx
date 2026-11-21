@@ -7,6 +7,7 @@ import {
   Text,
   TextInput,
   Image,
+  Modal,
   useWindowDimensions,
   View,
   type NativeScrollEvent,
@@ -43,6 +44,7 @@ import { matchDocuments, parseDocumentRequest } from "../../../../packages/alive
 import { formatDue, parseReminder, type Reminder } from "../../../../packages/alive/src/reminders.ts";
 import { isShortAffirmation, wantsThinking } from "../../../../packages/alive/src/chatTurn.ts";
 import { HUGE_TIMEOUT_MS, MODEL_LABELS, SWITCHING_CHAT_MESSAGE, parseModelCommand, type LocalModelId } from "../../../../packages/alive/src/modelSwitch.ts";
+import { offlineSourceView } from "../../../../packages/alive/src/offlineSources.ts";
 import {
   citedSourceEntries,
   shouldWebSearch,
@@ -332,6 +334,8 @@ export function ChatScreen({
   const [notesQuery, setNotesQuery] = useState("");
   const [editing, setEditing] = useState<{ id: string; text: string; kind: NoteKind } | null>(null);
   const [chip, setChip] = useState("");
+  /** Enlarged offline picture, or null when nothing is zoomed. */
+  const [zoomImage, setZoomImage] = useState("");
   const notesStamp = useRef(0);
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [searching, setSearching] = useState(false);
@@ -3070,42 +3074,38 @@ export function ChatScreen({
                       {message.sources?.length ? (
                         <View style={styles.sources}>
                           {citedSourceEntries(message.content, message.sources).map(({ n, source }) => {
-                            const offlineImageUrl = source.imageUrl;
+                            const view = offlineSourceView(source, bag.brainUrl, readToken());
                             return (
-                            <View key={`${source.url}-${n}`}>
-                              {source.offline && offlineImageUrl ? (
+                              <View key={`${source.url}-${n}`}>
+                                {view.imageUrl ? (
+                                  <Pressable
+                                    accessibilityRole="imagebutton"
+                                    accessibilityLabel={`Enlarge picture for ${view.title}`}
+                                    onPress={() => setZoomImage(view.imageUrl)}
+                                  >
+                                    <Image
+                                      source={{ uri: view.imageUrl }}
+                                      style={styles.offlineSourceImage}
+                                      resizeMode="cover"
+                                    />
+                                  </Pressable>
+                                ) : null}
                                 <Pressable
                                   onPress={() => {
                                     if (typeof window !== "undefined" && window.open) {
-                                      window.open(`${bag.brainUrl}${offlineImageUrl}${offlineImageUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(readToken())}`, "_blank", "noopener");
+                                      window.open(view.articleUrl || source.url, "_blank", "noopener");
                                     }
                                   }}
                                 >
-                                  <Image
-                                    source={{
-                                      uri: `${bag.brainUrl}${offlineImageUrl}${offlineImageUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(readToken())}`,
-                                      headers: readToken() ? { "X-Preyas-Token": readToken() } : undefined,
-                                    }}
-                                    style={styles.offlineSourceImage}
-                                    resizeMode="cover"
-                                  />
+                                  <Text style={styles.sourceLink} numberOfLines={2}>
+                                    [{n}] {view.tag ? (
+                                      <Text style={styles.offlineSourceTag}>{view.tag}</Text>
+                                    ) : null}
+                                    {view.tag ? " " : ""}
+                                    {view.title}
+                                  </Text>
                                 </Pressable>
-                              ) : null}
-                              <Pressable
-                                onPress={() => {
-                                  if (typeof window !== "undefined" && window.open) {
-                                    const target = source.offline
-                                      ? `${bag.brainUrl}${source.url.replace("/offline/article", "/v1/offline/article")}&token=${encodeURIComponent(readToken())}`
-                                      : source.url;
-                                    window.open(target, "_blank", "noopener");
-                                  }
-                                }}
-                              >
-                                <Text style={styles.sourceLink} numberOfLines={2}>
-                                  [{n}] {source.sourceLabel ? `${source.sourceLabel} · ` : ""}{source.title}
-                                </Text>
-                              </Pressable>
-                            </View>
+                              </View>
                             );
                           })}
                         </View>
@@ -3181,6 +3181,21 @@ export function ChatScreen({
                   <Text style={styles.jumpText}>Jump to latest ↓</Text>
                 </Pressable>
               </View>
+            ) : null}
+            {zoomImage ? (
+              <Modal visible transparent animationType="fade" onRequestClose={() => setZoomImage("")}>
+                <Pressable
+                  style={styles.zoomBackdrop}
+                  onPress={() => setZoomImage("")}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close picture"
+                >
+                  <Image source={{ uri: zoomImage }} style={styles.zoomImage} resizeMode="contain" />
+                  <Pressable style={styles.zoomClose} onPress={() => setZoomImage("")}>
+                    <Text style={styles.zoomCloseText}>Close</Text>
+                  </Pressable>
+                </Pressable>
+              </Modal>
             ) : null}
             {/* In normal flow right above the composer, so it can never cover it. */}
             <View style={styles.previewRow} pointerEvents="box-none">
@@ -3769,7 +3784,25 @@ const styles = StyleSheet.create({
   savePoints: { marginTop: 8, alignSelf: "flex-start", ...ghost, borderRadius: 12, paddingHorizontal: 10 },
   savePointsText: { color: theme.text, fontSize: 12, fontWeight: "600", paddingVertical: theme.space.xs },
   sourceLink: { color: theme.accentText, fontSize: 12, textDecorationLine: "underline" },
+  offlineSourceTag: { color: theme.faint, fontSize: 11 },
   offlineSourceImage: { width: "100%", height: 180, borderRadius: 12, marginBottom: 6, backgroundColor: theme.off },
+  zoomBackdrop: {
+    flex: 1,
+    backgroundColor: theme.scrim,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: theme.space.md,
+  },
+  zoomImage: { width: "100%", height: "82%" },
+  zoomClose: {
+    ...ghost,
+    marginTop: theme.space.md,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    minHeight: 44,
+    justifyContent: "center",
+  },
+  zoomCloseText: { color: theme.onAccent, fontSize: 13, fontWeight: "600" },
   thinkToggle: { color: theme.faint, fontSize: 11, marginTop: 6, minHeight: 36, textAlignVertical: "center" },
   thinkBody: { color: theme.dim, fontSize: 12, marginTop: 4 },
   note: { color: theme.note, fontSize: 13 },
