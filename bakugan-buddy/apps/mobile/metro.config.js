@@ -9,6 +9,9 @@ config.watchFolders = [packageRoot];
 if (!config.resolver.assetExts.includes("glb")) {
   config.resolver.assetExts.push("glb");
 }
+if (!config.resolver.assetExts.includes("wasm")) {
+  config.resolver.assetExts.push("wasm");
+}
 
 const previousResolve = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
