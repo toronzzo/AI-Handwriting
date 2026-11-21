@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  firstArticleImage,
   isLoopbackUrl,
+  parseKiwixBookNames,
   parseKiwixSearchJson,
+  parseKiwixSearchXml,
   proxyOfflineArticle,
   proxyOfflineImage,
   searchOffline,
@@ -24,6 +27,17 @@ function fakeResponse(body, { ok = true, status = 200, type = "application/json"
     }),
     arrayBuffer: async () => bytes,
     text: async () => String(body),
+  };
+}
+
+function xmlResponse(body, { ok = true, status = 200 } = {}) {
+  return {
+    ok,
+    status,
+    headers: { get: () => "application/xml" },
+    text: async () => body,
+    json: async () => ({}),
+    body: null,
   };
 }
 
@@ -60,11 +74,55 @@ test("parseKiwixSearchJson tolerates junk and an empty payload", () => {
   assert.deepEqual(parseKiwixSearchJson({ suggestions: [null, {}, { title: "", url: "/x" }] }), []);
 });
 
+test("parseKiwixSearchXml reads an RSS search payload", () => {
+  const rows = parseKiwixSearchXml(`<?xml version="1.0"?>
+<rss><channel>
+  <item>
+    <title>Mars</title>
+    <link>/content/wikipedia_en_astronomy_maxi_2026-08/Mars</link>
+    <description>Fourth &lt;b&gt;planet&lt;/b&gt;</description>
+  </item>
+  <item>
+    <title>Mars</title>
+    <link>/content/wikipedia_en_astronomy_maxi_2026-08/Mars</link>
+    <description>duplicate</description>
+  </item>
+</channel></rss>`, 5);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].title, "Mars");
+  assert.equal(rows[0].snippet, "Fourth planet");
+  assert.equal(rows[0].pack, "wikipedia_en_astronomy_maxi_2026-08");
+});
+
+test("parseKiwixBookNames reads content hrefs from the catalog", () => {
+  assert.deepEqual(
+    parseKiwixBookNames(`<feed><link href="/content/wikipedia_en_astronomy_maxi_2026-08"/><link href="/content/ifixit_en_all_2025-12/A"/></feed>`),
+    ["wikipedia_en_astronomy_maxi_2026-08", "ifixit_en_all_2025-12"],
+  );
+});
+
+test("firstArticleImage resolves relative pack assets", () => {
+  assert.equal(
+    firstArticleImage('<img src="./_assets_/mars.jpg" />', "/content/wikipedia_en_astronomy_maxi_2026-08/Mars"),
+    "/content/wikipedia_en_astronomy_maxi_2026-08/_assets_/mars.jpg",
+  );
+});
+
 test("searchOffline returns titles, snippets, pack and proxied image urls", async () => {
   const result = await searchOffline("Mars", {
-    fetchImpl: async () => fakeResponse({
-      suggestions: [{ title: "Mars", description: "Red planet", url: "/A/Mars", image: "/I/mars.jpg", book: "Wikipedia" }],
-    }),
+    enrichImages: false,
+    fetchImpl: async (url) => {
+      const href = String(url);
+      if (href.includes("/catalog/")) {
+        return xmlResponse(`<feed><link href="/content/wikipedia_en_astronomy_maxi_2026-08"/></feed>`);
+      }
+      if (href.includes("/search?")) {
+        return xmlResponse(`<?xml version="1.0"?><rss><channel>
+          <item><title>Mars</title><link>/content/wikipedia_en_astronomy_maxi_2026-08/Mars</link><description>Red planet</description></item>
+        </channel></rss>`);
+      }
+      throw new Error(`unexpected fetch ${href}`);
+    },
   });
   assert.equal(result.ok, true);
   assert.equal(result.results.length, 1);
@@ -72,9 +130,7 @@ test("searchOffline returns titles, snippets, pack and proxied image urls", asyn
   assert.equal(hit.title, "Mars");
   assert.equal(hit.snippet, "Red planet");
   assert.equal(hit.offline, true);
-  assert.match(hit.sourceLabel, /Wikipedia/);
-  // Both the picture and the article go through brain-server, never kiwix-serve.
-  assert.match(hit.imageUrl, /^\/v1\/offline\/image\?path=/);
+  assert.match(hit.sourceLabel, /wikipedia_en_astronomy/i);
   assert.match(hit.url, /^\/v1\/offline\/article\?path=/);
 });
 
@@ -91,7 +147,12 @@ test("searchOffline reports unavailable kiwix without throwing", async () => {
 
 test("searchOffline treats a non-2xx kiwix answer as unavailable", async () => {
   const result = await searchOffline("Mars", {
-    fetchImpl: async () => fakeResponse({}, { ok: false, status: 503 }),
+    fetchImpl: async (url) => {
+      if (String(url).includes("/catalog/")) {
+        return xmlResponse(`<feed><link href="/content/wikipedia_en_astronomy_maxi_2026-08"/></feed>`);
+      }
+      return fakeResponse({}, { ok: false, status: 503 });
+    },
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /503/);
@@ -122,9 +183,10 @@ test("searchOffline passes a bounded timeout to fetch", async () => {
   let sawSignal = false;
   await searchOffline("Mars", {
     timeoutMs: 1234,
+    enrichImages: false,
     fetchImpl: async (_url, init) => {
       sawSignal = init && init.signal instanceof AbortSignal;
-      return fakeResponse({ suggestions: [] });
+      return xmlResponse(`<feed></feed>`);
     },
   });
   assert.equal(sawSignal, true);

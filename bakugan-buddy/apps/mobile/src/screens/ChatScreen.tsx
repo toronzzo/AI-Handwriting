@@ -2101,6 +2101,32 @@ export function ChatScreen({
           allowPaidOnFailure: escalate,
         });
         if (route.route === "local") {
+          // Offline pack hits still belong on screen when the local model fails —
+          // otherwise encyclopedic questions show "didn't answer" with no pictures.
+          if (sources.length) {
+            const reply: Shown = {
+              t: Date.now(),
+              role: "assistant",
+              content:
+                cleaned.text?.trim() ||
+                "I couldn't finish a spoken answer, but here is what the offline library has:",
+              who: "preyas",
+              model: "preyas",
+              runId,
+              sources,
+            };
+            void remember(reply, chatId);
+            if (isCurrent()) {
+              messagesRef.current = [...messagesRef.current, reply];
+              setMessages(messagesRef.current);
+              setNote(
+                local.error === SWITCHING_CHAT_MESSAGE
+                  ? SWITCHING_CHAT_MESSAGE
+                  : "Preyas didn't finish answering, but offline sources are above.",
+              );
+            }
+            return;
+          }
           setNote(
             local.error === SWITCHING_CHAT_MESSAGE
               ? SWITCHING_CHAT_MESSAGE
@@ -3073,7 +3099,16 @@ export function ChatScreen({
                       ) : null}
                       {message.sources?.length ? (
                         <View style={styles.sources}>
-                          {citedSourceEntries(message.content, message.sources).map(({ n, source }) => {
+                          {(() => {
+                            const cited = citedSourceEntries(message.content, message.sources);
+                            // Offline pack hits still show when the model never cited [n]
+                            // (or failed before writing citations).
+                            return cited.length
+                              ? cited
+                              : message.sources
+                                  .map((source, index) => ({ n: index + 1, source }))
+                                  .filter(({ source }) => source.offline);
+                          })().map(({ n, source }) => {
                             const view = offlineSourceView(source, bag.brainUrl, readToken());
                             return (
                               <View key={`${source.url}-${n}`}>
