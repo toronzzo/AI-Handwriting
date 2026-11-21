@@ -171,6 +171,32 @@ export function createChat(root, title = NEW_CHAT_TITLE) {
   return chat;
 }
 
+/** True when a row is a day briefing rather than an ordinary message. */
+export function isBriefingRow(row) {
+  if (!row) return false;
+  if (row.briefingDay) return true;
+  return Boolean(dayFromContent(row.content));
+}
+
+/**
+ * Keep at most one briefing per day, the newest, and every ordinary message.
+ *
+ * Old files can hold several briefings for the same day (a re-run, a restart
+ * during delivery). They should never be shown twice, and a device must not
+ * have to care: filter here, on the way out, so it holds for saved data too.
+ */
+export function oneBriefingPerDay(rows) {
+  const newest = new Map();
+  rows.forEach((row, index) => {
+    const day = row && (row.briefingDay || dayFromContent(row.content));
+    if (!day) return;
+    const previous = newest.get(day);
+    if (!previous || Number(row.t || 0) >= Number(previous.t || 0)) newest.set(day, { index, t: row.t });
+  });
+  const keep = new Set([...newest.values()].map((entry) => entry.index));
+  return rows.filter((row, index) => !isBriefingRow(row) || keep.has(index));
+}
+
 /** Read one chat's newest turns, plus the shared summary and bond. */
 export function readChat(root, id, limit = 40) {
   const chat = findChat(root, id);
@@ -191,14 +217,22 @@ export function readChat(root, id, limit = 40) {
       /* skip a torn line */
     }
   }
-  const start = parsed.length > limit ? parsed.length - limit : 0;
-  return { chat, summary, messages: parsed.slice(start), partner: partnerFromTurns(userTurns) };
+  const shown = oneBriefingPerDay(parsed);
+  const start = shown.length > limit ? shown.length - limit : 0;
+  return { chat, summary, messages: shown.slice(start), partner: partnerFromTurns(userTurns) };
 }
 
 /** Append one turn, retitle a fresh chat from the first user line, touch `updated`. */
 export function appendMessage(root, id, entry) {
   const chat = findChat(root, id);
   if (!chat) return null;
+  // A briefing is one message per day: writing another replaces that day's.
+  // The day comes from the raw entry, because normalizeEntry drops the tag.
+  const day = String(entry?.briefingDay || "").trim() || dayFromContent(entry?.content);
+  if (day) {
+    const saved = upsertDayMessage(root, id, day, entry);
+    return saved ? { chat: saved.chat, summary: "" } : null;
+  }
   const line = normalizeEntry(entry);
   const index = readIndex(root);
   const stamp = nextStamp(index.chats, line.t);
@@ -292,6 +326,37 @@ export function collapseBriefingChat(root, id, now = Date.now()) {
   const kept = rows.filter((_, index) => keptIndexes.has(index));
   writeTextAtomic(file, kept.map((row) => `${JSON.stringify(row)}\n`).join(""));
   return { removed, backup };
+}
+
+/**
+ * One-time tidy for saved data: drop older copies of the same day's briefing in
+ * EVERY chat, keeping the newest. Ordinary messages are never touched, and each
+ * file is copied to <name>.bak-<timestamp> before it is rewritten. A file with
+ * nothing to drop is not copied and not written.
+ */
+export function collapseBriefingsEverywhere(root, now = Date.now()) {
+  const dir = chatsDir(root);
+  if (!fs.existsSync(dir)) return { removed: 0, backups: [] };
+  let removed = 0;
+  const backups = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith(".jsonl")) continue;
+    const file = path.join(dir, name);
+    let rows;
+    try {
+      rows = readRows(file);
+    } catch {
+      continue;
+    }
+    const kept = oneBriefingPerDay(rows);
+    if (kept.length === rows.length) continue;
+    const backup = `${file}.bak-${now}`;
+    fs.copyFileSync(file, backup);
+    writeTextAtomic(file, kept.map((row) => `${JSON.stringify(row)}\n`).join(""));
+    removed += rows.length - kept.length;
+    backups.push(backup);
+  }
+  return { removed, backups };
 }
 
 export function renameChat(root, id, title) {

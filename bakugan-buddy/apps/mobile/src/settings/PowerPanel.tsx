@@ -9,6 +9,8 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { theme } from "../theme";
 import { brainFetch, isUnauthorized } from "../room/brain/token";
+import { readProbe } from "../room/brain/probeJson";
+import { PAIR_HINT, probeThrownError } from "./probe";
 import {
   AUTOSTART_NOTE,
   CANNOT_TURN_ON_NOTE,
@@ -17,7 +19,6 @@ import {
   canTurnOff,
   normalizePowerStatus,
   powerDot,
-  powerErrorMessage,
   powerSummary,
   runningCount,
   serviceLine,
@@ -56,19 +57,16 @@ export function PowerPanel({ brainUrl, onTurnOff, refreshSignal = 0 }: Props) {
     const timer = timeoutSignal(REQUEST_TIMEOUT_MS);
     try {
       const res = await brainFetch(brainUrl.replace(/\/$/, "") + "/v1/power/status", { signal: timer.signal });
-      if (isUnauthorized(res.status)) {
-        setError("Pair this device with the code shown on the Mac.");
+      const read = await readProbe<unknown>("Power", res);
+      if (!read.ok) {
+        setError(read.error);
         return;
       }
-      if (!res.ok) {
-        setError("The Mac could not read the power state.");
-        return;
-      }
-      const next = normalizePowerStatus(await res.json());
+      const next = normalizePowerStatus(read.body);
       setStatus(next);
       setError(next.error || "");
     } catch (caught) {
-      setError(powerErrorMessage(caught));
+      setError(probeThrownError("Power", caught));
     } finally {
       timer.done();
       setLoading(false);
@@ -102,7 +100,7 @@ export function PowerPanel({ brainUrl, onTurnOff, refreshSignal = 0 }: Props) {
         signal: timer.signal,
       });
       if (isUnauthorized(res.status)) {
-        setNote("Pair this device with the code shown on the Mac.");
+        setNote(PAIR_HINT);
         return;
       }
       if (!res.ok) {
@@ -112,7 +110,7 @@ export function PowerPanel({ brainUrl, onTurnOff, refreshSignal = 0 }: Props) {
       setNote(service === "brain" ? "Brain restarting. This can take a minute." : "Model restarting. This can take a minute.");
       setTimeout(() => void load(), service === "brain" ? 5000 : 4000);
     } catch (caught) {
-      setNote(powerErrorMessage(caught));
+      setNote(probeThrownError("Power", caught));
     } finally {
       timer.done();
       setBusy("");
@@ -130,11 +128,12 @@ export function PowerPanel({ brainUrl, onTurnOff, refreshSignal = 0 }: Props) {
         body: JSON.stringify({ on }),
         signal: timer.signal,
       });
-      if (!res.ok) {
-        setNote("Could not change the login setting.");
+      const read = await readProbe<{ installed?: boolean; supported?: boolean; path?: string }>("Login setting", res);
+      if (!read.ok) {
+        setNote(read.error);
         return;
       }
-      const body = await res.json();
+      const body = read.body;
       setStatus((current) =>
         current
           ? { ...current, autostart: { installed: body.installed === true, supported: body.supported === true, path: body.path } }
@@ -142,7 +141,7 @@ export function PowerPanel({ brainUrl, onTurnOff, refreshSignal = 0 }: Props) {
       );
       setNote(body.installed ? "I will start when you log in." : "I will not start on login.");
     } catch (caught) {
-      setNote(powerErrorMessage(caught));
+      setNote(probeThrownError("Power", caught));
     } finally {
       timer.done();
       setBusy("");

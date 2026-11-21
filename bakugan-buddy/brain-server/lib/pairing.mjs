@@ -17,6 +17,31 @@ export function devicesPath(root) {
   return path.join(root, "memory", "devices.json");
 }
 
+/** True when the caller is this machine. */
+export function isLocalAddress(remoteAddress) {
+  const raw = String(remoteAddress || "").trim();
+  if (!raw) return false;
+  const address = raw.replace(/^::ffff:/, "");
+  return address === "::1" || address === "127.0.0.1" || address.startsWith("127.");
+}
+
+/**
+ * The web app's own origins. Since every /v1 route needs a token, the Mac's
+ * page would otherwise have to type a pairing code for the brain beside it.
+ */
+export function defaultWebOrigins(port = "8081") {
+  return [`http://127.0.0.1:${port}`, `http://localhost:${port}`];
+}
+
+/** PREYAS_WEB_ORIGINS (comma separated) wins; otherwise the default port. */
+export function parseWebOrigins(raw, port = "8081") {
+  const listed = String(raw || "")
+    .split(",")
+    .map((entry) => entry.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+  return listed.length > 0 ? listed : defaultWebOrigins(port);
+}
+
 export function localTokenPath(root) {
   return path.join(root, "memory", "local-token");
 }
@@ -130,6 +155,9 @@ export function authorizeRequest(input) {
     token = "",
     book = { devices: [] },
     pairing = null,
+    remoteAddress = "",
+    origin = "",
+    webOrigins = [],
     now = Date.now(),
   } = input;
 
@@ -141,6 +169,15 @@ export function authorizeRequest(input) {
   if (token && TOKEN_RE.test(token)) {
     const known = book.devices.find((device) => device.token === token);
     if (known) return { allow: true, device: known };
+  }
+
+  // The Mac's own page is the same person at the same keyboard. A browser sends
+  // its Origin and a website cannot forge it, so a loopback request from the
+  // app itself needs no code, while a website in that same browser is refused.
+  // Tools and scripts send no Origin and still have to pair.
+  const claimedOrigin = String(origin || "").replace(/\/$/, "");
+  if (claimedOrigin && isLocalAddress(remoteAddress) && webOrigins.includes(claimedOrigin)) {
+    return { allow: true, local: true };
   }
 
   if (pairing && pairing.attempts >= MAX_ATTEMPTS) {

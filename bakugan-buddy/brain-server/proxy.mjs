@@ -13,7 +13,7 @@ import { withSampling } from "./lib/sampling.mjs";
 import { mergeHistoryFiles, paidAvailability } from "./lib/history.mjs";
 import {
   appendMessage,
-  collapseBriefingChat,
+  collapseBriefingsEverywhere,
   createChat,
   deleteChat,
   listChats,
@@ -60,6 +60,7 @@ import {
   currentCode,
   localTokenPath,
   pairingCodePath,
+  parseWebOrigins,
   readDevices,
   removeDevice,
   requestToken as requestTokenFor,
@@ -128,6 +129,8 @@ const llamaUrl = (process.env.LLAMA_URL || `http://127.0.0.1:${LLAMA_PORT}`).rep
 const port = Number(process.env.BRAIN_PORT || 8788);
 const host = process.env.BRAIN_HOST || "0.0.0.0";
 const dataDir = process.env.BAKUGAN_DATA_DIR || "";
+/** Origins the Mac's own browser page uses (see pairing.mjs). */
+const webOrigins = parseWebOrigins(process.env.PREYAS_WEB_ORIGINS, process.env.PREYAS_WEB_PORT || "8081");
 const gatewayRoot = process.env.AGENT_DRIVE_ROOT || "/Volumes/Agent/agent";
 const buddyRoot = "/Volumes/Agent/BakuganBuddy";
 /** The repo folder (AI-Handwriting), the second safe root for MCP file tools. */
@@ -787,13 +790,23 @@ async function runBriefing(options = {}) {
   return { ...briefingPayload(briefing), model: written.model };
 }
 
-/** Once per start: keep only the newest "Briefing <day>" message per day. */
+/**
+ * One time only: keep the newest briefing per day in every saved chat, with a
+ * backup of each file it rewrites. Safe to leave behind a marker: once the
+ * sweep has run, later starts do nothing at all.
+ */
 function tidyBriefingChat() {
   if (!dataDir) return;
+  const marker = path.join(dataDir, "memory", "briefing-cleanup.json");
   try {
-    const chat = listChats(dataDir).find((row) => row.title === BRIEFING_CHAT_TITLE);
-    if (!chat) return;
-    collapseBriefingChat(dataDir, chat.id);
+    if (fs.existsSync(marker)) return;
+    const result = collapseBriefingsEverywhere(dataDir);
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(
+      marker,
+      `${JSON.stringify({ at: Date.now(), removed: result.removed, backups: result.backups.length })}\n`,
+    );
+    if (result.removed > 0) process.stdout.write(`briefing tidy: removed ${result.removed} repeat(s), ${result.backups.length} backup(s)\n`);
   } catch {
     /* tidying is a convenience */
   }
@@ -833,6 +846,8 @@ const server = http.createServer(async (req, res) => {
     path: url.pathname,
     method: req.method,
     remoteAddress: req.socket?.remoteAddress || "",
+    origin: req.headers.origin || "",
+    webOrigins,
     token: requestToken,
     book: dataDir ? readDevices(dataDir) : { devices: [] },
     pairing,
@@ -2200,6 +2215,7 @@ server.listen(port, host, () => {
     writePairingCode(dataDir, currentCode(pairing));
     process.stdout.write(`local pairing code: ${pairingCodePath(dataDir)}\n`);
     process.stdout.write(`local pairing token: ${localTokenPath(dataDir)} (created after pairing)\n`);
+    process.stdout.write(`local web origins: ${webOrigins.join(", ")}\n`);
   } else {
     process.stdout.write(`pairing code (local setup): ${currentCode(pairing)}\n`);
   }

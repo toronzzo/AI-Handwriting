@@ -32,6 +32,8 @@ import {
 import type { MicPhase } from "../../../../packages/alive/src/speech.ts";
 import { currentBrainUrl, readBrainHost } from "../room/brain/brainLink";
 import { brainFetch, isUnauthorized, pairWithCode, readToken } from "../room/brain/token";
+import { readProbe } from "../room/brain/probeJson";
+import { probeThrownError } from "../settings/probe";
 import { isValidPairingCode, microphoneAvailable, normalizePairingCode } from "../../../../packages/alive/src/phone.ts";
 import { isWhisperHallucination, resetSpeech, transcribeClip } from "../../../../packages/alive/src/speech.ts";
 import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../../../packages/alive/src/notes.ts";
@@ -353,6 +355,9 @@ export function ChatScreen({
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [modelError, setModelError] = useState("");
   const [vaultError, setVaultError] = useState("");
+  // Until the mount effect has worked out where the brain is, a probe would
+  // ask `/v1/status` relative to the web page and get HTML back.
+  const [brainReady, setBrainReady] = useState(false);
   /** The `at` of the last rollback note already shown, so it appears once. */
   const rollbackSeenRef = useRef(0);
   const [briefing, setBriefing] = useState<Briefing | null>(null);
@@ -965,20 +970,21 @@ export function ChatScreen({
   }
 
   async function refreshVault() {
+    if (!bag.brainUrl) return null;
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/vault/status`, {
         signal: AbortSignal.timeout(SETTINGS_PROBE_MS),
       });
-      if (!res.ok) {
-        setVaultError("Vault did not answer.");
+      const read = await readProbe<{ path: string; obsidianUrl: string; notes: number; lastSync: number }>("Vault", res);
+      if (!read.ok) {
+        setVaultError(read.error);
         return null;
       }
-      const body = (await res.json()) as { path: string; obsidianUrl: string; notes: number; lastSync: number };
-      setVault(body);
+      setVault(read.body);
       setVaultError("");
-      return body;
-    } catch {
-      setVaultError("Vault timed out. Is Preyas running?");
+      return read.body;
+    } catch (error) {
+      setVaultError(probeThrownError("Vault", error));
       return null;
     }
   }
@@ -997,34 +1003,37 @@ export function ChatScreen({
   }
 
   async function refreshHealth() {
+    if (!bag.brainUrl) return null;
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/status`, {
         signal: AbortSignal.timeout(SETTINGS_PROBE_MS),
       });
-      if (!res.ok) {
-        setHealthError("Status did not answer.");
+      const read = await readProbe<Health>("Status", res);
+      if (!read.ok) {
+        setHealthError(read.error);
         return null;
       }
-      const body = (await res.json()) as Health;
-      setHealth(body);
+      setHealth(read.body);
       setHealthError("");
-      return body;
-    } catch {
-      setHealthError("Status timed out. Is Preyas running?");
+      return read.body;
+    } catch (error) {
+      setHealthError(probeThrownError("Status", error));
       return null;
     }
   }
 
   async function refreshModel() {
+    if (!bag.brainUrl) return null;
     try {
       const res = await brainFetch(`${bag.brainUrl}/v1/model`, {
         signal: AbortSignal.timeout(SETTINGS_PROBE_MS),
       });
-      if (!res.ok) {
-        setModelError("Model status did not answer.");
+      const read = await readProbe<ModelStatus>("Model status", res);
+      if (!read.ok) {
+        setModelError(read.error);
         return null;
       }
-      const body = (await res.json()) as ModelStatus;
+      const body = read.body;
       setModelStatus(body);
       setModelError("");
       // A failed big/huge switch rolls back to the 8B on the server, which
@@ -1038,8 +1047,8 @@ export function ChatScreen({
         }
       }
       return body;
-    } catch {
-      setModelError("Model status timed out. Is Preyas running?");
+    } catch (error) {
+      setModelError(probeThrownError("Model status", error));
       return null;
     }
   }
@@ -1707,6 +1716,7 @@ export function ChatScreen({
       const saved = await readBrainHost();
       const brain = saved || currentBrainUrl();
       bag.brainUrl = brain.replace(/\/$/, "");
+      setBrainReady(Boolean(bag.brainUrl));
       const endpoint = await resolveChatBase(bag.brainUrl);
       if (cancel) return;
       setVia(endpoint.via);
@@ -1833,6 +1843,7 @@ export function ChatScreen({
       setHealthError("");
       setModelError("");
       setVaultError("");
+      if (!brainReady) return;
       void refreshHealth();
       void refreshPhone();
       void refreshBriefing();
@@ -1841,7 +1852,7 @@ export function ChatScreen({
       void refreshModel();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section]);
+  }, [section, brainReady]);
   // While a model is loading, keep asking the brain until it is ready or failed.
   useEffect(() => {
     if (!modelStatus || modelStatus.status !== "loading") return;
