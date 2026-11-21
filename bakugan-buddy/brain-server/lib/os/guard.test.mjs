@@ -44,6 +44,38 @@ test("tie-breaker: yes allows a write, anything else asks", async () => {
   assert.match(missing.why, /no model is available/);
 });
 
+test("reviewAction resolves the navigation hostname before the rules", async () => {
+  const navAction = {
+    kind: "browser_navigate",
+    args: { url: "https://innocent.example.com/" },
+    userRequest: "open the page",
+    origin: "user",
+    source: "task",
+  };
+  const privateResolved = await reviewAction(navAction, {
+    resolveNav: async () => ({ private: true, host: "innocent.example.com", address: "10.0.0.5" }),
+  });
+  assert.equal(privateResolved.verdict, "ask");
+  assert.equal(privateResolved.rule, "R11");
+  const publicResolved = await reviewAction(navAction, {
+    resolveNav: async () => ({ private: false, host: "innocent.example.com" }),
+  });
+  assert.equal(publicResolved.verdict, "allow");
+  // A broken resolver fails open: the navigation itself will fail at the browser.
+  const broken = await reviewAction(navAction, {
+    resolveNav: async () => {
+      throw new Error("dns down");
+    },
+  });
+  assert.equal(broken.verdict, "allow");
+  // Other kinds never resolve a hostname.
+  const snapshot = await reviewAction(
+    { kind: "browser_snapshot", args: {}, userRequest: "read it", origin: "user", source: "task" },
+    { resolveNav: async () => ({ private: true, host: "x" }) },
+  );
+  assert.equal(snapshot.verdict, "allow");
+});
+
 test("a destructive action never reaches the model, even for a yes", async () => {
   let called = 0;
   const judge = async () => {

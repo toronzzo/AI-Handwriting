@@ -8,6 +8,7 @@
 import crypto from "node:crypto";
 import { decide, kindClass, reviewRules } from "./guardRules.mjs";
 import { appendGuardLog } from "./guardLog.mjs";
+import { resolveNavPrivacy } from "./privateHost.mjs";
 
 export const APPROVAL_TTL_MS = 60_000;
 
@@ -96,7 +97,21 @@ export function llamaJudge({ llamaUrl, fetchImpl = fetch } = {}) {
  * ask. Destructive, paid and control actions never reach the model.
  */
 export async function reviewAction(action, deps = {}) {
-  const findings = reviewRules(action, deps);
+  // A browser navigation resolves its hostname first (DNS included) so the
+  // rules can ask before a private address opens; everything else skips it.
+  let nav = null;
+  if (String(action?.kind || "") === "browser_navigate") {
+    const url = action?.args?.url;
+    if (typeof url === "string" && url.trim()) {
+      const resolver = typeof deps.resolveNav === "function" ? deps.resolveNav : resolveNavPrivacy;
+      try {
+        nav = await resolver(url);
+      } catch {
+        nav = null; // a failed lookup fails open; the navigation will fail too
+      }
+    }
+  }
+  const findings = reviewRules(action, { ...deps, nav });
   let verdict = decide(findings);
   let rule = verdict.id;
   let why = verdict.why;

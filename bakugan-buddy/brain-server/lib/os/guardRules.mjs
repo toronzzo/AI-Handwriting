@@ -215,6 +215,13 @@ export function reviewRules(action, deps = {}) {
     findings.push({ id: "R10", verdict: "ask", why: "running a shell command needs your confirmation" });
   }
 
+  // R11: navigating to a local or private address always asks first. The
+  // verdict arrives through deps.nav, which the guard fills by resolving the
+  // URL's hostname (so a public name pointing at a private IP asks too).
+  if (kind === "browser_navigate" && deps.nav && deps.nav.private) {
+    findings.push({ id: "R11", verdict: "ask", why: `opening ${deps.nav.host || "a local or private address"} needs your confirmation` });
+  }
+
   // R8: control kinds are always ask (a later slice's deny list may block first).
   if (cls === "control") {
     findings.push({ id: "R8", verdict: "ask", why: "controlling your computer always needs your OK" });

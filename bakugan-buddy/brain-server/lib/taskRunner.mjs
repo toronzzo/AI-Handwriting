@@ -17,7 +17,8 @@ import {
   trimLocalLog,
 } from "./os/toolLoop.mjs";
 import { toOpenAiTools } from "./os/mcp.mjs";
-import { appendTaskSpend, capUsd, spentTodayUsd } from "./coach/spendGate.mjs";
+import { uploadCardDetail } from "./os/uploadCard.mjs";
+import { appendTaskSpend, capUsd, inFlightCostUsd, setInFlightCost, spentTodayUsd } from "./coach/spendGate.mjs";
 import { sharedBrain } from "./os/neurons.mjs";
 
 const PLAN_SYSTEM = [
@@ -253,7 +254,11 @@ export async function runToolTask(root, task, options = {}) {
   const overCap = () => {
     try {
       const at = new Date(typeof now === "function" ? now() : Date.now());
-      return spentTodayUsd(root, at) >= capUsd(root);
+      // Finished spend plus everything still running (this task's accrued
+      // gateway cost and any parallel run's) counts against the one cap, so
+      // a long or parallel task falls back to the local model instead of
+      // overshooting.
+      return spentTodayUsd(root, at) + inFlightCostUsd() >= capUsd(root);
     } catch {
       return false;
     }
@@ -272,6 +277,7 @@ export async function runToolTask(root, task, options = {}) {
         const promptTokens = Number(result.usage?.prompt_tokens) || 0;
         const completionTokens = Number(result.usage?.completion_tokens) || 0;
         totalUsd += (promptTokens * 0.15 + completionTokens * 0.6) / 1_000_000;
+        setInFlightCost(`task:${task.id}`, totalUsd);
         return { ...result, model: "deepseek-flash" };
       } catch (error) {
         mode = "local";
@@ -290,6 +296,16 @@ export async function runToolTask(root, task, options = {}) {
       judge: modelJudge,
       now,
     });
+
+  /** Extra text on the Yes/No card: uploads list every file and the site. */
+  const confirmDetail = (name, args, task) => {
+    if (name !== "browser_file_upload") return "";
+    try {
+      return uploadCardDetail(args, { fsRoot, repoRoot, task });
+    } catch {
+      return "";
+    }
+  };
 
   const execute = async (name, args) => {
     if (name === "search_notes") {
@@ -326,6 +342,7 @@ export async function runToolTask(root, task, options = {}) {
       review,
       execute,
       confirm,
+      confirmDetail,
       save: () => saveTask(root, task),
       activity: onActivity,
       maxSteps,
@@ -358,6 +375,8 @@ export async function runToolTask(root, task, options = {}) {
       /* spend logging is best effort */
     }
   }
+  // The finished spend is on disk now; the in-flight entry must not double-count.
+  setInFlightCost(`task:${task.id}`, 0);
   return task;
 }
 

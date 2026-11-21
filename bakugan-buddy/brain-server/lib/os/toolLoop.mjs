@@ -258,6 +258,7 @@ export async function runToolLoop(task, deps) {
     review,
     execute,
     confirm,
+    confirmDetail = null,
     save = () => {},
     maxSteps = TOOL_LOOP_MAX_STEPS,
     activity = null,
@@ -410,9 +411,20 @@ export async function runToolLoop(task, deps) {
 
     let result;
     if (verdict.verdict === "ask") {
+      // The card's extra detail (file list for uploads) is a nicety: a
+      // failing detail builder never blocks the confirmation.
+      let detail = "";
+      if (typeof confirmDetail === "function") {
+        try {
+          detail = String((await confirmDetail(call.name, args, task)) || "");
+        } catch {
+          detail = "";
+        }
+      }
       const pending = {
         token: randomToken(),
         why: String(verdict.why || "this needs your confirmation"),
+        detail,
         action,
         expiresAt: now() + confirmTtlMs,
         answered: null,

@@ -269,6 +269,23 @@ test("browser reads allow, interactive browser tools ask", () => {
   assert.equal(file.id, "R7");
 });
 
+test("R11: navigating to a local or private address asks, public allows", () => {
+  const nav = (url, nav) => decide(reviewRules(action({ kind: "browser_navigate", args: { url } }), { nav }));
+  // The guard resolves the hostname first: these arrive with private: true.
+  const privateIp = nav("http://192.168.31.73:8081/", { private: true, host: "192.168.31.73" });
+  assert.equal(privateIp.verdict, "ask");
+  assert.equal(privateIp.id, "R11");
+  assert.match(privateIp.why, /192\.168\.31\.73/);
+  const rebind = nav("https://innocent.example.com/", { private: true, host: "innocent.example.com", address: "10.0.0.5" });
+  assert.equal(rebind.verdict, "ask");
+  assert.equal(rebind.id, "R11");
+  // A public address (resolved, not private) stays a plain read: allowed.
+  const publicUrl = nav("https://example.com/", { private: false, host: "example.com" });
+  assert.equal(publicUrl.verdict, "allow");
+  const noInfo = nav("https://example.com/");
+  assert.equal(noInfo.verdict, "allow");
+});
+
 test("browser uploads check every path and always need the card", () => {
   const dir = tempDir();
   const repo = tempDir();

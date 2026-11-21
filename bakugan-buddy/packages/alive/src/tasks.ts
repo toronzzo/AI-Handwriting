@@ -19,6 +19,8 @@ export type PendingConfirm = {
   why: string;
   expiresAt: number;
   answered: "yes" | "no" | "expired" | null;
+  /** Extra card text (an upload lists each file and the site). */
+  detail?: string;
 };
 
 export type TaskStep = {
