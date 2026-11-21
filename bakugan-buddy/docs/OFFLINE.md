@@ -13,10 +13,17 @@ Everything lives on the Agent drive:
 
 ## 1. Install Kiwix
 
-The packs are served by `kiwix-serve`, which is a one-line Homebrew install:
+The packs are served by `kiwix-serve`. Homebrew no longer ships a `kiwix-tools`
+formula on this Mac, so install the official macOS binary once onto the Agent
+drive (arm64 example):
 
 ```sh
-brew install kiwix-tools
+mkdir -p /Volumes/Agent/agent/tools/kiwix-tools /Volumes/Agent/agent/bin
+curl -fL https://download.kiwix.org/release/kiwix-tools/kiwix-tools_macos-arm64-3.8.2.tar.gz \
+  | tar -xz -C /Volumes/Agent/agent/tools/kiwix-tools
+ln -sfn /Volumes/Agent/agent/tools/kiwix-tools/kiwix-tools_macos-arm64-3.8.2/kiwix-serve \
+  /Volumes/Agent/agent/bin/kiwix-serve
+export PATH="/Volumes/Agent/agent/bin:$PATH"
 ```
 
 CI does **not** install `kiwix-tools` and never downloads a pack.

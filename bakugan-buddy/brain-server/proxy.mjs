@@ -56,6 +56,7 @@ import {
   pairingCodePath,
   readDevices,
   removeDevice,
+  requestToken as requestTokenFor,
   touchDevice,
   writePairingCode,
   writeLocalToken,
@@ -264,7 +265,7 @@ function spendSettingsBody() {
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Preyas-Token");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Preyas-Token, X-Preyas-Run");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
 }
 
