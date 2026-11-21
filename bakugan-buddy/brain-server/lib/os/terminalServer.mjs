@@ -4,8 +4,11 @@
  * folder may only be one of the allowed roots (by default /Volumes/Agent and
  * the repo folder), and the real path is checked — `..`, symlinks and `~`
  * cannot escape, and secret folders (secrets, .env, keys, tokens, .ssh) are
- * off limits as a starting point. Commands that mention secret paths are
- * refused here AND by the guard (defence in depth).
+ * off limits as a starting point. On macOS the command itself runs inside a
+ * sandbox-exec profile built from the same roots: no reads or writes outside
+ * them, no network, so `cat /etc/hosts` is refused by the OS, not just by the
+ * checks. Commands that mention secret paths are refused here AND by the
+ * guard (defence in depth).
  *
  * Run over stdio: `node terminalServer.mjs --allowed-root <dir> ...`
  * Options: --allowed-root <dir> (repeatable), --timeout-ms <ms> (default 60000),
@@ -19,6 +22,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveSafePath } from "../safeFs.mjs";
+import { confineCommand } from "./sandbox.mjs";
 
 export const DEFAULT_TIMEOUT_MS = 60_000;
 export const DEFAULT_MAX_OUTPUT = 4_000;
@@ -86,18 +90,28 @@ export function cleanEnv(env = process.env) {
 
 /**
  * Run one command: execFile with an argument array and a timeout, never a
- * shell string API. Returns {stdout, stderr, exitCode, timedOut, ms}.
+ * shell string API. On macOS the command runs inside a sandbox-exec profile
+ * built from the allowed roots (no reads or writes outside them, no
+ * network), so a command cannot reach /etc or home even if it tries.
+ * Returns {stdout, stderr, exitCode, timedOut, ms}.
  */
 export function runCommand(command, options = {}) {
-  const { allowedRoots = [], cwd = "", timeoutMs = DEFAULT_TIMEOUT_MS, maxOutput = DEFAULT_MAX_OUTPUT, env = cleanEnv() } = options;
+  const {
+    allowedRoots = [],
+    cwd = "",
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    maxOutput = DEFAULT_MAX_OUTPUT,
+    env = cleanEnv(),
+    extraRead = [],
+  } = options;
   const safeCommand = checkShellCommand(command);
   const safeCwd = checkCwd(cwd, allowedRoots.length ? allowedRoots : [process.cwd()]);
-  const shell = process.platform === "darwin" ? "/bin/zsh" : "/bin/sh";
+  const runner = (options.confine ?? confineCommand)(safeCommand, { roots: allowedRoots, extraRead });
   return new Promise((resolve) => {
     const started = Date.now();
     execFile(
-      shell,
-      ["-c", safeCommand],
+      runner.command,
+      runner.args,
       {
         cwd: safeCwd,
         env,

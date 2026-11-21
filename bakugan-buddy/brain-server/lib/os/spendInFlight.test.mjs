@@ -63,7 +63,22 @@ test("parallel tasks: the second one sees the first one's in-flight cost", () =>
     // $0.60 finished + $0.50 in-flight + $0.02 estimate > $1.00 -> blocked.
     assert.equal(allowPaid(dir, 0.02, now, inFlightCostUsd()).allowed, false);
     // The same check without the ledger would wrongly allow it.
+    assert.equal(allowPaid(dir, 0.02, now).allowed, false, "the ledger total is included by default");
+    setInFlightCost("task:first", 0);
     assert.equal(allowPaid(dir, 0.02, now).allowed, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("every call site counts the ledger: a 3-argument allowPaid call sees in-flight costs", () => {
+  const dir = dataDirWithSpentSpend();
+  try {
+    const now = new Date();
+    setInFlightCost("task:first", 0.45);
+    // Old call sites pass only (dataDir, estimate, now) — they must still
+    // include the running work.
+    assert.equal(allowPaid(dir, 0.0, now).allowed, false);
     setInFlightCost("task:first", 0);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

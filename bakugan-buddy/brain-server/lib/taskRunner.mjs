@@ -18,7 +18,7 @@ import {
 } from "./os/toolLoop.mjs";
 import { toOpenAiTools } from "./os/mcp.mjs";
 import { uploadCardDetail } from "./os/uploadCard.mjs";
-import { appendTaskSpend, capUsd, inFlightCostUsd, setInFlightCost, spentTodayUsd } from "./coach/spendGate.mjs";
+import { allowPaid, appendTaskSpend, setInFlightCost } from "./coach/spendGate.mjs";
 import { sharedBrain } from "./os/neurons.mjs";
 
 const PLAN_SYSTEM = [
@@ -251,14 +251,19 @@ export async function runToolTask(root, task, options = {}) {
   let mode = "gateway";
   let totalUsd = 0;
 
+  // One gateway call costs at most ~1000 completion tokens plus ~3.5K prompt
+  // tokens (the local context cap) — about $0.0011; $0.002 covers it with
+  // margin. It is reserved BEFORE the call so the cap can never be exceeded
+  // by several calls racing in parallel.
+  const GATEWAY_CALL_RESERVE_USD = 0.002;
+
   const overCap = () => {
     try {
       const at = new Date(typeof now === "function" ? now() : Date.now());
-      // Finished spend plus everything still running (this task's accrued
-      // gateway cost and any parallel run's) counts against the one cap, so
-      // a long or parallel task falls back to the local model instead of
-      // overshooting.
-      return spentTodayUsd(root, at) + inFlightCostUsd() >= capUsd(root);
+      // allowPaid sums finished spend plus everything still running (this
+      // task's reserved/accrued gateway cost included), so a long or
+      // parallel task falls back to the local model instead of overshooting.
+      return !allowPaid(root, 0, at).allowed;
     } catch {
       return false;
     }
@@ -268,6 +273,7 @@ export async function runToolTask(root, task, options = {}) {
     if (mode === "gateway") {
       try {
         if (overCap()) throw new Error("daily limit reached; using the local model");
+        setInFlightCost(`task:${task.id}`, totalUsd + GATEWAY_CALL_RESERVE_USD);
         const result = await gatewayChat({
           gatewayUrl,
           fetchImpl,
@@ -280,6 +286,7 @@ export async function runToolTask(root, task, options = {}) {
         setInFlightCost(`task:${task.id}`, totalUsd);
         return { ...result, model: "deepseek-flash" };
       } catch (error) {
+        setInFlightCost(`task:${task.id}`, totalUsd); // the failed call billed nothing
         mode = "local";
         onLog(`mcp: gateway failed (${error instanceof Error ? error.message : String(error)}); using the local model`);
       }

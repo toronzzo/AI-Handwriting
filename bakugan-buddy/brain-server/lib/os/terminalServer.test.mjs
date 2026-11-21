@@ -43,7 +43,9 @@ test("a slow command is killed at the timeout", async () => {
 
 test("output is capped at 4000 characters", async () => {
   const root = tempDir();
-  const result = await run("node -e \"process.stdout.write('x'.repeat(6000))\"", { root });
+  // A shell builtin: the sandbox denies binaries outside the allowed roots,
+  // so this must not depend on node living in the home folder.
+  const result = await run("printf 'x%.0s' {1..6000}", { root });
   assert.ok(result.stdout.length <= 4000 + 40);
   assert.match(result.stdout, /capped at 4000 chars/);
 });

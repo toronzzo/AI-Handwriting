@@ -98,8 +98,11 @@ export function inFlightCostUsd() {
   return total;
 }
 
-/** spent + in-flight + estimate must stay under the cap. Read-only. */
-export function allowPaid(dataDir, estimateUsd, now = new Date(), inFlightUsd = 0) {
+/** spent + in-flight + estimate must stay under the cap. Read-only.
+ * The in-flight ledger total is included by DEFAULT, so every existing call
+ * site counts work that is still running; callers may pass an explicit value
+ * (tests) but cannot accidentally skip it. */
+export function allowPaid(dataDir, estimateUsd, now = new Date(), inFlightUsd = inFlightCostUsd()) {
   const spent = spentTodayUsd(dataDir, now);
   const cap = capUsd(dataDir);
   const estimate = Number(estimateUsd) || 0;
