@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MAIN_TABS, SETTINGS_ENTRY, tabById } from "./nav.ts";
 
-test("the app renders four main tabs plus a settings entry", () => {
-  assert.deepEqual(MAIN_TABS.map((t) => t.id), ["today", "chat", "learn", "memory"]);
+test("the app renders five main tabs plus a settings entry", () => {
+  assert.deepEqual(MAIN_TABS.map((t) => t.id), ["today", "chat", "learn", "memory", "brain"]);
   assert.equal(SETTINGS_ENTRY.id, "settings");
 });
 
@@ -27,4 +27,5 @@ test("tabById finds each tab by its id", () => {
   assert.equal(tabById("chat").id, "chat");
   assert.equal(tabById("learn").icon, "🎓");
   assert.equal(tabById("memory").id, "memory");
+  assert.equal(tabById("brain").label, "Brain");
 });

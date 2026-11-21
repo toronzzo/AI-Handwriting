@@ -16,6 +16,7 @@ import { BenchmarkScreen } from "./src/screens/BenchmarkScreen";
 import { RoomScreen } from "./src/room/RoomScreen";
 import { ChatScreen } from "./src/screens/ChatScreen";
 import { TodayScreen } from "./src/today/TodayScreen";
+import { BrainScreen } from "./src/brain/BrainScreen";
 import { MAIN_TABS, SETTINGS_ENTRY, type Section } from "./src/nav";
 import { theme } from "./src/theme";
 import { isWide, ROOT_ATTR, SHELL_ATTR, STAGE_ATTR, WEB_SHELL_CSS } from "./src/layout";
@@ -193,6 +194,8 @@ export default function App() {
             </AdvancedWrap>
           ) : section === "today" ? (
             <TodayScreen />
+          ) : section === "brain" ? (
+            <BrainScreen />
           ) : (
             <ChatScreen section={section} onSection={setSection} onNavigate={openAdvanced} />
           )}
