@@ -18,7 +18,7 @@ Ports (from bakugan-buddy/launcher/preyas-up.sh):
 
 Logs are in /Volumes/Agent/agent/logs (preyas-up.log, preyas-proxy.log, expo.log, llama.log).
 
-UNVERIFIED: how you normally start Preyas (the Preyas.app / login item from launcher/install.sh, or ./start.sh in a Terminal). This skill uses the launcher scripts. `<repo>` is the folder that contains bakugan-buddy/.
+UNVERIFIED: how you normally start Preyas (the Preyas.app / login item from launcher/install.sh, or ./start.sh in a Terminal). This skill uses the launcher scripts. `<repo>` is the folder that contains bakugan-buddy/. The first pairing code is stored in `/Volumes/Agent/BakuganBuddy/memory/pairing-code`; after pairing, the app shows the code for other devices.
 
 ## Steps
 
@@ -46,6 +46,7 @@ Check: The last lines say "Preyas is at http://localhost:8081".
 Expect: /Preyas is at http:\/\/localhost:8081/
 Bad: /Refusing to kill|did not appear|did not start/i
 Fail-hint: It says port 8788 is held by another app? Do not kill it. Paste the line here. Find out who holds it with: lsof -nP -iTCP:8788 -sTCP:LISTEN
+First pairing: Read the code from `/Volumes/Agent/BakuganBuddy/memory/pairing-code` on the Mac.
 
 ### 4. Check the brain answers
 Do: Ask the brain and the model if they are healthy.
@@ -56,7 +57,14 @@ Check: The first prints JSON with "service":"bakugan-brain". The second prints o
 Expect: /bakugan-brain/
 Fail-hint: Nothing printed? Look at the log: tail -n 30 /Volumes/Agent/agent/logs/preyas-proxy.log and paste it here.
 
-### 5. Open the app
+### 5. Restart through the API
+Do: If you need to restart from a terminal instead of using the launcher, send the local paired token.
+Command: `TOKEN="$(cat /Volumes/Agent/BakuganBuddy/memory/local-token)" && curl -sS -X POST -H "X-Preyas-Token: $TOKEN" http://127.0.0.1:8788/v1/restart`
+Why: Brain API routes require a paired token, including requests from this Mac.
+Check: The response says `"restarting":true`.
+Fail-hint: No local token file? Pair a device first; the file is created automatically.
+
+### 6. Open the app
 Do: Open http://localhost:8081 and press Cmd+Shift+R.
 Why: Loads the app against the fresh brain.
 Check: The chat opens and shows Preyas online.

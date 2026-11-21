@@ -11,6 +11,7 @@ set -euo pipefail
 REPO_ROOT="${PREYAS_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 DRIVE="/Volumes/Agent"
 BUDDY="$DRIVE/BakuganBuddy"
+TOKEN_FILE="$BUDDY/memory/local-token"
 AGENT="$DRIVE/agent"
 LOGS="$AGENT/logs"
 BRAIN="$REPO_ROOT/bakugan-buddy/brain-server"
@@ -34,6 +35,18 @@ dialog() {
 }
 
 http_ok() { curl -sf --max-time 3 "$1" >/dev/null 2>&1; }
+
+brain_http_ok() {
+  local url="$1" token=""
+  if [[ -r "$TOKEN_FILE" ]]; then
+    IFS= read -r token < "$TOKEN_FILE" || true
+    if [[ "$token" =~ ^[A-Za-z0-9_-]{16,128}$ ]]; then
+      curl -sf --max-time 3 -H "X-Preyas-Token: $token" "$url" >/dev/null 2>&1
+      return
+    fi
+  fi
+  http_ok "$url"
+}
 
 port_pid() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1; }
 
@@ -85,7 +98,7 @@ else
 fi
 
 # 2. brain proxy on :8788 — the one we must be careful with.
-if http_ok "http://127.0.0.1:8788/v1/health"; then
+if brain_http_ok "http://127.0.0.1:8788/v1/health"; then
   say "brain proxy already healthy on :8788."
 else
   holder="$(port_owner 8788)"
@@ -102,7 +115,7 @@ else
       echo $! > "$LOGS/preyas-proxy.pid"
     )
     STARTED+=("proxy"); started_count=$((started_count + 1))
-    for _ in $(seq 1 30); do http_ok "http://127.0.0.1:8788/v1/health" && break; sleep 1; done
+    for _ in $(seq 1 30); do brain_http_ok "http://127.0.0.1:8788/v1/health" && break; sleep 1; done
   fi
 fi
 

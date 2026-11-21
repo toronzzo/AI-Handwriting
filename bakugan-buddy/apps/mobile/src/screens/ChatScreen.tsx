@@ -2552,7 +2552,7 @@ export function ChatScreen({
                 <Text style={styles.dim}>{phoneInfo.devices} paired device(s)</Text>
               </>
             ) : (
-              <Text style={styles.dim}>No Wi-Fi address yet; connect the Mac to a network.</Text>
+              <Text style={styles.dim}>Pair this app to view phone details. The first code is in /Volumes/Agent/BakuganBuddy/memory/pairing-code on the Mac.</Text>
             )}
           </View>
           <View style={styles.phoneCard}>
@@ -3350,7 +3350,7 @@ export function ChatScreen({
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>Pair this phone</Text>
             <Text style={styles.modalBody}>
-              Enter the 6-digit code shown on the Mac, under Settings → Open on iPhone.
+              Enter the 6-digit code from /Volumes/Agent/BakuganBuddy/memory/pairing-code on the Mac. After pairing, Settings → Open on iPhone shows the code for other devices.
             </Text>
             <TextInput
               value={pairCode}

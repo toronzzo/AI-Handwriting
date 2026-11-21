@@ -162,13 +162,88 @@ test("a search parses a live-shaped response through the fetch seam", async () =
 });
 
 test("page fetch refuses private targets before any request", async () => {
-  let called = false;
+  const calls = [];
   const denied = await fetchPageText("http://127.0.0.1:8080/admin", {
-    fetchImpl: async () => {
+    requestImpl: async (request) => calls.push(request),
+  });
+  assert.equal(denied.ok, false);
+  assert.equal(calls.length, 0);
+});
+
+test("page fetch refuses DNS answers containing any private address", async () => {
+  let called = false;
+  const denied = await fetchPageText("https://public.example/", {
+    lookup: async () => ["93.184.216.34", "::"],
+    requestImpl: async () => {
       called = true;
-      return { ok: true, text: async () => "secret" };
     },
   });
   assert.equal(denied.ok, false);
+  assert.match(denied.error, /non-public address/);
   assert.equal(called, false);
+});
+
+test("page fetch pins the request to a validated public DNS answer", async () => {
+  let observed;
+  const result = await fetchPageText("https://public.example/article", {
+    lookup: async (host) => {
+      assert.equal(host, "public.example");
+      return ["93.184.216.34"];
+    },
+    requestImpl: async (request) => {
+      observed = request;
+      return { status: 200, headers: { "content-type": "text/html" }, body: "<p>Public page</p>" };
+    },
+  });
+  assert.equal(observed.address, "93.184.216.34");
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "Public page");
+});
+
+test("page fetch resolves and pins every public redirect destination", async () => {
+  const lookups = [];
+  const requests = [];
+  const result = await fetchPageText("https://first.example/start", {
+    lookup: async (host) => {
+      lookups.push(host);
+      return host === "first.example" ? ["93.184.216.34"] : ["1.1.1.1"];
+    },
+    requestImpl: async (request) => {
+      requests.push(request);
+      if (requests.length === 1) {
+        return { status: 302, headers: { location: "https://second.example/final" }, body: "" };
+      }
+      return { status: 200, headers: { "content-type": "text/plain" }, body: "Final page" };
+    },
+  });
+  assert.deepEqual(lookups, ["first.example", "second.example"]);
+  assert.deepEqual(requests.map((request) => request.address), ["93.184.216.34", "1.1.1.1"]);
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "Final page");
+});
+
+test("page fetch refuses private redirect targets without making the redirected request", async () => {
+  let called = 0;
+  const denied = await fetchPageText("https://public.example/start", {
+    lookup: async () => ["93.184.216.34"],
+    requestImpl: async () => {
+      called += 1;
+      return { status: 302, headers: { location: "http://[::]/admin" }, body: "" };
+    },
+  });
+  assert.equal(denied.ok, false);
+  assert.equal(called, 1);
+});
+
+test("page fetch caps redirects", async () => {
+  let called = 0;
+  const result = await fetchPageText("https://public.example/start", {
+    lookup: async () => ["93.184.216.34"],
+    requestImpl: async () => {
+      called += 1;
+      return { status: 302, headers: { location: "/next" }, body: "" };
+    },
+  });
+  assert.deepEqual(result, { ok: false, error: "too many redirects", text: "" });
+  assert.equal(called, 6);
 });

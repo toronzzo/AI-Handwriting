@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { AppState, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Network from "expo-network";
+import { brainFetch } from "./brain/token";
 import {
   AnimationAction,
   AnimationMixer,
@@ -712,7 +713,7 @@ export function RoomScreen() {
       const json = bag.sim.exportSnapshot();
       void writeAliveMemory(json);
       if (bag.brainUrl) {
-        void fetch(`${bag.brainUrl}/v1/memory`, {
+        void brainFetch(`${bag.brainUrl}/v1/memory`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: json,

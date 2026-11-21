@@ -4,7 +4,11 @@
  * every two seconds so the endpoint is never hammered.
  */
 import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
+import net from "node:net";
 import path from "node:path";
+import { isPrivateHostname, isPrivateIp, lookupAddresses } from "./os/privateHost.mjs";
 import {
   htmlToText,
   isFetchableUrl,
@@ -17,6 +21,7 @@ export const CACHE_TTL_MS = 60 * 60 * 1000;
 export const MIN_GAP_MS = 2000;
 export const FETCH_TIMEOUT_MS = 8000;
 export const PAGE_MAX_CHARS = 6000;
+const MAX_REDIRECTS = 5;
 
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -114,24 +119,98 @@ export async function searchWeb(query, options = {}) {
   }
 }
 
-/** Fetch one result page as plain text. http/https only, never this machine. */
+function requestPinned({ url, address, timeoutMs }) {
+  const client = url.protocol === "https:" ? https : http;
+  const family = net.isIP(address);
+  if (!family) throw new Error("resolved address is invalid");
+
+  return new Promise((resolve, reject) => {
+    const req = client.request(
+      url,
+      {
+        method: "GET",
+        headers: { "User-Agent": UA, Accept: "text/html,text/plain;q=0.9" },
+        signal: AbortSignal.timeout(timeoutMs),
+        agent: false,
+        lookup: (_hostname, options, callback) => {
+          if (options?.all) callback(null, [{ address, family }]);
+          else callback(null, address, family);
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        res.on("error", reject);
+        res.on("end", () =>
+          resolve({
+            status: res.statusCode || 0,
+            headers: res.headers,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }),
+        );
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+function fetchError(error) {
+  return { ok: false, error: error instanceof Error ? error.message : String(error), text: "" };
+}
+
+/** Fetch one public page, validating and pinning every destination. */
 export async function fetchPageText(url, options = {}) {
-  const { fetchImpl = fetch, timeoutMs = FETCH_TIMEOUT_MS, cap = PAGE_MAX_CHARS } = options;
-  if (!isFetchableUrl(url)) return { ok: false, error: "url is not a public http(s) page", text: "" };
+  const {
+    lookup = lookupAddresses,
+    requestImpl = requestPinned,
+    timeoutMs = FETCH_TIMEOUT_MS,
+    cap = PAGE_MAX_CHARS,
+  } = options;
+  let current;
   try {
-    const res = await fetchImpl(url, {
-      headers: { "User-Agent": UA, Accept: "text/html,text/plain;q=0.9" },
-      signal: AbortSignal.timeout(timeoutMs),
-      redirect: "follow",
-    });
-    if (!res.ok) throw new Error(`page answered ${res.status}`);
-    const type = String(res.headers?.get?.("content-type") || "");
-    if (type && !/text\/html|text\/plain|application\/xhtml/i.test(type)) {
-      return { ok: false, error: `not a text page (${type})`, text: "" };
+    current = new URL(String(url ?? "").trim());
+    for (let redirects = 0; ; redirects += 1) {
+      if (
+        !isFetchableUrl(current.href) ||
+        current.username ||
+        current.password ||
+        isPrivateHostname(current.hostname)
+      ) {
+        return { ok: false, error: "url is not a public http(s) page", text: "" };
+      }
+
+      const host = current.hostname.replace(/^\[|\]$/g, "");
+      const addresses = net.isIP(host) ? [host] : await lookup(host);
+      if (
+        !Array.isArray(addresses) ||
+        addresses.length === 0 ||
+        addresses.some((address) => !net.isIP(address) || isPrivateIp(address))
+      ) {
+        return { ok: false, error: "url resolved to a non-public address", text: "" };
+      }
+
+      const res = await requestImpl({ url: current, address: addresses[0], timeoutMs });
+      if ([301, 302, 303, 307, 308].includes(res.status)) {
+        if (redirects >= MAX_REDIRECTS) {
+          return { ok: false, error: "too many redirects", text: "" };
+        }
+        const location = res.headers?.location;
+        if (!location) return { ok: false, error: "redirect has no location", text: "" };
+        current = new URL(location, current);
+        continue;
+      }
+      if (!Number.isInteger(res.status) || res.status < 200 || res.status >= 300) {
+        throw new Error(`page answered ${res.status}`);
+      }
+
+      const type = String(res.headers?.["content-type"] || "");
+      if (type && !/text\/html|text\/plain|application\/xhtml/i.test(type)) {
+        return { ok: false, error: `not a text page (${type})`, text: "" };
+      }
+      return { ok: true, text: htmlToText(res.body, cap) };
     }
-    const body = await res.text();
-    return { ok: true, text: htmlToText(body, cap) };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error), text: "" };
+    return fetchError(error);
   }
 }
