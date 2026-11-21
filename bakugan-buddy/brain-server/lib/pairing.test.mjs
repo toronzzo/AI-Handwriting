@@ -9,7 +9,10 @@ import {
   attemptPair,
   authorizeRequest,
   createPairingState,
+  defaultWebOrigins,
+  isLocalAddress,
   localTokenPath,
+  parseWebOrigins,
   pairingCodePath,
   readLocalToken,
   readDevices,
@@ -34,6 +37,55 @@ test("loopback requests require a valid paired token", () => {
     assert.equal(result.allow, false, remoteAddress);
     assert.equal(result.status, 401, remoteAddress);
   }
+});
+
+test("the Mac's own page needs no code, a website in that browser still does", () => {
+  const webOrigins = defaultWebOrigins();
+  for (const remoteAddress of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+    const result = authorizeRequest({
+      path: "/v1/status",
+      remoteAddress,
+      origin: "http://127.0.0.1:8081",
+      webOrigins,
+      book: book(),
+    });
+    assert.equal(result.allow, true, remoteAddress);
+    assert.equal(result.local, true, remoteAddress);
+  }
+  const origin = (value) => authorizeRequest({ path: "/v1/status", remoteAddress: "127.0.0.1", origin: value, webOrigins, book: book() });
+
+  assert.equal(origin("http://localhost:8081").allow, true, "localhost works too");
+  assert.equal(origin("http://127.0.0.1:8081/").allow, true, "a trailing slash does not matter");
+  // A website in the same browser keeps its own Origin, which cannot be forged.
+  assert.equal(origin("https://evil.example").allow, false);
+  assert.equal(origin("http://127.0.0.1:9999").allow, false, "another port is another app");
+  // Scripts send no Origin, so #86's rule still applies to them.
+  assert.equal(origin("").allow, false);
+  // A phone is not on this machine, even if it claimed the app's Origin.
+  const phone = authorizeRequest({
+    path: "/v1/status",
+    remoteAddress: "192.168.31.40",
+    origin: "http://127.0.0.1:8081",
+    webOrigins,
+    book: book(),
+  });
+  assert.equal(phone.allow, false);
+});
+
+test("the web origins default to the app's port and can be overridden", () => {
+  assert.deepEqual(defaultWebOrigins(), ["http://127.0.0.1:8081", "http://localhost:8081"]);
+  assert.deepEqual(defaultWebOrigins("8099"), ["http://127.0.0.1:8099", "http://localhost:8099"]);
+  assert.deepEqual(parseWebOrigins(""), defaultWebOrigins());
+  assert.deepEqual(parseWebOrigins(undefined), defaultWebOrigins());
+  assert.deepEqual(parseWebOrigins("http://127.0.0.1:9000/, http://localhost:9000"), [
+    "http://127.0.0.1:9000",
+    "http://localhost:9000",
+  ]);
+});
+
+test("loopback means this machine only", () => {
+  for (const address of ["127.0.0.1", "::1", "::ffff:127.0.0.1", "127.0.0.53"]) assert.equal(isLocalAddress(address), true, address);
+  for (const address of ["192.168.31.40", "10.0.0.2", "", "::ffff:192.168.31.40"]) assert.equal(isLocalAddress(address), false, address);
 });
 
 test("an unpaired phone on the Wi-Fi is refused", () => {

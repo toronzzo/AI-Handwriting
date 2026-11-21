@@ -9,6 +9,9 @@ import {
   appendMessage,
   chatFile,
   collapseBriefingChat,
+  collapseBriefingsEverywhere,
+  isBriefingRow,
+  oneBriefingPerDay,
   createChat,
   dayFromContent,
   deleteChat,
@@ -205,12 +208,79 @@ test("the day is also found in an old untagged 'Briefing <day>' message", () => 
   done();
 });
 
+test("saved duplicates of one day's briefing are shown once, and the newest is kept", () => {
+  const { root, done } = drive();
+  const chat = createChat(root, "Daily briefing");
+  const file = chatFile(root, chat.id);
+  const rows = [
+    { t: 1000, role: "assistant", who: "preyas", content: "Good morning\n\n- old", briefingDay: "2026-11-02" },
+    { t: 2000, role: "user", who: "user", content: "a normal question" },
+    { t: 3000, role: "assistant", who: "preyas", content: "Good morning\n\n- new", briefingDay: "2026-11-02" },
+    { t: 4000, role: "assistant", who: "preyas", content: "Briefing 2026-11-03\n\n- next" },
+  ];
+  for (const row of rows) fs.appendFileSync(file, JSON.stringify(row) + "\n");
+  assert.deepEqual(
+    readChat(root, chat.id).messages.map((row) => row.content),
+    ["a normal question", "Good morning\n\n- new", "Briefing 2026-11-03\n\n- next"],
+  );
+  assert.equal(isBriefingRow({ content: "hello" }), false);
+  assert.equal(isBriefingRow({ content: "x", briefingDay: "2026-11-02" }), true);
+  assert.equal(oneBriefingPerDay([{ content: "keep me" }]).length, 1);
+  done();
+});
+
+test("a briefing appended again for the same day replaces it instead of piling up", () => {
+  const { root, done } = drive();
+  const chat = createChat(root, "Daily briefing");
+  appendMessage(root, chat.id, { t: 1000, role: "assistant", who: "preyas", briefingDay: "2026-11-02", content: "Good morning\n\n- first" });
+  appendMessage(root, chat.id, { t: 2000, role: "assistant", who: "preyas", briefingDay: "2026-11-02", content: "Good morning\n\n- second" });
+  appendMessage(root, chat.id, { t: 3000, role: "user", who: "user", content: "hello" });
+  const rows = lines(root, chat.id);
+  const briefs = rows.filter((row) => row.briefingDay === "2026-11-02");
+  assert.equal(briefs.length, 1, "only one message for the day");
+  assert.equal(briefs[0].content, "Good morning\n\n- second", "the newest wins");
+  assert.equal(rows.filter((row) => row.content === "hello").length, 1, "normal messages still append");
+  done();
+});
+
+test("the sweep cleans every chat, backs each file up and leaves normal messages alone", () => {
+  const { root, done } = drive();
+  const briefing = createChat(root, "Daily briefing");
+  const chat = createChat(root, "A real chat");
+  const seed = (id, rows) => {
+    for (const row of rows) fs.appendFileSync(chatFile(root, id), JSON.stringify(row) + "\n");
+  };
+  seed(briefing.id, [
+    { t: 1000, role: "assistant", who: "preyas", content: "Good morning\n\n- copy 0", briefingDay: "2026-11-02" },
+    { t: 2000, role: "assistant", who: "preyas", content: "Good morning\n\n- copy 1", briefingDay: "2026-11-02" },
+  ]);
+  seed(chat.id, [
+    { t: 3000, role: "assistant", who: "preyas", content: "Good morning\n\n- old", briefingDay: "2026-11-02" },
+    { t: 3100, role: "user", who: "user", content: "a normal question" },
+    { t: 4000, role: "assistant", who: "preyas", content: "Good morning\n\n- newest", briefingDay: "2026-11-02" },
+  ]);
+
+  const result = collapseBriefingsEverywhere(root, 909);
+  assert.equal(result.removed, 2, "one older copy in each chat");
+  assert.equal(result.backups.length, 2, "a copy per rewritten file");
+  assert.equal(fs.existsSync(`${chatFile(root, briefing.id)}.bak-909`), true);
+  assert.match(fs.readFileSync(`${chatFile(root, chat.id)}.bak-909`, "utf8"), /a normal question/, "the backup holds the old file");
+  assert.deepEqual(lines(root, chat.id).map((row) => row.content), ["a normal question", "Good morning\n\n- newest"]);
+  assert.equal(lines(root, briefing.id).length, 1);
+
+  // Nothing left to drop: no new copy and no new backup.
+  assert.deepEqual(collapseBriefingsEverywhere(root, 910), { removed: 0, backups: [] });
+  assert.equal(fs.existsSync(`${chatFile(root, chat.id)}.bak-910`), false);
+  done();
+});
+
 test("the one-time cleanup keeps the newest message per day and writes a .bak copy", () => {
   const { root, done } = drive();
   const chat = createChat(root, "Daily briefing");
   const other = createChat(root, "A real chat");
+  // Seed the duplicates straight into the file: appendMessage now refuses them.
   for (let i = 0; i < 4; i += 1) {
-    appendMessage(root, chat.id, { role: "assistant", who: "preyas", content: `Briefing 2026-11-02\n\n- copy ${i}` });
+    fs.appendFileSync(chatFile(root, chat.id), JSON.stringify({ t: 1000 + i, role: "assistant", who: "preyas", content: `Briefing 2026-11-02\n\n- copy ${i}` }) + "\n");
   }
   appendMessage(root, chat.id, { role: "assistant", who: "preyas", content: "Briefing 2026-11-03\n\n- one" });
   appendMessage(root, chat.id, { role: "assistant", who: "preyas", content: "Briefing 2026-11-07\n\n- only" });

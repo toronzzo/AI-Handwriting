@@ -6,7 +6,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { theme } from "../theme";
-import { brainFetch, isUnauthorized } from "../room/brain/token";
+import { brainFetch } from "../room/brain/token";
+import { readProbe } from "../room/brain/probeJson";
+import { probeThrownError } from "./probe";
 import {
   ABOUT_GROUPS,
   aboutHeadline,
@@ -16,8 +18,6 @@ import {
   serviceDots,
   type CapabilitiesView,
 } from "./about";
-import { powerErrorMessage } from "./power";
-
 type Props = { brainUrl: string; refreshSignal?: number };
 
 const REQUEST_TIMEOUT_MS = 6000;
@@ -38,18 +38,15 @@ export function AboutPreyas({ brainUrl, refreshSignal = 0 }: Props) {
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       const res = await brainFetch(brainUrl.replace(/\/$/, "") + "/v1/capabilities", { signal: controller.signal });
-      if (isUnauthorized(res.status)) {
-        setError("Pair this device with the code shown on the Mac.");
+      const read = await readProbe<unknown>("About Preyas", res);
+      if (!read.ok) {
+        setError(read.error);
         return;
       }
-      if (!res.ok) {
-        setError("The Mac could not list what I can do.");
-        return;
-      }
-      setView(normalizeCapabilities(await res.json()));
+      setView(normalizeCapabilities(read.body));
       setError("");
     } catch (caught) {
-      setError(powerErrorMessage(caught));
+      setError(probeThrownError("About Preyas", caught));
     } finally {
       clearTimeout(timer);
       setLoading(false);
