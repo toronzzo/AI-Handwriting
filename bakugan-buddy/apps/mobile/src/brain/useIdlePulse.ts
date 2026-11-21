@@ -1,50 +1,93 @@
-import { useEffect, useRef, useState } from "react";
-import { Animated } from "react-native";
+import { useEffect, useRef } from "react";
+import { Animated, Easing, Platform } from "react-native";
 import { usePageVisible } from "../ui/usePageVisible";
 import { useReducedMotion } from "../ui/useReducedMotion";
 
 /**
- * A single, slow "neural breathing" phase for the Brain map.
+ * The two slow phases behind the Brain map's glow.
  *
- * Returns a number that eases from 0 up to near 1 and back again, on one
- * `Animated.loop`, only while the page is actually visible and the platform
- * does not prefer reduced motion. When either stops being true it snaps to a
- * still 0 and the loop is torn down, so there is no hidden work and no
- * per-frame React churn left running.
+ * Both are plain react-native Animated values: opacity and transform only, so
+ * the native driver can run them on the UI thread. There is no per-frame
+ * setState and no per-node loop — one breath for the resting map, one faster
+ * pulse for neurons that are in use, shared by every halo.
  *
- * One value drives every ring in the map, so there is exactly one loop and
- * one listener for the whole screen — no constant expensive animation, and
- * no flashing: the easing never reaches a hard 1, it just tilts gently.
+ * While the page is hidden or the platform asks for reduced motion, both
+ * values stop at a still midpoint. A reduced-motion map therefore keeps its
+ * static glow but never pulses or travels.
  */
-export function useIdlePulse(): number {
+export type BrainMotion = {
+  breath: Animated.Value;
+  activePulse: Animated.Value;
+  reduce: boolean;
+};
+
+const STILL = 0.5;
+const SLOW_MS = 4_200;
+const FAST_MS = 1_250;
+
+export function useIdlePulse(): BrainMotion {
   const visible = usePageVisible();
   const reduce = useReducedMotion();
-  const anim = useRef(new Animated.Value(0)).current;
-  const [phase, setPhase] = useState(0);
-
-  useEffect(() => {
-    const id = anim.addListener(({ value }) => setPhase(value as number));
-    return () => anim.removeListener(id);
-  }, [anim]);
+  const breath = useRef(new Animated.Value(0)).current;
+  const activePulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (!visible || reduce) {
-      anim.stopAnimation();
-      anim.setValue(0);
+      breath.stopAnimation();
+      activePulse.stopAnimation();
+      breath.setValue(STILL);
+      activePulse.setValue(STILL);
       return;
     }
-    const loop = Animated.loop(
+
+    // Start each loop at 0 so Animated.loop's reset lands on the same value
+    // every cycle; starting from STILL would jump halfway each time.
+    breath.setValue(0);
+    activePulse.setValue(0);
+
+    // react-native-web has no native animated module; the JS driver still
+    // animates only opacity and transform, which the browser composites.
+    const native = Platform.OS !== "web";
+    const slow = Animated.loop(
       Animated.sequence([
-        // Ease up from 0 to 1 over ~2.4 s, then back down over ~2.4 s;
-        // keyframe 0.96 keeps the peak soft so nothing ever flashes.
-        Animated.timing(anim, { toValue: 1, duration: 2400, useNativeDriver: false }),
-        Animated.timing(anim, { toValue: 0, duration: 2400, useNativeDriver: false }),
+        Animated.timing(breath, {
+          toValue: 1,
+          duration: SLOW_MS,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: native,
+        }),
+        Animated.timing(breath, {
+          toValue: 0,
+          duration: SLOW_MS,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: native,
+        }),
       ]),
     );
-    loop.start();
-    return () => loop.stop();
-  }, [visible, reduce, anim]);
+    const fast = Animated.loop(
+      Animated.sequence([
+        Animated.timing(activePulse, {
+          toValue: 1,
+          duration: FAST_MS,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: native,
+        }),
+        Animated.timing(activePulse, {
+          toValue: 0,
+          duration: FAST_MS,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: native,
+        }),
+      ]),
+    );
 
-  // 0..1 breathing; a touch of ease-in-out already comes from the two timings.
-  return phase;
+    slow.start();
+    fast.start();
+    return () => {
+      slow.stop();
+      fast.stop();
+    };
+  }, [visible, reduce, breath, activePulse]);
+
+  return { breath, activePulse, reduce };
 }
