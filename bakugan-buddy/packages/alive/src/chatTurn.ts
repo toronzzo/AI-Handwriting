@@ -391,7 +391,18 @@ export async function streamReply(options: {
       signal: controller.signal,
     });
     if (!res.ok || !res.body) {
-      return { text: "", thinking: "", usage: null, ok: false, error: res.ok ? "empty" : `status ${res.status}` };
+      let error = res.ok ? "empty" : `status ${res.status}`;
+      // The brain explains refusals in its JSON body ("switching models…");
+      // surface that text instead of a bare status code.
+      if (!res.ok && res.body) {
+        try {
+          const parsed = (await res.json().catch(() => null)) as { error?: unknown } | null;
+          if (parsed && typeof parsed.error === "string" && parsed.error.trim()) error = parsed.error;
+        } catch {
+          /* keep the status text */
+        }
+      }
+      return { text: "", thinking: "", usage: null, ok: false, error };
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
