@@ -3,7 +3,7 @@
  *
  * The brain is bound to 0.0.0.0 so a phone can reach it, which means anything
  * on the Wi-Fi could too. A device must enter a 6-digit code shown on the Mac
- * once, then it keeps a token. Requests from this machine never need a code.
+ * once, then it keeps a token.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -17,12 +17,27 @@ export function devicesPath(root) {
   return path.join(root, "memory", "devices.json");
 }
 
-/** True when the caller is this machine. */
-export function isLocalAddress(remoteAddress) {
-  const raw = String(remoteAddress || "").trim();
-  if (!raw) return false;
-  const address = raw.replace(/^::ffff:/, "");
-  return address === "::1" || address === "127.0.0.1" || address.startsWith("127.");
+export function localTokenPath(root) {
+  return path.join(root, "memory", "local-token");
+}
+
+export function pairingCodePath(root) {
+  return path.join(root, "memory", "pairing-code");
+}
+
+export function readLocalToken(root) {
+  const token = fs.readFileSync(localTokenPath(root), "utf8").trim();
+  if (!TOKEN_RE.test(token)) throw new Error("local pairing token is invalid");
+  return token;
+}
+
+function writePrivateFile(file, content) {
+  const directory = path.dirname(file);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temp = `${file}.${randomBytes(8).toString("hex")}.tmp`;
+  fs.writeFileSync(temp, `${content}\n`, { flag: "wx", mode: 0o600 });
+  fs.renameSync(temp, file);
+  fs.chmodSync(file, 0o600);
 }
 
 export function readDevices(root) {
@@ -50,8 +65,19 @@ export function writeDevices(root, book) {
   const file = devicesPath(root);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temp = `${file}.tmp`;
-  fs.writeFileSync(temp, `${JSON.stringify(book, null, 2)}\n`);
+  fs.writeFileSync(temp, `${JSON.stringify(book, null, 2)}\n`, { mode: 0o600 });
   fs.renameSync(temp, file);
+  fs.chmodSync(file, 0o600);
+}
+
+export function writeLocalToken(root, token) {
+  if (!TOKEN_RE.test(String(token || ""))) throw new TypeError("invalid local pairing token");
+  writePrivateFile(localTokenPath(root), token);
+}
+
+export function writePairingCode(root, code) {
+  if (!/^\d{6}$/.test(String(code || ""))) throw new TypeError("invalid pairing code");
+  writePrivateFile(pairingCodePath(root), code);
 }
 
 function safeEqual(left, right) {
@@ -86,7 +112,6 @@ export function authorizeRequest(input) {
   const {
     path: requestPath = "/",
     method = "GET",
-    remoteAddress = "",
     token = "",
     book = { devices: [] },
     pairing = null,
@@ -97,7 +122,6 @@ export function authorizeRequest(input) {
   if (!String(requestPath).startsWith("/v1/")) return { allow: true };
   if (requestPath === "/v1/health") return { allow: true };
   if (requestPath === "/v1/pair") return { allow: true };
-  if (isLocalAddress(remoteAddress)) return { allow: true };
 
   if (token && TOKEN_RE.test(token)) {
     const known = book.devices.find((device) => device.token === token);

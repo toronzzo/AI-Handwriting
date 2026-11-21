@@ -9,9 +9,13 @@ import {
   attemptPair,
   authorizeRequest,
   createPairingState,
-  isLocalAddress,
+  localTokenPath,
+  pairingCodePath,
+  readLocalToken,
   readDevices,
   removeDevice,
+  writeLocalToken,
+  writePairingCode,
   writeDevices,
 } from "./pairing.mjs";
 
@@ -23,14 +27,11 @@ function drive() {
 const book = () => ({ devices: [] });
 const PAIRED = { devices: [{ token: "tok_abcdefghijklmnop", name: "iPhone", pairedAt: 1, lastSeen: 1 }] };
 
-test("this machine never needs a code", () => {
-  assert.equal(isLocalAddress("127.0.0.1"), true);
-  assert.equal(isLocalAddress("::1"), true);
-  assert.equal(isLocalAddress("::ffff:127.0.0.1"), true);
-  assert.equal(isLocalAddress("192.168.31.40"), false);
-  for (const address of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
-    const result = authorizeRequest({ path: "/v1/chats", remoteAddress: address, book: book() });
-    assert.equal(result.allow, true, address);
+test("loopback requests require a valid paired token", () => {
+  for (const remoteAddress of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+    const result = authorizeRequest({ path: "/v1/chats", remoteAddress, book: book() });
+    assert.equal(result.allow, false, remoteAddress);
+    assert.equal(result.status, 401, remoteAddress);
   }
 });
 
@@ -41,18 +42,20 @@ test("an unpaired phone on the Wi-Fi is refused", () => {
   assert.match(result.error, /pair/i);
 });
 
-test("a paired token is accepted, a wrong or unknown one is not", () => {
-  const ok = authorizeRequest({
-    path: "/v1/chats",
-    remoteAddress: "192.168.31.40",
-    token: "tok_abcdefghijklmnop",
-    book: PAIRED,
-  });
-  assert.equal(ok.allow, true);
-  assert.equal(ok.device.name, "iPhone");
+test("a paired token is accepted from local and network callers; invalid tokens are refused", () => {
+  for (const remoteAddress of ["127.0.0.1", "::1", "192.168.31.40"]) {
+    const ok = authorizeRequest({
+      path: "/v1/chats",
+      remoteAddress,
+      token: "tok_abcdefghijklmnop",
+      book: PAIRED,
+    });
+    assert.equal(ok.allow, true, remoteAddress);
+    assert.equal(ok.device.name, "iPhone");
+  }
 
   for (const token of ["tok_wrongtokenthatislong", "", "short"]) {
-    const result = authorizeRequest({ path: "/v1/chats", remoteAddress: "192.168.31.40", token, book: PAIRED });
+    const result = authorizeRequest({ path: "/v1/chats", remoteAddress: "127.0.0.1", token, book: PAIRED });
     assert.equal(result.allow, false, token);
     assert.equal(result.status, 401);
   }
@@ -63,8 +66,10 @@ test("static files and the pairing endpoint stay open on the LAN", () => {
     const result = authorizeRequest({ path: requestPath, remoteAddress: "192.168.31.40", book: book() });
     assert.equal(result.allow, true, requestPath);
   }
-  const other = authorizeRequest({ path: "/v1/notes", remoteAddress: "192.168.31.40", book: book() });
-  assert.equal(other.allow, false);
+  for (const requestPath of ["/v1/notes", "/v1/phone", "/v1/restart"]) {
+    const other = authorizeRequest({ path: requestPath, remoteAddress: "127.0.0.1", book: book() });
+    assert.equal(other.allow, false, requestPath);
+  }
 });
 
 test("the right code pairs, the wrong code is rejected", () => {
@@ -110,14 +115,25 @@ test("the attempt window resets after a while", () => {
   assert.equal(later.ok, true, "a new window lets the real code through");
 });
 
-test("paired devices are stored and can be removed", () => {
+test("pairing material is stored with owner-only permissions", () => {
   const { root, done } = drive();
   try {
     assert.deepEqual(readDevices(root).devices, []);
     writeDevices(root, addDevice(book(), "tok_abcdefghijklmnop", "iPhone", 500));
+    writeLocalToken(root, "tok_abcdefghijklmnop");
+    writePairingCode(root, "482913");
     const stored = readDevices(root);
     assert.equal(stored.devices.length, 1);
     assert.equal(stored.devices[0].name, "iPhone");
+    const tokenPath = localTokenPath(root);
+    assert.equal(fs.readFileSync(tokenPath, "utf8"), "tok_abcdefghijklmnop\n");
+    assert.equal(readLocalToken(root), "tok_abcdefghijklmnop");
+    assert.equal(fs.statSync(tokenPath).mode & 0o777, 0o600);
+    assert.equal(fs.readFileSync(pairingCodePath(root), "utf8"), "482913\n");
+    assert.equal(fs.statSync(pairingCodePath(root)).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(path.join(root, "memory", "devices.json")).mode & 0o777, 0o600);
+    assert.throws(() => writeLocalToken(root, "invalid"), /invalid local pairing token/);
+    assert.throws(() => writePairingCode(root, "bad"), /invalid pairing code/);
     writeDevices(root, removeDevice(stored, "tok_abcdefghijklmnop"));
     assert.deepEqual(readDevices(root).devices, []);
     assert.equal(fs.existsSync(`${path.join(root, "memory", "devices.json")}.tmp`), false);

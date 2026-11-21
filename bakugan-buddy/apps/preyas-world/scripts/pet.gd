@@ -44,6 +44,7 @@ var debug_shot_taken := false
 @onready var preyas: Sprite2D = $PreyasSprite
 @onready var menu: PopupMenu = $Menu
 var mood_request: HTTPRequest
+var brain_token := ""
 ## The mood URL, defaulting to the brain; PREYAS_MOOD_URL overrides it
 ## (handy for testing against a mock without touching the real brain).
 var mood_url := BRAIN_MOOD_URL
@@ -56,6 +57,7 @@ func _ready() -> void:
 	var override := OS.get_environment("PREYAS_MOOD_URL")
 	if override != "":
 		mood_url = override
+	brain_token = _read_local_token()
 	_setup_window()
 	var json_text := FileAccess.get_file_as_string("res://data/preyas-sprite.json")
 	sprite_data = SpriteDataScript.parse(json_text)
@@ -236,10 +238,28 @@ func _setup_mood_request() -> void:
 	mood_request.request_completed.connect(_on_mood_response)
 	_poll_mood()
 
+func _read_local_token() -> String:
+	var token_file := OS.get_environment("PREYAS_TOKEN_FILE")
+	if token_file == "":
+		var data_root := OS.get_environment("BAKUGAN_DATA_DIR")
+		if data_root == "":
+			data_root = "/Volumes/Agent/BakuganBuddy"
+		token_file = data_root.path_join("memory/local-token")
+	if not FileAccess.file_exists(token_file):
+		print("PreyasWorld: pair a device before enabling brain mood polling.")
+		return ""
+	var token := FileAccess.get_file_as_string(token_file).strip_edges()
+	var token_pattern := RegEx.new()
+	token_pattern.compile("^[A-Za-z0-9_-]{16,128}$")
+	if token_pattern.search(token) == null:
+		print("PreyasWorld: local pairing token is invalid; mood polling is disabled.")
+		return ""
+	return token
+
 ## GET only — the pet never writes anything to the brain.
 func _poll_mood() -> void:
-	if mood_request.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
-		mood_request.request(mood_url, [], HTTPClient.METHOD_GET)
+	if brain_token != "" and mood_request.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
+		mood_request.request(mood_url, ["X-Preyas-Token: " + brain_token], HTTPClient.METHOD_GET)
 
 func _on_mood_response(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
 	var mood := ""

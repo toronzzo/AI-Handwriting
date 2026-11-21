@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { brainUrlFor } from "../../../../../packages/alive/src/phone.ts";
+import { brainFetch } from "./token.ts";
 
 /**
  * The brain lives on whatever host served the page: 127.0.0.1 on the Mac,
@@ -116,7 +117,7 @@ export async function fetchRemembered(url: string, query: string, timeoutMs = 70
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${normalizeBrainUrl(url)}/v1/facts?q=${encodeURIComponent(query)}`, {
+    const res = await brainFetch(`${normalizeBrainUrl(url)}/v1/facts?q=${encodeURIComponent(query)}`, {
       signal: controller.signal,
     });
     if (!res.ok) return [];
@@ -133,7 +134,7 @@ export async function fetchRemembered(url: string, query: string, timeoutMs = 70
 export function sendMoment(url: string, body: string): void {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 800);
-  void fetch(`${normalizeBrainUrl(url)}/v1/facts`, {
+  void brainFetch(`${normalizeBrainUrl(url)}/v1/facts`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body,

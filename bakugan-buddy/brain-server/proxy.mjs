@@ -51,9 +51,13 @@ import {
   authorizeRequest,
   createPairingState,
   currentCode,
+  localTokenPath,
+  pairingCodePath,
   readDevices,
   removeDevice,
   touchDevice,
+  writePairingCode,
+  writeLocalToken,
   writeDevices,
 } from "./lib/pairing.mjs";
 import {
@@ -776,7 +780,7 @@ const server = http.createServer(async (req, res) => {
   }
   const url = new URL(req.url || "/", `http://${host}`);
 
-  // The phone must pair once; this machine never does.
+  // All API clients, including local callers, must pair once.
   const gate = authorizeRequest({
     path: url.pathname,
     method: req.method,
@@ -1000,6 +1004,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (dataDir) {
         writeDevices(dataDir, addDevice(readDevices(dataDir), result.token, result.name));
+        writeLocalToken(dataDir, result.token);
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, token: result.token, name: result.name }));
@@ -2052,6 +2057,13 @@ function missedAtStartup() {
 
 server.listen(port, host, () => {
   process.stdout.write(`brain proxy ${host}:${port} -> ${llamaUrl}\n`);
+  if (dataDir) {
+    writePairingCode(dataDir, currentCode(pairing));
+    process.stdout.write(`local pairing code: ${pairingCodePath(dataDir)}\n`);
+    process.stdout.write(`local pairing token: ${localTokenPath(dataDir)} (created after pairing)\n`);
+  } else {
+    process.stdout.write(`pairing code (local setup): ${currentCode(pairing)}\n`);
+  }
   startReminderLoop();
   tidyBriefingChat();
   missedAtStartup();

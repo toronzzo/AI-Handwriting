@@ -22,6 +22,21 @@
     "react-native-webview": "14.0.1",
     "three": "^0.186.1"
   },
+  "overrides": {
+    "expo": {
+      "@expo/cli": {
+        "glob": "14.0.6",
+        "minimatch": "11.0.9",
+        "zod": "4.6.6"
+      },
+      "@expo/fingerprint": {
+        "minimatch": "11.0.9"
+      },
+      "@expo/metro-config": {
+        "glob": "14.0.6"
+      }
+    }
+  },
   "devDependencies": {
     "@types/react": "~19.3.0",
     "@types/three": "^0.186.0",

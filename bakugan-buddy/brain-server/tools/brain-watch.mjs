@@ -8,7 +8,12 @@
  * from GET /v1/brain/stream prints as one line. The watcher survives proxy
  * restarts and dropped connections; heartbeats are silent.
  */
+import { readLocalToken } from "../lib/pairing.mjs";
+
 const base = String(process.argv[2] || "http://127.0.0.1:8788").replace(/\/$/, "");
+const dataDir = process.env.BAKUGAN_DATA_DIR || "/Volumes/Agent/BakuganBuddy";
+const token = readLocalToken(dataDir);
+const headers = { "X-Preyas-Token": token };
 
 const COLORS = {
   thinking: "\x1b[94m",
@@ -39,7 +44,7 @@ function lineFor(entry) {
 }
 
 async function snapshot() {
-  const res = await fetch(`${base}/v1/brain`, { signal: AbortSignal.timeout(5000) });
+  const res = await fetch(`${base}/v1/brain`, { headers, signal: AbortSignal.timeout(5000) });
   if (!res.ok) throw new Error(`GET /v1/brain answered ${res.status}`);
   const body = await res.json();
   console.log(`Preyas brain — ${base} (ctrl-c to leave)`);
@@ -59,7 +64,7 @@ async function streamOnce() {
   if (typeof stall.unref === "function") stall.unref();
   const connect = setTimeout(() => controller.abort(), 10_000);
   try {
-    const res = await fetch(`${base}/v1/brain/stream`, { signal: controller.signal });
+    const res = await fetch(`${base}/v1/brain/stream`, { headers, signal: controller.signal });
     clearTimeout(connect);
     if (!res.ok || !res.body) throw new Error(`stream answered ${res.status}`);
     const reader = res.body.getReader();
