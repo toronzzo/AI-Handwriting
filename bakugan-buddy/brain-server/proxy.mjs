@@ -98,10 +98,12 @@ import {
   writeSpendSetting,
 } from "./lib/harness/settings.mjs";
 import { handleOsRoute } from "./lib/os/routes.mjs";
+import { sharedBrain } from "./lib/os/neurons.mjs";
+import { paidCostUsd, parseJsonUsage, parseSseUsage, tokensPerSec } from "./lib/os/brainUsage.mjs";
 import { ART_WRITE_DIR, MAX_ART_BYTES, findArt, isSlot, saveArt } from "./lib/art.mjs";
 import { resolveSafePath } from "./lib/safeFs.mjs";
 import { createActivityHub } from "./lib/activity.mjs";
-import { createModelSwitch, LLAMA_PORT } from "./lib/modelSwitch.mjs";
+import { createModelSwitch, LLAMA_PORT, llamaServerRamMb } from "./lib/modelSwitch.mjs";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -124,6 +126,13 @@ const modelSwitch = createModelSwitch({
   dataDir: dataDir || undefined,
   template: path.join(path.dirname(fileURLToPath(import.meta.url)), "templates", "qwen3.jinja"),
 });
+
+/**
+ * The brain (slice N2): one event bus for the whole proxy process. Every
+ * model call and tool below reports into it; GET /v1/brain/stream fans the
+ * events out live and <dataDir>/brain/YYYY-MM.jsonl keeps them.
+ */
+const brain = sharedBrain(dataDir);
 
 /**
  * One MCP hub for the whole brain process. Created lazily (it only spawns
@@ -391,11 +400,53 @@ function sendJson(res, status, body) {
 
 const CHAT_PROXY_TIMEOUT_MS = Number(process.env.BRAIN_UPSTREAM_TIMEOUT_MS || 90_000);
 
-/** Pipe one model response, but stop paying for generation after the client leaves. */
-async function pipeChatCompletion(req, res, target, body, downError, timeoutMs = CHAT_PROXY_TIMEOUT_MS) {
+/**
+ * Pipe one model response, but stop paying for generation after the client
+ * leaves. With `events` (brain slice N2) the passthrough also reports
+ * thinking/done/error into the brain, reading usage tokens from the very
+ * bytes it forwards — a response is never changed for the feed.
+ */
+async function pipeChatCompletion(req, res, target, body, downError, timeoutMs = CHAT_PROXY_TIMEOUT_MS, events = null) {
   const controller = new AbortController();
   let timedOut = false;
   let clientClosed = false;
+  let upstream = null;
+  const startedAt = Date.now();
+  const MAX_BUFFER = 4 * 1024 * 1024; // enough to hold a usage chunk, never a whole stream
+  const chunks = [];
+  let buffered = 0;
+  const streamed = (() => {
+    try {
+      return JSON.parse(String(body)).stream === true;
+    } catch {
+      return false;
+    }
+  })();
+  const brainOut = (record) => {
+    if (!events || !events.neuron) return;
+    try {
+      brain.emit({ ...record, neuron: events.neuron });
+    } catch {
+      /* the feed is a nicety */
+    }
+  };
+  const finishEvents = async (ok) => {
+    if (!events) return;
+    if (!ok) {
+      brainOut({ state: "error", detail: `upstream answered ${upstream ? upstream.status : "?"}` });
+      return;
+    }
+    const text = Buffer.concat(chunks).toString("utf8");
+    const usage = streamed ? parseSseUsage(text) : parseJsonUsage(text);
+    const stats = usage
+      ? { tps: tokensPerSec(usage, startedAt, Date.now()), costUsd: events.paid ? paidCostUsd(usage, Date.now()) : null }
+      : {};
+    const ramMb =
+      events.local && events.ramPromise
+        ? await Promise.race([events.ramPromise, new Promise((resolve) => setTimeout(() => resolve(null), 800))])
+        : null;
+    brainOut({ state: "done", ...stats, ramMb });
+  };
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
@@ -408,7 +459,6 @@ async function pipeChatCompletion(req, res, target, body, downError, timeoutMs =
   };
   res.on("close", onClose);
   try {
-    let upstream;
     try {
       upstream = await fetch(target, {
         method: "POST",
@@ -418,6 +468,7 @@ async function pipeChatCompletion(req, res, target, body, downError, timeoutMs =
       });
     } catch {
       if (clientClosed) return;
+      brainOut({ state: "error", detail: timedOut ? "model timed out" : downError });
       sendJson(res, timedOut ? 504 : 503, { error: timedOut ? "model timed out" : downError });
       return;
     }
@@ -426,16 +477,31 @@ async function pipeChatCompletion(req, res, target, body, downError, timeoutMs =
       "Cache-Control": "no-cache",
     });
     if (!upstream.body) {
-      res.end(await upstream.text());
+      const text = await upstream.text();
+      if (buffered < MAX_BUFFER) {
+        chunks.push(Buffer.from(text));
+        buffered += text.length;
+      }
+      await finishEvents(upstream.ok);
+      res.end(text);
       return;
     }
     const reader = upstream.body.getReader();
     for (;;) {
       const step = await reader.read();
       if (step.done || clientClosed) break;
+      if (buffered < MAX_BUFFER) {
+        chunks.push(step.value);
+        buffered += step.value.length;
+      }
       res.write(step.value);
     }
-    if (!clientClosed) res.end();
+    if (clientClosed) {
+      brainOut({ state: "off", detail: "stopped: the client left" });
+    } else {
+      await finishEvents(upstream.ok);
+      res.end();
+    }
   } catch {
     if (!clientClosed && !res.writableEnded) {
       if (!res.headersSent) sendJson(res, timedOut ? 504 : 503, { error: timedOut ? "model timed out" : downError });
@@ -925,15 +991,21 @@ const server = http.createServer(async (req, res) => {
       const file = path.join(dir, "in.wav");
       fs.writeFileSync(file, wav);
       try {
+        brain.emit({ neuron: "ears", state: "thinking" });
         const heard = await transcribeFile(file);
         if (!heard) {
+          brain.emit({ neuron: "ears", state: "error", detail: "stt_unavailable" });
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "stt_unavailable" }));
           return;
         }
         if (isWhisperHallucination(heard.text)) heard.text = "";
+        brain.emit({ neuron: "ears", state: "done", detail: String(heard.language || "") || null });
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(heard));
+      } catch (error) {
+        brain.emit({ neuron: "ears", state: "error", detail: error instanceof Error ? error.message : String(error) });
+        throw error;
       } finally {
         fs.rmSync(dir, { recursive: true, force: true });
       }
@@ -942,12 +1014,15 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/v1/tts") {
       const payload = await readJson(req);
+      brain.emit({ neuron: "voice", state: "thinking", detail: String((payload && payload.voice) || "") || null });
       const wav = await synthesizeFile(payload);
       if (!wav) {
+        brain.emit({ neuron: "voice", state: "error", detail: "tts_unavailable" });
         res.writeHead(503, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "tts_unavailable" }));
         return;
       }
+      brain.emit({ neuron: "voice", state: "done" });
       res.writeHead(200, { "Content-Type": "audio/wav" });
       res.end(wav);
       return;
@@ -1908,6 +1983,16 @@ const server = http.createServer(async (req, res) => {
         model === "paid"
           ? "http://127.0.0.1:4000/v1/chat/completions"
           : `${llamaUrl}/v1/chat/completions`;
+      // The brain sees the chat neuron that serves this call: the live tier
+      // for local routes, hands (the paid gateway) for paid ones.
+      const paid = model === "paid";
+      const neuron = paid ? "hands" : `chat-${modelSwitch.state().current || "small"}`;
+      brain.emit({
+        neuron,
+        state: "thinking",
+        detail: paid ? "DeepSeek Flash via gateway" : null,
+      });
+      const ramPromise = paid ? null : llamaServerRamMb().catch(() => null);
       await pipeChatCompletion(
         req,
         res,
@@ -1915,6 +2000,7 @@ const server = http.createServer(async (req, res) => {
         body,
         model === "paid" ? "paid gateway is down" : "llama is down",
         model === "paid" ? CHAT_PROXY_TIMEOUT_MS : modelSwitch.chatTimeoutMs(),
+        { neuron, paid, local: !paid, ramPromise },
       );
       return;
     }

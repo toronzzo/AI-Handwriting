@@ -24,6 +24,7 @@ import { createLocalProposer, createPaidProposer } from "./computerPropose.mjs";
 import { createComputerSession } from "./computerSession.mjs";
 import { loadTask, saveTask } from "../tasks.mjs";
 import { confirmTaskStep } from "../taskRunner.mjs";
+import { sharedBrain } from "./neurons.mjs";
 
 function sendJson(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -69,6 +70,14 @@ function getComputerSession(ctx) {
 /** Test-only injection; the proxy never calls this. */
 export function _setComputerSessionForTests(session) {
   computerSessionForTests = session;
+}
+
+/** The brain the routes report through: the caller's own, else the shared one. */
+function brainFor(ctx) {
+  if (ctx.brain && typeof ctx.brain.emit === "function" && typeof ctx.brain.neurons === "function") {
+    return ctx.brain;
+  }
+  return sharedBrain(ctx.dataDir);
 }
 
 /** Reads a JSON body through the proxy helper; a thrown HttpError keeps its status. */
@@ -126,6 +135,44 @@ export async function handleOsRoute(ctx) {
   if (url.pathname === "/v1/persona/versions" && req.method === "GET") {
     // Revision lines only; the persona text never leaves the live file.
     return answered(res, 200, { versions: listVersions(dataDir) });
+  }
+
+  // The brain (slice N2): a snapshot of every neuron, and the live SSE feed.
+  if (url.pathname === "/v1/brain" && req.method === "GET") {
+    const brain = brainFor(ctx);
+    return answered(res, 200, { neurons: brain.neurons(), ts: nowMs });
+  }
+
+  if (url.pathname === "/v1/brain/stream" && req.method === "GET") {
+    const brain = brainFor(ctx);
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    const write = (text) => {
+      if (typeof res.write !== "function" || res.writableEnded || res.destroyed) return;
+      try {
+        res.write(text);
+      } catch {
+        /* the client left; nothing to do */
+      }
+    };
+    write("retry: 3000\n\n");
+    write(`event: snapshot\ndata: ${JSON.stringify({ neurons: brain.neurons(), ts: nowMs })}\n\n`);
+    const unsubscribe = brain.subscribe((event) => {
+      write(`event: neuron\ndata: ${JSON.stringify(event)}\n\n`);
+    });
+    // A comment line every 15 s keeps phones and proxies from dropping the
+    // connection; the browser's EventSource ignores comments.
+    const heartbeat = setInterval(() => write(": ping\n\n"), 15_000);
+    if (typeof heartbeat.unref === "function") heartbeat.unref();
+    res.on("close", () => {
+      unsubscribe();
+      clearInterval(heartbeat);
+    });
+    return true;
   }
 
   // The Yes/No card answer for a paused tool-loop step. Reads nothing else

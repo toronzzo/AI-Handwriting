@@ -18,6 +18,7 @@ import {
 } from "./os/toolLoop.mjs";
 import { toOpenAiTools } from "./os/mcp.mjs";
 import { appendTaskSpend, capUsd, spentTodayUsd } from "./coach/spendGate.mjs";
+import { sharedBrain } from "./os/neurons.mjs";
 
 const PLAN_SYSTEM = [
   "You plan small tasks for Preyas, a careful assistant.",
@@ -232,6 +233,7 @@ export async function runToolTask(root, task, options = {}) {
     now = () => Date.now(),
     searchNotesImpl = searchNotes,
     onLog = () => {},
+    brain = null,
   } = options;
   const modelJudge = judge !== undefined ? judge : llamaUrl ? llamaJudge({ llamaUrl, fetchImpl }) : null;
 
@@ -330,6 +332,7 @@ export async function runToolTask(root, task, options = {}) {
       confirmTtlMs,
       now,
       onLog,
+      brain: brain ?? sharedBrain(),
     });
   } catch (error) {
     // Both models down, or the loop itself broke: record it, never hang "running".

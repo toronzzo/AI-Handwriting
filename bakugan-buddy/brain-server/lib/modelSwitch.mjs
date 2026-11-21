@@ -15,11 +15,39 @@ import os from "node:os";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { MODEL_LABELS, switchNeedsConfirm } from "../../packages/alive/src/modelSwitch.ts";
+import { sharedBrain } from "./os/neurons.mjs";
 
 export const LLAMA_PORT = 8790;
 export const IDLE_RETURN_MS = 20 * 60_000;
 export const DEFAULT_IDLE_MODEL = "small";
 export const LOAD_TIMEOUT_MS = { small: 180_000, big: 300_000, huge: 600_000 };
+
+/** Resident memory of one pid in MB (ps reports rss in KB); null when unreadable. */
+export function ramOfPid(pid, execImpl = execFile) {
+  return new Promise((resolve) => {
+    execImpl("ps", ["-p", String(pid), "-o", "rss="], { timeout: 4000 }, (error, stdout) => {
+      if (error) return resolve(null);
+      const kb = Number(String(stdout).trim().split(/\s+/)[0]);
+      resolve(Number.isFinite(kb) && kb > 0 ? Math.round(kb / 1024) : null);
+    });
+  });
+}
+
+/**
+ * Resident memory of whatever llama-server holds :8790 — ours or the drive
+ * launcher's — or null when nothing listens. Used by the brain feed.
+ */
+export async function llamaServerRamMb(execImpl = execFile, port = LLAMA_PORT) {
+  const pid = await new Promise((resolve) => {
+    execImpl("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], { timeout: 4000 }, (error, stdout) => {
+      if (error) return resolve(null);
+      const found = Number(String(stdout).trim().split("\n")[0]);
+      resolve(Number.isInteger(found) && found > 0 ? found : null);
+    });
+  });
+  if (pid === null) return null;
+  return ramOfPid(pid, execImpl);
+}
 
 /**
  * The three tiers. Files live on the Agent drive, never in git.
@@ -78,7 +106,18 @@ export function createModelSwitch(options = {}) {
     now = () => Date.now(),
     log = (line) => console.warn(`model: ${line}`),
     idleReturnMs = IDLE_RETURN_MS,
+    brain = null,
   } = options;
+
+  const feed = brain ?? sharedBrain();
+  /** The brain feed is a nicety: a switch never fails because of it. */
+  function emitBrain(event) {
+    try {
+      feed.emit(event);
+    } catch {
+      /* the feed is a nicety */
+    }
+  }
 
   let current = DEFAULT_IDLE_MODEL;
   let status = "down"; // down | loading | ready | error
@@ -137,6 +176,13 @@ export function createModelSwitch(options = {}) {
         resolve(String(stdout).trim().split("/").pop());
       });
     });
+  }
+
+  /** Resident memory of the llama-server on our port, for the brain feed. */
+  async function probeRamMb() {
+    const pid = await portPid();
+    if (pid === null) return null;
+    return ramOfPid(pid, execImpl);
   }
 
   /** Stop whatever llama-server holds the port — ours or the drive launcher's. */
@@ -224,6 +270,10 @@ export function createModelSwitch(options = {}) {
       status = "loading";
       error = null;
       const tier = TIERS[target];
+      emitBrain({ neuron: `chat-${target}`, state: "loading", detail: tier.file });
+      if (current !== target) {
+        emitBrain({ neuron: `chat-${current}`, state: "off", detail: `switching to ${target}` });
+      }
       try {
         const gguf = path.join(modelsDir, tier.file);
         if (!fs.existsSync(gguf)) throw new Error(`model file is not on the drive: ${gguf}`);
@@ -241,6 +291,7 @@ export function createModelSwitch(options = {}) {
             if (status === "ready") {
               status = "down";
               error = `llama-server exited (${signal || code})`;
+              emitBrain({ neuron: `chat-${current}`, state: "off", detail: error });
             }
           });
         }
@@ -260,10 +311,14 @@ export function createModelSwitch(options = {}) {
         status = "ready";
         error = null;
         lastActivity = now();
+        // Loaded and idle reads as "off" in the brain view; thinking only
+        // lights up while a reply is being generated.
+        emitBrain({ neuron: `chat-${target}`, state: "off", ramMb: await probeRamMb() });
         scheduleIdle();
       } catch (err) {
         status = "error";
         error = err instanceof Error ? err.message : String(err);
+        emitBrain({ neuron: `chat-${target}`, state: "error", detail: error });
         log(`switch to ${target} failed: ${error}`);
       } finally {
         switching = false;
@@ -303,6 +358,7 @@ export function createModelSwitch(options = {}) {
           error = null;
           lastActivity = now();
           scheduleIdle();
+          emitBrain({ neuron: `chat-${tier.id}`, state: "off", ramMb: await probeRamMb(), detail: "already running" });
           return true;
         }
       }
@@ -321,10 +377,12 @@ export function createModelSwitch(options = {}) {
       error = null;
       lastActivity = now();
       scheduleIdle();
+      emitBrain({ neuron: `chat-${current}`, state: "off", ramMb: await probeRamMb() });
     } else if (!ok && status === "ready") {
       status = "down";
       error = "llama-server is down";
       clearIdleTimer();
+      emitBrain({ neuron: `chat-${current}`, state: "off", detail: error });
     }
     return state();
   }
