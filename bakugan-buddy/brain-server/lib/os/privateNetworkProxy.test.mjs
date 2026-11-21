@@ -93,6 +93,29 @@ test("the proxy blocks a private HTTPS CONNECT before opening its socket", async
   }
 });
 
+test("the proxy rejects IPv6 unspecified destinations before connect", async () => {
+  let connections = 0;
+  const proxy = createPrivateNetworkProxy({
+    lookup: async (host) => host === "0:0:0:0:0:0:0:0" ? ["0:0:0:0:0:0:0:0"] : ["::"],
+    connectSocket: () => {
+      connections += 1;
+      throw new Error("must not connect");
+    },
+  });
+  const endpoint = await proxy.start();
+  const proxyPort = Number(new URL(endpoint).port);
+  try {
+    for (const url of ["http://[::]/", "http://[0:0:0:0:0:0:0:0]/"]) {
+      const blocked = await proxyGet(proxyPort, url);
+      assert.equal(blocked.status, 451);
+      assert.match(blocked.body, /private-network guard/);
+    }
+    assert.equal(connections, 0, "unspecified IPv6 never opened a socket");
+  } finally {
+    await proxy.close();
+  }
+});
+
 test("the proxy waits for a task-scoped card before allowing a private HTTPS CONNECT", async () => {
   let privateConnections = 0;
   let requested;

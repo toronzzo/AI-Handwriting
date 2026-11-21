@@ -94,7 +94,8 @@ export function urlHost(url) {
 /**
  * True for the private IPv4 ranges (0/8, 10/8, 100.64/10, 127/8, 169.254/16,
  * 172.16/12, 192.168/16), ::1, IPv6 ULA fc00::/7, link-local fe80::/10 and
- * IPv4-mapped IPv6 (::ffff:a.b.c.d — the embedded IPv4 is what counts).
+ * IPv6 unspecified :: and IPv4-mapped IPv6 (::ffff:a.b.c.d — the embedded
+ * IPv4 is what counts).
  */
 export function isPrivateIp(ip) {
   const text = String(ip || "").trim().toLowerCase().replace(/^\[|\]$/g, "");
@@ -104,6 +105,7 @@ export function isPrivateIp(ip) {
   if (version === 6) {
     const groups = ipv6Groups(text);
     if (!groups) return false;
+    if (groups.every((group) => group === 0)) return true;
     if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
       const high = groups[6];
       const low = groups[7];

@@ -17,6 +17,8 @@ test("isPrivateIp knows every required range and nothing public", () => {
     "192.168.31.73",
     "169.254.169.254",
     "0.0.0.0",
+    "::",
+    "0:0:0:0:0:0:0:0",
     "::1",
     "0:0:0:0:0:0:0:1",
     "::ffff:10.0.0.1",
@@ -43,7 +45,6 @@ test("isPrivateIp knows every required range and nothing public", () => {
     "11.0.0.1",
     "::ffff:8.8.8.8",
     "::ffff:808:808",
-    "::",
     "2001:4860:4860::8888",
     "fbff::1",
     "fec0::1",
@@ -76,6 +77,16 @@ test("private IPv4-mapped IPv6 URL literals are recognized in every valid notati
       lookup: async () => { throw new Error("literal must not use DNS"); },
     });
     assert.equal(result.private, true, `${host} must be recognized without DNS`);
+  }
+});
+
+test("IPv6 unspecified URL literals are private before approval", async () => {
+  for (const host of ["::", "0:0:0:0:0:0:0:0"]) {
+    const result = await resolveNavPrivacy(`http://[${host}]/`, {
+      lookup: async () => { throw new Error("literal must not use DNS"); },
+    });
+    assert.equal(result.private, true);
+    assert.equal(isPrivateIp(result.address), true);
   }
 });
 
