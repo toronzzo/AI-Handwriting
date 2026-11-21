@@ -43,7 +43,9 @@ test("a slow command is killed at the timeout", async () => {
 
 test("output is capped at 4000 characters", async () => {
   const root = tempDir();
-  const result = await run("node -e \"process.stdout.write('x'.repeat(6000))\"", { root });
+  // POSIX tools only: CI's /bin/sh has no brace expansion, and the sandbox
+  // denies binaries outside the allowed roots.
+  const result = await run("head -c 6000 /dev/zero | tr '\\0' x", { root });
   assert.ok(result.stdout.length <= 4000 + 40);
   assert.match(result.stdout, /capped at 4000 chars/);
 });
@@ -135,6 +137,27 @@ test("checkCwd follows symlinks so a link cannot escape either", () => {
   fs.symlinkSync(outside, path.join(root, "link"));
   assert.throws(() => checkCwd(path.join(root, "link"), [root]), /outside the allowed folders/);
   assert.equal(checkCwd(root, [root]), fs.realpathSync(root));
+});
+
+test("the working folder cannot be a secret folder, even under a root", () => {
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, "secrets"), { recursive: true });
+  fs.mkdirSync(path.join(root, "agent", "secrets"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".ssh"), { recursive: true });
+  assert.throws(() => checkCwd(path.join(root, "secrets"), [root]), /secrets are off limits/);
+  assert.throws(() => checkCwd(path.join(root, "agent", "secrets"), [root]), /secrets are off limits/);
+  assert.throws(() => checkCwd(path.join(root, ".ssh"), [root]), /secrets are off limits/);
+  // A symlink to a secret folder is refused too: the real path is checked.
+  fs.symlinkSync(path.join(root, "secrets"), path.join(root, "innocent-link"));
+  assert.throws(() => checkCwd(path.join(root, "innocent-link"), [root]), /secrets are off limits/);
+  // A normal folder still works.
+  assert.equal(checkCwd(root, [root]), fs.realpathSync(root));
+});
+
+test("~/ paths expand to the home folder, which is outside every root", () => {
+  const root = tempDir();
+  assert.throws(() => checkCwd("~", [root]), /outside the allowed folders/);
+  assert.throws(() => checkCwd("~/Documents", [root]), /outside the allowed folders/);
 });
 
 test("the module entry points exist next to the brain server", () => {

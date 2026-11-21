@@ -29,6 +29,7 @@ function makeTask(overrides = {}) {
 const READ = { name: "files_read_text_file", args: { path: "/Volumes/Agent/agent/notes/a.md" } };
 const WRITE = { name: "files_write_file", args: { path: "/Volumes/Agent/agent/tmp/test.txt", content: "hi" } };
 const SHELL = { name: "shell_run", args: { command: "printf hi" } };
+const UPLOAD = { name: "browser_file_upload", args: { paths: ["/Volumes/Agent/agent/notes/a.md"] } };
 
 /** A model that always asks for one tool, then answers when tools are off. */
 function toolThenAnswer(tool = READ, answer = "final answer") {
@@ -137,6 +138,7 @@ test("writes and shell commands wait for a Yes/No card, reads do not", async () 
     })(),
     review: async () => ({ verdict: "allow", why: "reading is safe" }),
   });
+
   const readConfirm = [];
   readDeps.confirm = async () => {
     readConfirm.push(1);
@@ -188,6 +190,55 @@ test("writes and shell commands wait for a Yes/No card, reads do not", async () 
   assert.equal(shellDone.steps[0].status, "done");
   assert.match(shellDone.steps[0].result, /You said no/);
   assert.equal(shellDeps.seen.length, 0);
+});
+
+test("a confirmed private navigation passes its exact destination to execution", async () => {
+  const task = makeTask();
+  const destination = { url: "http://router.local:8080/", host: "router.local", port: 8080, address: "192.168.1.1" };
+  const model = toolThenAnswer({ name: "browser_navigate", args: { url: destination.url } });
+  let executeContext = null;
+  const deps = baseDeps({
+    callModel: model.model,
+    review: async () => ({ verdict: "ask", why: "opening router.local:8080 needs your confirmation", privateDestinations: [destination] }),
+    execute: async (_name, _args, context) => {
+      executeContext = context;
+      return "opened";
+    },
+    confirm: async () => "yes",
+  });
+  await runToolLoop(task, deps);
+  assert.deepEqual(executeContext, { privateDestinations: [destination] });
+});
+
+test("the confirm card carries the detail text for uploads", async () => {
+  const task = makeTask();
+  const seen = [];
+  const deps = baseDeps({
+    callModel: (() => {
+      let round = 0;
+      return async (log, { allowTools }) => {
+        round += 1;
+        if (!allowTools || round > 1) return { answer: "done", model: "deepseek-flash" };
+        return { toolCalls: [UPLOAD], model: "deepseek-flash" };
+      };
+    })(),
+    review: async () => ({ verdict: "ask", why: "controlling your computer always needs your OK" }),
+    confirmDetail: async (name, args, current) =>
+      name === "browser_file_upload"
+        ? "Uploading 1 file to https://example.com/contact:\n- a.md — /Volumes/Agent/agent/notes/a.md (12 B)"
+        : "",
+    confirm: async (current, step, pending) => {
+      seen.push({ why: pending.why, detail: pending.detail, token: pending.token });
+      return "yes";
+    },
+  });
+  const finished = await runToolLoop(task, deps);
+  assert.equal(finished.steps[0].status, "done");
+  assert.equal(seen.length, 1);
+  assert.match(seen[0].why, /needs your OK/);
+  assert.match(seen[0].detail, /a\.md/);
+  assert.match(seen[0].detail, /12 B/);
+  assert.match(seen[0].detail, /example\.com\/contact/);
 });
 
 test("a stale paused confirm from before a restart is closed silently", async () => {

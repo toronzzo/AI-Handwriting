@@ -6,12 +6,15 @@
  *
  *   files_*   -> @modelcontextprotocol/server-filesystem
  *   shell_*   -> lib/os/terminalServer.mjs (our tiny terminal server)
- *   browser_* -> @playwright/mcp (official Playwright MCP server)
+ * browser_* -> @playwright/mcp (official Playwright MCP server, behind the
+ *              private-network request proxy)
  *
  * Memory rules (16 GB Mac): the Playwright server is started ONLY when a
  * browser tool is first used, and it is stopped after 5 minutes without a
  * browser call. Its tool schemas are static (browserTools.mjs, pinned to the
  * installed @playwright/mcp version) so listing tools never starts it.
+ * The browser process uses a loopback proxy that checks and pins every
+ * HTTP(S) destination before opening its socket.
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -21,6 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSafePath, SAFE_ROOT } from "../safeFs.mjs";
 import { browserToolSpecs, BROWSER_TOOL_NAMES } from "./browserTools.mjs";
+import { createPrivateNetworkProxy } from "./privateNetworkProxy.mjs";
 import { DEFAULT_MAX_OUTPUT, DEFAULT_TIMEOUT_MS } from "./terminalServer.mjs";
 
 export const MCP_IDLE_MS = 5 * 60_000;
@@ -163,6 +167,9 @@ export function spawnArgs(moduleName, serverConfig, { dataDir = "" } = {}) {
     };
   }
   const outputDir = serverConfig.outputDir || path.join(dataDir || os.tmpdir(), "mcp", "shots");
+  const proxyArgs = serverConfig.proxyServer
+    ? ["--proxy-server", serverConfig.proxyServer, "--proxy-bypass", "<-loopback>"]
+    : [];
   return {
     command: process.execPath,
     args: [
@@ -178,7 +185,8 @@ export function spawnArgs(moduleName, serverConfig, { dataDir = "" } = {}) {
       "--timeout-action",
       "15000",
       "--timeout-navigation",
-      "60000",
+      "300000",
+      ...proxyArgs,
     ],
   };
 }
@@ -275,6 +283,9 @@ export function createMcpHub(options = {}) {
   } = options;
 
   const state = new Map(); // module -> { connection, broken }
+  const privateProxy = createPrivateNetworkProxy();
+  let browserTaskContext = null;
+  const browserTaskWaiters = [];
   let browserTimer = null;
 
   function serverConfig(moduleName) {
@@ -289,11 +300,16 @@ export function createMcpHub(options = {}) {
     if (existing && existing.starting) return existing.starting;
     const starting = (async () => {
       try {
-        const connection = await connect(moduleName, cfg, { env, dataDir });
+        const effectiveConfig = moduleName === "browser"
+          ? { ...cfg, proxyServer: await privateProxy.start() }
+          : cfg;
+        if (moduleName === "browser") privateProxy.setTaskContext(browserTaskContext);
+        const connection = await connect(moduleName, effectiveConfig, { env, dataDir });
         state.set(moduleName, { connection });
         log(`mcp: ${moduleName} server started`);
         return connection;
       } catch (error) {
+        if (moduleName === "browser") await privateProxy.close();
         state.delete(moduleName);
         const message = error instanceof Error ? error.message : String(error);
         log(`mcp: ${moduleName} server failed: ${message}`);
@@ -327,6 +343,7 @@ export function createMcpHub(options = {}) {
       browserTimer = null;
     }
     await stopOne("browser");
+    await privateProxy.close();
   }
 
   /** Reset the 5-minute idle clock after every browser call. */
@@ -342,6 +359,33 @@ export function createMcpHub(options = {}) {
 
   return {
     config,
+
+    async setBrowserTaskContext(context) {
+      const taskId = String(context?.taskId || "");
+      if (!context) throw new Error("a browser task context is required");
+      await new Promise((resolve) => {
+        const acquire = () => {
+          browserTaskContext = { ...context, taskId };
+          privateProxy.setTaskContext(browserTaskContext);
+          resolve();
+        };
+        if (browserTaskContext) browserTaskWaiters.push(acquire);
+        else acquire();
+      });
+      let released = false;
+      return () => {
+        if (released || browserTaskContext?.taskId !== taskId) return;
+        released = true;
+        browserTaskContext = null;
+        privateProxy.setTaskContext(null);
+        const next = browserTaskWaiters.shift();
+        if (next) next();
+      };
+    },
+
+    approveBrowserDestination(destination, taskId) {
+      return privateProxy.approveDestination(destination, taskId);
+    },
 
     /**
      * Tool specs for the model: live files + shell tools, static browser
@@ -404,6 +448,9 @@ export function createMcpHub(options = {}) {
         browserTimer = null;
       }
       for (const moduleName of MODULES) await stopOne(moduleName);
+      await privateProxy.close();
+      browserTaskContext = null;
+      browserTaskWaiters.length = 0;
     },
   };
 }

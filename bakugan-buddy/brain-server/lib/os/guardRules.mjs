@@ -4,7 +4,7 @@
  * the local model is only a tie-breaker for "unsure" and can only tighten.
  */
 import { resolveSafePath, SAFE_ROOT } from "../safeFs.mjs";
-import { SHELL_SECRET } from "./terminalServer.mjs";
+import { SECRET_PATH_SEGMENT, SHELL_SECRET } from "./terminalServer.mjs";
 
 export const KINDS = {
   read: new Set([
@@ -67,7 +67,8 @@ export const WRITE_INTENT = {
   reminder: /(?:^|[^a-zа-яё0-9])(remind|reminder|напомни|напомнить|напоминание)(?=$|[^a-zа-яё0-9])/iu,
 };
 
-export const SECRET_SEGMENT = /(^|\/)(secrets|\.env(\..*)?|.*\.pem|.*\.key|id_rsa.*|.*token.*)($|\/)/i;
+/** Secret segments in a path (the one list, shared with the terminal server). */
+export const SECRET_SEGMENT = SECRET_PATH_SEGMENT;
 export const PATH_SEGMENT_DOTS = /(^|\/)\.\.(\/|$)/;
 /** A URL with a scheme (anything but http/https) is refused; "note: x" is not a URL. */
 export const URL_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -78,8 +79,9 @@ export const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 /** File content may contain newlines and tabs; other control characters stay blocked. */
 export const FILE_CONTENT_CONTROLS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 
-/** Path-like arguments that must resolve under the safe roots. */
-const PATH_ARG_KEYS = ["path", "file", "target", "source", "destination", "cwd"];
+/** Path-like arguments that must resolve under the safe roots. `paths` is the
+ * array form (browser uploads, multi-file reads): every entry is checked. */
+const PATH_ARG_KEYS = ["path", "file", "target", "source", "destination", "cwd", "paths"];
 
 function pathArgs(action) {
   if (!action || typeof action.args !== "object" || action.args === null) return [];
@@ -211,6 +213,17 @@ export function reviewRules(action, deps = {}) {
   // plain-English reason is the one reported).
   if (kind === "shell_run") {
     findings.push({ id: "R10", verdict: "ask", why: "running a shell command needs your confirmation" });
+  }
+
+  // R11: navigating to a local or private address always asks first. The
+  // verdict arrives through deps.nav, which the guard fills by resolving the
+  // URL's hostname (so a public name pointing at a private IP asks too).
+  if (kind === "browser_navigate" && deps.nav && deps.nav.private) {
+    const destination = deps.nav.privateDestination;
+    const target = destination
+      ? `${destination.host}:${destination.port}${destination.address ? ` (${destination.address})` : ""}`
+      : deps.nav.host || "a local or private address";
+    findings.push({ id: "R11", verdict: "ask", why: `opening ${target} needs your confirmation` });
   }
 
   // R8: control kinds are always ask (a later slice's deny list may block first).

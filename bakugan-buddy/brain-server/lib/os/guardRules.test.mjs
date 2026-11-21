@@ -269,6 +269,69 @@ test("browser reads allow, interactive browser tools ask", () => {
   assert.equal(file.id, "R7");
 });
 
+test("R11: navigating to a local or private address asks, public allows", () => {
+  const nav = (url, nav) => decide(reviewRules(action({ kind: "browser_navigate", args: { url } }), { nav }));
+  // The guard resolves the hostname first: these arrive with private: true.
+  const privateIp = nav("http://192.168.31.73:8081/", { private: true, host: "192.168.31.73" });
+  assert.equal(privateIp.verdict, "ask");
+  assert.equal(privateIp.id, "R11");
+  assert.match(privateIp.why, /192\.168\.31\.73/);
+  const rebind = nav("https://innocent.example.com/", { private: true, host: "innocent.example.com", address: "10.0.0.5" });
+  assert.equal(rebind.verdict, "ask");
+  assert.equal(rebind.id, "R11");
+  // A public address (resolved, not private) stays a plain read: allowed.
+  const publicUrl = nav("https://example.com/", { private: false, host: "example.com" });
+  assert.equal(publicUrl.verdict, "allow");
+  const noInfo = nav("https://example.com/");
+  assert.equal(noInfo.verdict, "allow");
+});
+
+test("browser uploads check every path and always need the card", () => {
+  const dir = tempDir();
+  const repo = tempDir();
+  const outside = tempDir();
+  try {
+    const deps = { fsRoot: dir, repoRoot: repo };
+    const upload = (paths) => decide(reviewRules(action({ kind: "browser_file_upload", args: { paths } }), deps));
+
+    // Even a safe upload needs the Yes/No card (R8).
+    const safe = upload([path.join(dir, "notes", "a.md")]);
+    assert.equal(safe.verdict, "ask");
+    assert.equal(safe.id, "R8");
+
+    // A "../" escape is refused.
+    const dots = upload([path.join(dir, "..", "escape.txt")]);
+    assert.equal(dots.verdict, "block");
+    assert.equal(dots.id, "R2");
+
+    // A symlink inside a root that points outside is refused (real path).
+    fs.symlinkSync(outside, path.join(dir, "link-out"));
+    const linked = upload([path.join(dir, "link-out", "file.txt")]);
+    assert.equal(linked.verdict, "block");
+    assert.equal(linked.id, "R2");
+
+    // Secret paths stay blocked even under a safe root.
+    const secret = upload([path.join(dir, "notes", "my-token.txt")]);
+    assert.equal(secret.verdict, "block");
+    assert.equal(secret.id, "R2");
+    assert.equal(upload(["/Volumes/Agent/agent/secrets/.env"]).verdict, "block");
+
+    // Every entry is checked, not just the first one.
+    const mixed = upload([path.join(dir, "notes", "a.md"), "/etc/passwd"]);
+    assert.equal(mixed.verdict, "block");
+    assert.equal(mixed.id, "R2");
+
+    // Multi-file reads use the same "paths" key and get the same protection.
+    const read = decide(reviewRules(action({ kind: "files_read_multiple_files", args: { paths: [path.join(dir, "..", "x.md")] } }), deps));
+    assert.equal(read.verdict, "block");
+    assert.equal(read.id, "R2");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test("multi-line file content is allowed, other control characters stay blocked", () => {
   const multiline = decide(
     reviewRules(action({ kind: "files_write_file", args: { path: "/Volumes/Agent/agent/tmp/x.txt", content: "line one\nline two\ttabbed" } })),

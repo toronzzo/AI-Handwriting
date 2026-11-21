@@ -74,13 +74,41 @@ export function capUsd(dataDir) {
   }
 }
 
-/** spent + estimate must stay under the cap. Read-only. */
-export function allowPaid(dataDir, estimateUsd, now = new Date()) {
+/**
+ * Costs of work still running, keyed by owner ("task:<id>", "harness:<id>").
+ * A running task registers its accrued gateway cost (and the harness its
+ * worst-case estimate), so parallel or long runs count against the one daily
+ * cap BEFORE their spend line is written to disk.
+ */
+const inFlight = new Map();
+
+export function setInFlightCost(key, usd) {
+  const value = Number(usd);
+  if (!Number.isFinite(value) || value <= 0) inFlight.delete(String(key));
+  else inFlight.set(String(key), value);
+  return inFlightCostUsd();
+}
+
+/** The summed in-flight cost of everything still running. */
+export function inFlightCostUsd() {
+  let total = 0;
+  for (const value of inFlight.values()) {
+    if (Number.isFinite(value) && value > 0) total += value;
+  }
+  return total;
+}
+
+/** spent + in-flight + estimate must stay under the cap. Read-only.
+ * The in-flight ledger total is included by DEFAULT, so every existing call
+ * site counts work that is still running; callers may pass an explicit value
+ * (tests) but cannot accidentally skip it. */
+export function allowPaid(dataDir, estimateUsd, now = new Date(), inFlightUsd = inFlightCostUsd()) {
   const spent = spentTodayUsd(dataDir, now);
   const cap = capUsd(dataDir);
   const estimate = Number(estimateUsd) || 0;
-  if (spent + estimate > cap) {
-    return { allowed: false, reason: "over_cap", spentTodayUsd: spent, capUsd: cap };
+  const running = Math.max(0, Number(inFlightUsd) || 0);
+  if (spent + running + estimate > cap) {
+    return { allowed: false, reason: "over_cap", spentTodayUsd: spent, inFlightUsd: running, capUsd: cap };
   }
-  return { allowed: true, reason: "ok", spentTodayUsd: spent, capUsd: cap };
+  return { allowed: true, reason: "ok", spentTodayUsd: spent, inFlightUsd: running, capUsd: cap };
 }

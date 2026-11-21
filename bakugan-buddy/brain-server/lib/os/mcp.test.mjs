@@ -11,6 +11,7 @@ import {
   loadMcpConfig,
   MCP_IDLE_MS,
   MAX_TOOL_RESULT_CHARS,
+  spawnArgs,
   splitToolName,
   toOpenAiTools,
 } from "./mcp.mjs";
@@ -191,5 +192,28 @@ test("every curated browser tool is a known guard kind", async () => {
   for (const name of names) {
     const known = Object.values(KINDS).some((set) => set.has(name));
     assert.ok(known, `${name} is missing from guard KINDS`);
+  }
+});
+
+test("the browser MCP server routes traffic through the private-network proxy", () => {
+  const { args } = spawnArgs("browser", { outputDir: "/tmp/shots", proxyServer: "http://127.0.0.1:12345" });
+  assert.deepEqual(args.slice(-4), ["--proxy-server", "http://127.0.0.1:12345", "--proxy-bypass", "<-loopback>"]);
+});
+
+test("the browser hub starts a loopback proxy before connecting the MCP server", async () => {
+  const config = defaultMcpConfig({ repoRoot: tempDir(), dataDir: tempDir() });
+  let browserConfig = null;
+  const hub = createMcpHub({
+    config,
+    connect: async (moduleName, serverConfig) => {
+      if (moduleName === "browser") browserConfig = serverConfig;
+      return { listTools: async () => [], callTool: async () => ({ content: [] }), close: async () => {} };
+    },
+  });
+  try {
+    await hub.callTool("browser_snapshot", {});
+    assert.match(browserConfig.proxyServer, /^http:\/\/127\.0\.0\.1:\d+$/);
+  } finally {
+    await hub.stop();
   }
 });

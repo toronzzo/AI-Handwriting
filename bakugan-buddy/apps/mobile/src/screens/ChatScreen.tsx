@@ -1456,7 +1456,7 @@ export function ChatScreen({
                 stepId: waiting.id,
                 token: waiting.pendingConfirm!.token,
                 title: "May I run this?",
-                body: `${waiting.text}\n\n${waiting.pendingConfirm!.why}`,
+                body: `${waiting.text}\n\n${waiting.pendingConfirm!.why}${waiting.pendingConfirm!.detail ? `\n\n${waiting.pendingConfirm!.detail}` : ""}`,
               };
             });
           }

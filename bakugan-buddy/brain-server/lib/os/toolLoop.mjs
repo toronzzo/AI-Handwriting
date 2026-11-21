@@ -246,7 +246,7 @@ export function trimLocalLog(log, maxChars = MAX_LOCAL_CONTEXT_CHARS) {
  * deps.save() after every change so a restart can resume. deps:
  *   callModel(messages, { allowTools }) -> { answer? } | { toolCalls:[{name,args}] }
  *   review(action) -> { verdict: "allow"|"ask"|"block", why }
- *   execute(name, args) -> result string
+ *   execute(name, args, context) -> result string
  *   confirm(task, step, pending) -> "yes" | "no" | "expired"
  *   save(), maxSteps, activity (optional { begin, done, fail })
  *   brain (optional { emit }) — the hands neuron reports every model call and
@@ -258,6 +258,7 @@ export async function runToolLoop(task, deps) {
     review,
     execute,
     confirm,
+    confirmDetail = null,
     save = () => {},
     maxSteps = TOOL_LOOP_MAX_STEPS,
     activity = null,
@@ -312,12 +313,12 @@ export async function runToolLoop(task, deps) {
     };
   };
 
-  const runOne = async (step, name, args) => {
+  const runOne = async (step, name, args, executeContext = {}) => {
     const started = mark(step, { name, args });
     const label = labelForTool(name, args);
     feed({ neuron: "hands", state: "thinking", detail: label });
     try {
-      const raw = await execute(name, args);
+      const raw = await execute(name, args, executeContext);
       const result = String(raw ?? "").slice(0, MAX_TOOL_RESULT_CHARS);
       if (started) started.done();
       feed({ neuron: "hands", state: "done", detail: label });
@@ -410,9 +411,20 @@ export async function runToolLoop(task, deps) {
 
     let result;
     if (verdict.verdict === "ask") {
+      // The card's extra detail (file list for uploads) is a nicety: a
+      // failing detail builder never blocks the confirmation.
+      let detail = "";
+      if (typeof confirmDetail === "function") {
+        try {
+          detail = String((await confirmDetail(call.name, args, task)) || "");
+        } catch {
+          detail = "";
+        }
+      }
       const pending = {
         token: randomToken(),
         why: String(verdict.why || "this needs your confirmation"),
+        detail,
         action,
         expiresAt: now() + confirmTtlMs,
         answered: null,
@@ -430,7 +442,7 @@ export async function runToolLoop(task, deps) {
         task.status = "running";
         task.updated = Date.now();
         save();
-        result = await runOne(step, call.name, args);
+        result = await runOne(step, call.name, args, { privateDestinations: verdict.privateDestinations || [] });
         step.status = "done";
       } else {
         step.pendingConfirm = undefined;

@@ -3,6 +3,7 @@
  * tool (notes, list, read) before the model writes its short result, and the
  * task file is saved after every step so a restart can resume.
  */
+import crypto from "node:crypto";
 import { parsePlan } from "../../packages/alive/src/tasks.ts";
 import { searchNotes } from "./notes.mjs";
 import { listDir, readTextFile } from "./safeFs.mjs";
@@ -17,7 +18,8 @@ import {
   trimLocalLog,
 } from "./os/toolLoop.mjs";
 import { toOpenAiTools } from "./os/mcp.mjs";
-import { appendTaskSpend, capUsd, spentTodayUsd } from "./coach/spendGate.mjs";
+import { uploadCardDetail } from "./os/uploadCard.mjs";
+import { allowPaid, appendTaskSpend, setInFlightCost } from "./coach/spendGate.mjs";
 import { sharedBrain } from "./os/neurons.mjs";
 
 const PLAN_SYSTEM = [
@@ -250,10 +252,19 @@ export async function runToolTask(root, task, options = {}) {
   let mode = "gateway";
   let totalUsd = 0;
 
+  // One gateway call costs at most ~1000 completion tokens plus ~3.5K prompt
+  // tokens (the local context cap) — about $0.0011; $0.002 covers it with
+  // margin. It is reserved BEFORE the call so the cap can never be exceeded
+  // by several calls racing in parallel.
+  const GATEWAY_CALL_RESERVE_USD = 0.002;
+
   const overCap = () => {
     try {
       const at = new Date(typeof now === "function" ? now() : Date.now());
-      return spentTodayUsd(root, at) >= capUsd(root);
+      // allowPaid sums finished spend plus everything still running (this
+      // task's reserved/accrued gateway cost included), so a long or
+      // parallel task falls back to the local model instead of overshooting.
+      return !allowPaid(root, 0, at).allowed;
     } catch {
       return false;
     }
@@ -263,6 +274,7 @@ export async function runToolTask(root, task, options = {}) {
     if (mode === "gateway") {
       try {
         if (overCap()) throw new Error("daily limit reached; using the local model");
+        setInFlightCost(`task:${task.id}`, totalUsd + GATEWAY_CALL_RESERVE_USD);
         const result = await gatewayChat({
           gatewayUrl,
           fetchImpl,
@@ -272,8 +284,10 @@ export async function runToolTask(root, task, options = {}) {
         const promptTokens = Number(result.usage?.prompt_tokens) || 0;
         const completionTokens = Number(result.usage?.completion_tokens) || 0;
         totalUsd += (promptTokens * 0.15 + completionTokens * 0.6) / 1_000_000;
+        setInFlightCost(`task:${task.id}`, totalUsd);
         return { ...result, model: "deepseek-flash" };
       } catch (error) {
+        setInFlightCost(`task:${task.id}`, totalUsd); // the failed call billed nothing
         mode = "local";
         onLog(`mcp: gateway failed (${error instanceof Error ? error.message : String(error)}); using the local model`);
       }
@@ -291,12 +305,34 @@ export async function runToolTask(root, task, options = {}) {
       now,
     });
 
-  const execute = async (name, args) => {
+  /** Extra text on the Yes/No card: uploads list every file and the site. */
+  const confirmDetail = (name, args, task) => {
+    if (name !== "browser_file_upload") return "";
+    try {
+      return uploadCardDetail(args, { fsRoot, repoRoot, task });
+    } catch {
+      return "";
+    }
+  };
+
+  let releaseBrowserTask = () => {};
+  let browserTaskHeld = false;
+
+  const execute = async (name, args, executeContext = {}) => {
     if (name === "search_notes") {
       const hits = searchNotesImpl(root, String((args && args.query) || ""), 5);
       return hits.length ? hits.map((note) => `- ${note.text}`).join("\n") : "no notes found";
     }
     if (!hub || typeof hub.callTool !== "function") throw new Error("tools are not available");
+    if (name.startsWith("browser_") && !browserTaskHeld && typeof hub.setBrowserTaskContext === "function") {
+      releaseBrowserTask = await hub.setBrowserTaskContext({ taskId: task.id, onPrivateRequest: confirmPrivateRequest });
+      browserTaskHeld = true;
+    }
+    if (typeof hub.approveBrowserDestination === "function") {
+      for (const destination of executeContext.privateDestinations || []) {
+        hub.approveBrowserDestination(destination, task.id);
+      }
+    }
     return hub.callTool(name, args);
   };
 
@@ -304,17 +340,59 @@ export async function runToolTask(root, task, options = {}) {
     new Promise((resolve) => {
       const key = `${current.id}:${step.id}`;
       let settled = false;
+      let timer;
       const finish = (value) => {
         if (!settled) {
           settled = true;
+          clearTimeout(timer);
           confirmWaiters.delete(key);
           resolve(value);
         }
       };
       confirmWaiters.set(key, { resolve: finish });
       const ttl = Math.max(1_000, Number(pending.expiresAt) - (typeof now === "function" ? now() : Date.now()));
-      setTimeout(() => finish("expired"), ttl);
+      timer = setTimeout(() => finish("expired"), ttl);
     });
+
+  const confirmPrivateRequest = async (destination) => {
+    const url = String(destination?.url || "");
+    const host = String(destination?.host || "unknown");
+    const port = Number(destination?.port) || 0;
+    const address = String(destination?.address || "unknown");
+    const step = {
+      id: Math.max(0, ...(task.steps || []).map((row) => Number(row.id) || 0)) + 1,
+      text: `Allow browser request to ${host}:${port}?`,
+      status: "paused",
+      tool: null,
+    };
+    const pending = {
+      token: crypto.randomBytes(12).toString("hex"),
+      why: `opening ${host}:${port} at ${address} needs your confirmation`,
+      detail: "This permission applies only to this host, port, address, and task.",
+      action: { kind: "browser_navigate", args: { url }, origin: "user", source: "task" },
+      expiresAt: (typeof now === "function" ? now() : Date.now()) + confirmTtlMs,
+      answered: null,
+    };
+    step.pendingConfirm = pending;
+    task.steps = [...(task.steps || []), step];
+    task.status = "paused";
+    task.updated = Date.now();
+    saveTask(root, task);
+
+    const decision = await confirm(task, step, pending);
+    pending.answered = decision;
+    step.pendingConfirm = undefined;
+    step.status = "done";
+    step.result = decision === "yes"
+      ? `You approved ${host}:${port} at ${address} for this task.`
+      : decision === "no"
+        ? `You denied ${host}:${port} at ${address}.`
+        : `No answer in time; ${host}:${port} at ${address} was blocked.`;
+    task.status = "running";
+    task.updated = Date.now();
+    saveTask(root, task);
+    return decision === "yes";
+  };
 
   task.status = "running";
   task.updated = Date.now();
@@ -326,6 +404,7 @@ export async function runToolTask(root, task, options = {}) {
       review,
       execute,
       confirm,
+      confirmDetail,
       save: () => saveTask(root, task),
       activity: onActivity,
       maxSteps,
@@ -349,6 +428,8 @@ export async function runToolTask(root, task, options = {}) {
     ];
     task.updated = Date.now();
     saveTask(root, task);
+  } finally {
+    releaseBrowserTask();
   }
 
   if (totalUsd > 0) {
@@ -358,6 +439,8 @@ export async function runToolTask(root, task, options = {}) {
       /* spend logging is best effort */
     }
   }
+  // The finished spend is on disk now; the in-flight entry must not double-count.
+  setInFlightCost(`task:${task.id}`, 0);
   return task;
 }
 

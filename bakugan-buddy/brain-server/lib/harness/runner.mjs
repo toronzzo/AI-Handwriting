@@ -27,7 +27,7 @@ import { canStart, hashPrompt, lintPrompt, redact } from "./guard.mjs";
 import { buildPrompt, draftTask as draftTaskWithLlama, slugFor, TASK_MAX } from "./promptTemplate.mjs";
 import { DEFAULT_MAX_MINUTES } from "./adapter.mjs";
 import { recordHarnessSpend } from "./spend.mjs";
-import { capUsd, spentTodayUsd } from "../coach/spendGate.mjs";
+import { capUsd, inFlightCostUsd, setInFlightCost, spentTodayUsd } from "../coach/spendGate.mjs";
 
 /** The Generate box accepts at most this many characters. */
 export const MAX_GOAL_CHARS = 400;
@@ -272,7 +272,7 @@ export function createHarnessRunner({
     };
     drafts.set(entry.id, entry);
     pruneDrafts();
-    const spent = spentTodayUsd(dataDir, new Date(now()));
+    const spent = spentTodayUsd(dataDir, new Date(now())) + inFlightCostUsd();
     const cap = capUsd(dataDir);
     const check = canStart({
       draft: entry,
@@ -299,7 +299,7 @@ export function createHarnessRunner({
       return { ok: false, code: "BAD_ANSWER", reason: 'answer must be "yes" or "no".' };
     }
     const entry = drafts.get(String(draftId || ""));
-    const spent = spentTodayUsd(dataDir, new Date(now()));
+    const spent = spentTodayUsd(dataDir, new Date(now())) + inFlightCostUsd();
     const cap = capUsd(dataDir);
     const check = canStart({
       draft: entry,
@@ -332,6 +332,10 @@ export function createHarnessRunner({
     const mine = run && run.id === runId ? run : null;
     let outcome = null;
     let startedSomething = true;
+    // While this run works, its worst-case estimate counts against the one
+    // daily cap for everyone else (tool tasks included) — parallel work
+    // cannot overshoot the cap together.
+    setInFlightCost(`harness:${runId}`, Number(entry.estimate?.usdHigh) || 0);
     try {
       if (typeof adapter.setSecrets === "function") adapter.setSecrets(secrets.env);
       const cap = capUsd(dataDir);
@@ -409,6 +413,7 @@ export function createHarnessRunner({
     } finally {
       // Only this run's lock may be released: stop() and a following run may
       // already own the file by the time the adapter finishes.
+      setInFlightCost(`harness:${runId}`, 0);
       if (readLock()?.runId === runId) releaseLock();
       if (active === state) active = null;
     }
