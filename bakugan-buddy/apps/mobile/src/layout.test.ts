@@ -6,7 +6,11 @@ import {
   isPhone,
   isWide,
   listWidth,
+  PAGE_MAX,
+  pageColumn,
+  pageGridColumns,
   ROOT_ATTR,
+  SETTINGS_PROBE_MS,
   SHELL_ATTR,
   STAGE_ATTR,
   todayColumns,
@@ -66,4 +70,22 @@ test("the browser shell can shrink to the window, so the rail keeps Settings", (
 test("every shell size is a whole number of pixels", () => {
   for (const value of Object.values(theme.size)) assert.ok(Number.isInteger(value) && value > 0);
   for (const value of Object.values(theme.space)) assert.equal(value % 4, 0);
+});
+
+test("Learn and Memory content is capped near 900px on a desktop window", () => {
+  assert.equal(PAGE_MAX, 900);
+  assert.deepEqual(pageColumn(1440), { maxWidth: 900, width: "100%", alignSelf: "center" });
+  assert.deepEqual(pageColumn(390), { maxWidth: 390, width: "100%", alignSelf: "center" });
+  assert.equal(pageGridColumns(1440), 2);
+  assert.equal(pageGridColumns(390), 1);
+});
+
+test("settings status probes stay bounded", () => {
+  assert.ok(SETTINGS_PROBE_MS >= 2_000 && SETTINGS_PROBE_MS <= 10_000);
+});
+
+test("phone and desktop widths stay distinct for the polish pass", () => {
+  assert.equal(isPhone(390, 844), true);
+  assert.equal(isWide(1440), true);
+  assert.equal(chatColumn(1440).maxWidth, theme.size.maxChat);
 });

@@ -127,10 +127,11 @@ export default function App() {
           setAdvanced(null);
           setSection("settings");
         }}
+        hitSlop={8}
         accessibilityRole="button"
-        accessibilityLabel={SETTINGS_ENTRY.label}
+        accessibilityLabel="Settings"
       >
-        <Text style={[styles.tabIcon, section === "settings" && !advanced && styles.tabIconOn]}>{SETTINGS_ENTRY.icon}</Text>
+        <Text style={[styles.gearIcon, section === "settings" && !advanced && styles.tabIconOn]}>{SETTINGS_ENTRY.icon}</Text>
       </Pressable>
     </>
   );
@@ -281,12 +282,23 @@ const styles = StyleSheet.create({
     paddingBottom: theme.space.sm,
     paddingHorizontal: theme.space.sm,
   },
-  barTabs: { flex: 1, flexDirection: "row" },
+  barTabs: { flex: 1, flexDirection: "row", minWidth: 0 },
   barTab: { flex: 1, alignItems: "center", justifyContent: "center", gap: theme.space.xs / 2, minHeight: 44, paddingVertical: theme.space.xs / 2, borderRadius: theme.radius.sm },
   barTabOn: { backgroundColor: theme.accent },
-  barGear: { alignItems: "center", justifyContent: "center", minHeight: 44, paddingHorizontal: theme.space.md, paddingVertical: theme.space.xs / 2, borderRadius: theme.radius.sm },
+  barGear: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+    minWidth: 48,
+    paddingHorizontal: theme.space.md,
+    paddingVertical: theme.space.xs / 2,
+    borderRadius: theme.radius.sm,
+    opacity: 1,
+  },
   barGearOn: { backgroundColor: theme.accent },
   tabIcon: { fontSize: theme.type.title, color: theme.dim },
+  /** Settings gear stays full-opacity so it never looks disabled. */
+  gearIcon: { fontSize: theme.type.title, color: theme.text, opacity: 1 },
   tabIconOn: { color: theme.onAccent },
   barLabel: { color: theme.dim, fontSize: theme.type.label, fontWeight: "600" },
   barLabelOn: { color: theme.onAccent },

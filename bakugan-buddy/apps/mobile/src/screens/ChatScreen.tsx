@@ -70,7 +70,7 @@ import {
 import { patchVoiceSettings, readVoiceSettings, type VoiceSettings } from "../voice/voiceSettings";
 import { PreyasHeroSwitch } from "../today/PreyasHeroSwitch";
 import { tabById, type Section } from "../nav";
-import { chatColumn, isPhone, isWide } from "../layout";
+import { chatColumn, isPhone, isWide, pageColumn, pageGridColumns, SETTINGS_PROBE_MS } from "../layout";
 import { useArt } from "../art/slots.ts";
 import { usePhotoSwitcher } from "../ui/ArtSlot";
 import { ActivityPanel } from "../activity/ActivityPanel";
@@ -337,7 +337,10 @@ export function ChatScreen({
   const [docChoice, setDocChoice] = useState<{ name: string; matches: string[] } | null>(null);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
+  const [healthError, setHealthError] = useState("");
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+  const [modelError, setModelError] = useState("");
+  const [vaultError, setVaultError] = useState("");
   /** The `at` of the last rollback note already shown, so it appears once. */
   const rollbackSeenRef = useRef(0);
   const [briefing, setBriefing] = useState<Briefing | null>(null);
@@ -390,6 +393,8 @@ export function ChatScreen({
     });
   const phone = isPhone(width, height);
   const column = chatColumn(width);
+  const page = pageColumn(width);
+  const pageCols = pageGridColumns(width);
   const preview = previewMode(width);
   const setActiveChat = (id: string | null) => {
     activeIdRef.current = id;
@@ -949,12 +954,19 @@ export function ChatScreen({
 
   async function refreshVault() {
     try {
-      const res = await brainFetch(`${bag.brainUrl}/v1/vault/status`);
-      if (!res.ok) return null;
+      const res = await brainFetch(`${bag.brainUrl}/v1/vault/status`, {
+        signal: AbortSignal.timeout(SETTINGS_PROBE_MS),
+      });
+      if (!res.ok) {
+        setVaultError("Vault did not answer.");
+        return null;
+      }
       const body = (await res.json()) as { path: string; obsidianUrl: string; notes: number; lastSync: number };
       setVault(body);
+      setVaultError("");
       return body;
     } catch {
+      setVaultError("Vault timed out. Is Preyas running?");
       return null;
     }
   }
@@ -974,22 +986,35 @@ export function ChatScreen({
 
   async function refreshHealth() {
     try {
-      const res = await brainFetch(`${bag.brainUrl}/v1/status`);
-      if (!res.ok) return null;
+      const res = await brainFetch(`${bag.brainUrl}/v1/status`, {
+        signal: AbortSignal.timeout(SETTINGS_PROBE_MS),
+      });
+      if (!res.ok) {
+        setHealthError("Status did not answer.");
+        return null;
+      }
       const body = (await res.json()) as Health;
       setHealth(body);
+      setHealthError("");
       return body;
     } catch {
+      setHealthError("Status timed out. Is Preyas running?");
       return null;
     }
   }
 
   async function refreshModel() {
     try {
-      const res = await brainFetch(`${bag.brainUrl}/v1/model`);
-      if (!res.ok) return null;
+      const res = await brainFetch(`${bag.brainUrl}/v1/model`, {
+        signal: AbortSignal.timeout(SETTINGS_PROBE_MS),
+      });
+      if (!res.ok) {
+        setModelError("Model status did not answer.");
+        return null;
+      }
       const body = (await res.json()) as ModelStatus;
       setModelStatus(body);
+      setModelError("");
       // A failed big/huge switch rolls back to the 8B on the server, which
       // posts "couldn't load, back on small" into the newest chat. Pull that
       // line onto the screen once per rollback, without clobbering a reply
@@ -1002,6 +1027,7 @@ export function ChatScreen({
       }
       return body;
     } catch {
+      setModelError("Model status timed out. Is Preyas running?");
       return null;
     }
   }
@@ -1773,10 +1799,14 @@ export function ChatScreen({
       void refreshInbox();
     }
     if (section === "settings") {
+      setHealthError("");
+      setModelError("");
+      setVaultError("");
       void refreshHealth();
       void refreshPhone();
       void refreshBriefing();
       void refreshDriveMap();
+      void refreshVault();
       void refreshModel();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2413,6 +2443,43 @@ export function ChatScreen({
       <Pressable style={styles.newChat} onPress={() => void newChat()}>
         <Text style={styles.newChatText}>+ New chat</Text>
       </Pressable>
+      {withClose ? (
+        <View style={styles.drawerExtras}>
+          <Pressable
+            style={styles.drawerExtraBtn}
+            onPress={() => {
+              setDrawerOpen(false);
+              setProfile(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="View profile"
+          >
+            <Text style={styles.drawerExtraText}>View profile</Text>
+          </Pressable>
+          <Pressable
+            style={styles.drawerExtraBtn}
+            onPress={() => {
+              setDrawerOpen(false);
+              onSection?.("settings");
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+          >
+            <Text style={styles.drawerExtraText}>Settings</Text>
+          </Pressable>
+          <Pressable
+            style={styles.drawerExtraBtn}
+            onPress={() => {
+              setDrawerOpen(false);
+              setCoachPanel(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Coach"
+          >
+            <Text style={styles.drawerExtraText}>Coach</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <ScrollView style={styles.chatList} contentContainerStyle={styles.chatListInner}>
         {chats.map((chat) => (
           <View key={chat.id} style={[styles.chatRow, chat.id === activeChatId && styles.chatRowOn]}>
@@ -2454,10 +2521,10 @@ export function ChatScreen({
   return (
     <View style={styles.root}>
       <VoiceSession sinks={bag} handsFreeOn={voice.handsFree} />
-      <BackgroundPhotoCard />
       {section === "settings" ? (
-        <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
+        <ScrollView style={styles.fill} contentContainerStyle={[styles.pad, page]}>
           <Text style={styles.sectionTitle} accessibilityRole="header">Settings</Text>
+          <BackgroundPhotoCard />
           <Text style={styles.kicker}>STATUS</Text>
           {health ? (
             <View style={styles.healthList}>
@@ -2474,14 +2541,14 @@ export function ChatScreen({
               </Text>
             </View>
           ) : (
-            <Text style={styles.dim}>Checking…</Text>
+            <Text style={styles.dim}>{healthError || "Checking…"}</Text>
           )}
           <View style={styles.phoneCard}>
             <Text style={styles.kicker}>MODEL</Text>
             <Text style={styles.dim}>
               {modelStatus
                 ? `${modelStatus.label}${modelStatus.status === "loading" ? " · loading…" : modelStatus.status === "down" || modelStatus.status === "error" ? ` · ${modelStatus.status}` : ""}`
-                : "Checking…"}
+                : modelError || "Checking…"}
             </Text>
             <View style={styles.modelRow}>
               {MODEL_BUTTONS.map((tier) => {
@@ -2492,7 +2559,8 @@ export function ChatScreen({
                     key={tier.id}
                     disabled={loading}
                     accessibilityRole="button"
-                    accessibilityLabel={`Use ${tier.short}`}
+                    accessibilityState={{ selected: active, disabled: loading }}
+                    accessibilityLabel={`Use ${tier.short}${active ? ", active" : ""}`}
                     style={[styles.modelBtn, active && styles.modelBtnActive, loading && styles.modelBtnDim]}
                     onPress={() => void switchModel(tier.id, false)}
                   >
@@ -2504,19 +2572,25 @@ export function ChatScreen({
             {modelStatus?.freeGb != null ? <Text style={styles.dim}>About {modelStatus.freeGb} GB free on the Mac.</Text> : null}
             <Text style={styles.dim}>Back to the 8B after 20 idle minutes. Chat: "use small", "use big", "use huge".</Text>
           </View>
-          <Text style={styles.dim}>
-            Drive map:{" "}
-            {driveMap
-              ? `last scanned ${new Date(driveMap.scanned).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}, ${driveMap.files} files`
-              : "not scanned yet"}
-          </Text>
+          <View style={styles.phoneCard}>
+            <Text style={styles.kicker}>DRIVE MAP</Text>
+            <Text style={styles.dim}>
+              {driveMap
+                ? `Last scanned ${new Date(driveMap.scanned).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}, ${driveMap.files} files`
+                : "Not scanned yet"}
+            </Text>
+          </View>
           <Pressable
             style={styles.profileBtn}
             onPress={() => {
+              setHealthError("");
+              setModelError("");
+              setVaultError("");
               void refreshHealth();
               void refreshPhone();
               void refreshVault();
               void refreshDriveMap();
+              void refreshModel();
             }}
           >
             <Text style={styles.profileText}>Refresh</Text>
@@ -2526,7 +2600,9 @@ export function ChatScreen({
           <View style={styles.phoneCard}>
             <Text style={styles.kicker}>VAULT</Text>
             <Text style={styles.dim}>
-              {vault ? `${vault.path}\n${vault.notes} notes · last sync ${vault.lastSync ? new Date(vault.lastSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "never"}` : "Checking…"}
+              {vault
+                ? `${vault.path}\n${vault.notes} notes · last sync ${vault.lastSync ? new Date(vault.lastSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "never"}`
+                : vaultError || "Checking…"}
             </Text>
             <Pressable
               style={styles.docBtn}
@@ -2623,7 +2699,7 @@ export function ChatScreen({
           </View>
         </ScrollView>
       ) : section === "learn" ? (
-        <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
+        <ScrollView style={styles.fill} contentContainerStyle={[styles.pad, page]}>
           <Text style={styles.sectionTitle} accessibilityRole="header">Learn</Text>
           <Text style={styles.dim}>{tabById("learn").empty}</Text>
           {decks.length === 0 ? (
@@ -2631,33 +2707,35 @@ export function ChatScreen({
               <Text style={styles.dim}>{tabById("learn").example}</Text>
             </View>
           ) : null}
-          {decks.map((deck) => (
-            <View key={deck.id} style={styles.deckRow}>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.deckTitle}>{deck.title}</Text>
-                <Text style={styles.dim}>{deck.cards} cards · {deck.due} due{deck.language ? ` · ${deck.language}` : ""}</Text>
+          <View style={[styles.pageGrid, pageCols === 2 && styles.pageGridWide]}>
+            {decks.map((deck) => (
+              <View key={deck.id} style={[styles.deckRow, styles.solidCard, pageCols === 2 && styles.pageGridItem]}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.deckTitle}>{deck.title}</Text>
+                  <Text style={styles.dim}>{deck.cards} cards · {deck.due} due{deck.language ? ` · ${deck.language}` : ""}</Text>
+                </View>
+                <Pressable style={styles.deckBtn} onPress={() => void startReview(deck.id, deck.title)}>
+                  <Text style={styles.deckBtnText}>Review</Text>
+                </Pressable>
+                <Pressable style={styles.deckBtn} onPress={() => void startQuiz(deck.id, deck.title)}>
+                  <Text style={styles.deckBtnText}>Quiz</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.chatRowIcon}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${deck.title}`}
+                  onPress={() => setDialog({ kind: "deleteDeck", id: deck.id, title: deck.title })}
+                >
+                  <Text style={styles.chatRowIconText}>🗑</Text>
+                </Pressable>
               </View>
-              <Pressable style={styles.deckBtn} onPress={() => void startReview(deck.id, deck.title)}>
-                <Text style={styles.deckBtnText}>Review</Text>
-              </Pressable>
-              <Pressable style={styles.deckBtn} onPress={() => void startQuiz(deck.id, deck.title)}>
-                <Text style={styles.deckBtnText}>Quiz</Text>
-              </Pressable>
-              <Pressable
-                style={styles.chatRowIcon}
-                hitSlop={6}
-                accessibilityRole="button"
-                accessibilityLabel={`Delete ${deck.title}`}
-                onPress={() => setDialog({ kind: "deleteDeck", id: deck.id, title: deck.title })}
-              >
-                <Text style={styles.chatRowIconText}>🗑</Text>
-              </Pressable>
-            </View>
-          ))}
+            ))}
+          </View>
         </ScrollView>
       ) : section === "memory" ? (
         <View style={styles.fill}>
-          <View style={styles.memHead}>
+          <View style={[styles.memHead, page]}>
             <Text style={styles.sectionTitle} accessibilityRole="header">Memory</Text>
             <Text style={styles.dim}>{tabById("memory").empty}</Text>
             <TextInput
@@ -2687,14 +2765,14 @@ export function ChatScreen({
               ))}
             </View>
           </View>
-          <ScrollView style={styles.fill} contentContainerStyle={styles.pad}>
+          <ScrollView style={styles.fill} contentContainerStyle={[styles.pad, page]}>
             {(memFilter === "all" || memFilter === "notes") ? (
               <>
                 {notesList.length === 0 && memFilter === "notes" ? (
                   <Text style={styles.dim}>{tabById("memory").example}</Text>
                 ) : null}
                 {notesList.map((noteRow) => (
-                  <View key={noteRow.id} style={styles.noteRow}>
+                  <View key={noteRow.id} style={[styles.noteRow, styles.solidCard]}>
                     {editing?.id === noteRow.id ? (
                       <View style={styles.noteEditing}>
                         <TextInput style={styles.modalInput} value={editing.text} onChangeText={(text) => setEditing({ ...editing, text })} multiline />
@@ -2737,7 +2815,7 @@ export function ChatScreen({
                   <Text style={styles.dim}>No reminders. Tell Preyas: "remind me to call mum at 6".</Text>
                 ) : null}
                 {reminders.filter((row) => row.status !== "done").map((row) => (
-                  <View key={row.id} style={styles.noteRow}>
+                  <View key={row.id} style={[styles.noteRow, styles.solidCard]}>
                     <View style={styles.noteMain}>
                       <Text style={styles.noteKind}>
                         {formatDue(new Date(row.dueAt))}
@@ -2771,7 +2849,7 @@ export function ChatScreen({
                   </Text>
                 ) : null}
                 {inbox.map((file) => (
-                  <View key={file.name} style={styles.noteRow}>
+                  <View key={file.name} style={[styles.noteRow, styles.solidCard]}>
                     <View style={styles.noteMain}>
                       <Text style={styles.noteKind}>{file.type} · {Math.max(1, Math.round(file.size / 1024))} KB</Text>
                       <Text style={styles.noteText} numberOfLines={2}>{file.name}</Text>
@@ -2820,10 +2898,14 @@ export function ChatScreen({
                 </View>
               </Pressable>
               <View style={styles.chatHeadText}>
-                <Text style={styles.chatName}>Preyas</Text>
-                <Text style={styles.subtitle}>Aquos · level {partner.level}</Text>
+                <Text style={styles.chatName} numberOfLines={1} ellipsizeMode="tail">
+                  Preyas
+                </Text>
+                <Text style={styles.subtitle} numberOfLines={1} ellipsizeMode="tail">
+                  Aquos · level {partner.level}
+                </Text>
               </View>
-              <CoachChip state={coach.state} compact={!wide} onPress={() => setCoachPanel(true)} />
+              {wide ? <CoachChip state={coach.state} compact={false} onPress={() => setCoachPanel(true)} /> : null}
               {wide ? (
                 <View style={styles.bondInline}>
                   <View
@@ -2841,58 +2923,29 @@ export function ChatScreen({
                 <View style={[styles.dot, online ? styles.dotOn : styles.dotOff]} />
                 <Text style={[styles.online, !wide && styles.onlineCompact]}>{online ? "Online" : "Offline"}</Text>
               </View>
-              <Pressable style={styles.profileBtnHead} onPress={() => setProfile(true)} accessibilityLabel="View profile">
-                <Text style={styles.profileText}>View profile</Text>
-              </Pressable>
-              <Pressable
-                style={styles.gearBtn}
-                onPress={() => onSection?.("settings")}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Settings"
-              >
-                <Text style={styles.gearText}>⚙</Text>
-              </Pressable>
-            </View>
-            <View style={[styles.column, column]}>
-            {briefing && !briefingDismissed ? (
-              <View style={[styles.briefingCard, styles.briefingTop]}>
-                <View style={styles.briefingCardHead}>
-                  <Text style={styles.briefingTitle}>{briefingKicker(briefing.day)}</Text>
+              {wide ? (
+                <>
+                  <Pressable style={styles.profileBtnHead} onPress={() => setProfile(true)} accessibilityLabel="View profile">
+                    <Text style={styles.profileText}>View profile</Text>
+                  </Pressable>
                   <Pressable
-                    onPress={() => setBriefingDismissed(true)}
+                    style={styles.gearBtn}
+                    onPress={() => onSection?.("settings")}
                     hitSlop={8}
                     accessibilityRole="button"
-                    accessibilityLabel="Dismiss briefing"
+                    accessibilityLabel="Settings"
                   >
-                    <Text style={styles.sidebarClose}>✕</Text>
+                    <Text style={styles.gearText}>⚙</Text>
                   </Pressable>
-                </View>
-                {briefing.opening ? <Text style={styles.briefingText}>{briefing.opening}</Text> : null}
-                {briefing.items.map((item, row) => (
-                  <View key={`${row}-${item}`} style={styles.briefingItemRow}>
-                    <Text style={styles.briefingBullet}>•</Text>
-                    <Text style={styles.briefingItem}>{item}</Text>
-                  </View>
-                ))}
-                {hasFlashcardsDue(briefing) ? (
-                  <Pressable
-                    style={styles.studyNow}
-                    onPress={() => {
-                      onSection?.("learn");
-                      void refreshDecks();
-                    }}
-                  >
-                    <Text style={styles.studyNowText}>Study now</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            ) : null}
+                </>
+              ) : null}
+            </View>
+            <View style={[styles.column, column, phone && styles.columnPhone]}>
             <View style={styles.logWrap}>
               <ScrollView
                 ref={logRef}
                 style={styles.log}
-                contentContainerStyle={styles.logInner}
+                contentContainerStyle={[styles.logInner, jumpVisible && styles.logInnerJump]}
                 horizontal={false}
                 showsHorizontalScrollIndicator={false}
                 onScroll={onLogScroll}
@@ -2901,7 +2954,40 @@ export function ChatScreen({
                   if (pinned.current) scrollToLatest();
                 }}
               >
-              {messages.length === 0 && !live ? (
+              {briefing && !briefingDismissed ? (
+                <View style={[styles.briefingCard, styles.briefingTop]}>
+                  <View style={styles.briefingCardHead}>
+                    <Text style={styles.briefingTitle}>{briefingKicker(briefing.day)}</Text>
+                    <Pressable
+                      onPress={() => setBriefingDismissed(true)}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Dismiss briefing"
+                    >
+                      <Text style={styles.sidebarClose}>✕</Text>
+                    </Pressable>
+                  </View>
+                  {briefing.opening ? <Text style={styles.briefingText}>{briefing.opening}</Text> : null}
+                  {briefing.items.map((item, row) => (
+                    <View key={`${row}-${item}`} style={styles.briefingItemRow}>
+                      <Text style={styles.briefingBullet}>•</Text>
+                      <Text style={styles.briefingItem}>{item}</Text>
+                    </View>
+                  ))}
+                  {hasFlashcardsDue(briefing) ? (
+                    <Pressable
+                      style={styles.studyNow}
+                      onPress={() => {
+                        onSection?.("learn");
+                        void refreshDecks();
+                      }}
+                    >
+                      <Text style={styles.studyNowText}>Study now</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
+              {messages.length === 0 && !live && !(briefing && !briefingDismissed) ? (
                 <View style={styles.emptyChat}>
                   <Text style={styles.emptyTitle}>Say hi to Preyas.</Text>
                   <Text style={styles.emptyText}>{tabById("chat").empty}</Text>
@@ -2912,7 +2998,15 @@ export function ChatScreen({
                 const mine = message.who === "user";
                 const read = mine && messages.slice(index + 1).some((row) => row.who !== "user");
                 const label = message.who === "paid" ? "deepseek-flash" : message.who === "preyas" ? "Preyas" : "You";
-                const asBriefing = message.briefingDay ? toBriefing(message.briefingDay, message.content) : null;
+                // Skip history rows that duplicate today's "Your day" card.
+                if (
+                  message.briefingDay &&
+                  briefing &&
+                  !briefingDismissed &&
+                  message.briefingDay === briefing.day
+                ) {
+                  return null;
+                }
                 return (
                   <View
                     key={`${message.t}-${index}`}
@@ -2927,45 +3021,7 @@ export function ChatScreen({
                           {message.who === "paid" && message.costUsd != null ? ` · ~$${message.costUsd.toFixed(4)}` : ""}
                         </Text>
                       ) : null}
-                      {asBriefing ? (
-                        <View style={styles.briefingCard}>
-                          <Text style={styles.briefingTitle}>{briefingKicker(asBriefing.day)}</Text>
-                          {asBriefing.opening ? <Text style={styles.briefingText}>{asBriefing.opening}</Text> : null}
-                          {asBriefing.items.map((item, row) => (
-                            <View key={`${row}-${item}`} style={styles.briefingItemRow}>
-                              <Text style={styles.briefingBullet}>•</Text>
-                              <Text style={styles.briefingItem}>{item}</Text>
-                            </View>
-                          ))}
-                          <View style={styles.briefingActions}>
-                            <Pressable style={styles.docBtn} onPress={() => onSection?.("settings")}>
-                              <Text style={styles.docBtnText}>Open settings</Text>
-                            </Pressable>
-                            <Pressable
-                              style={styles.docBtn}
-                              onPress={() => {
-                                onSection?.("memory");
-                                setMemFilter("reminders");
-                              }}
-                            >
-                              <Text style={styles.docBtnText}>Open reminders</Text>
-                            </Pressable>
-                            {hasFlashcardsDue(asBriefing) ? (
-                              <Pressable
-                                style={styles.docBtn}
-                                onPress={() => {
-                                  onSection?.("learn");
-                                  void refreshDecks();
-                                }}
-                              >
-                                <Text style={styles.docBtnText}>Study now</Text>
-                              </Pressable>
-                            ) : null}
-                          </View>
-                        </View>
-                      ) : (
-                        <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{message.content}</Text>
-                      )}
+                      <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{message.content}</Text>
                       {!mine && message.thinking ? (
                         <Pressable onPress={() => setOpenThink((current) => ({ ...current, [index]: !current[index] }))}>
                           <Text style={styles.thinkToggle}>{openThink[index] ? "Hide thinking" : "Show thinking"}</Text>
@@ -3055,14 +3111,19 @@ export function ChatScreen({
                 </View>
               ) : null}
             </ScrollView>
-              {jumpVisible ? (
-                <View style={styles.jumpWrap} pointerEvents="box-none">
-                  <Pressable style={styles.jump} onPress={jumpToLatest}>
-                    <Text style={styles.jumpText}>Jump to latest ↓</Text>
-                  </Pressable>
-                </View>
-              ) : null}
             </View>
+            {jumpVisible ? (
+              <View style={styles.jumpRow}>
+                <Pressable
+                  style={styles.jump}
+                  onPress={jumpToLatest}
+                  accessibilityRole="button"
+                  accessibilityLabel="Jump to latest"
+                >
+                  <Text style={styles.jumpText}>Jump to latest ↓</Text>
+                </Pressable>
+              </View>
+            ) : null}
             {/* In normal flow right above the composer, so it can never cover it. */}
             <View style={styles.previewRow} pointerEvents="box-none">
               <PreviewCard state={activity.state} runId={lastRunId} mode={preview} brainUrl={bag.brainUrl} />
@@ -3147,7 +3208,7 @@ export function ChatScreen({
               <Text style={styles.voiceHint}>{MIC_DENIED_LABEL}</Text>
             ) : null}
             {!micOk ? <Text style={styles.voiceHint}>Voice works on the Mac; type here</Text> : null}
-            <View style={styles.chips}>
+            <View style={[styles.chips, phone && styles.chipsPhone]}>
               {QUICK.map((chip) => (
                 <Pressable key={chip.label} style={styles.chip} onPress={() => void send(chip.prompt, false)}>
                   <Text style={styles.chipText}>{chip.label}</Text>
@@ -3468,6 +3529,8 @@ const styles = StyleSheet.create({
   thread: { flex: 1, minWidth: 0 },
   /** The reading column: messages, briefing and composer, centred on a Mac. */
   column: { flex: 1, alignSelf: "center", minWidth: 0, paddingHorizontal: theme.space.md },
+  /** Extra bottom room so quick-reply chips sit above the phone tab bar. */
+  columnPhone: { paddingBottom: theme.space.sm },
   /** The chats list: secondary paper (cardSoft) under the same panel edge. */
   sidebar: { width: theme.size.list, ...panel, backgroundColor: theme.cardSoft, padding: theme.space.sm, marginRight: theme.space.sm },
   sidebarInner: { flex: 1, gap: 8 },
@@ -3494,7 +3557,7 @@ const styles = StyleSheet.create({
   emptyText: { color: theme.dim, fontSize: 13, lineHeight: 19, textAlign: "center" },
   chipSaved: { alignSelf: "center", ...paperSoft, borderRadius: theme.radius.md, paddingHorizontal: theme.space.sm + 2, paddingVertical: theme.space.xs, marginBottom: theme.space.xs },
   chipSavedText: { color: theme.accentText, fontSize: 12, fontWeight: "700" },
-  noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, borderWidth: 1, borderColor: theme.accentLine, borderRadius: 10, padding: 8 },
+  noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, borderRadius: 16, padding: 12 },
   noteEditing: { flex: 1, gap: 6 },
   kindRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   kindChip: { borderWidth: 1, borderColor: theme.lineStrong, borderRadius: 10, minHeight: 36, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
@@ -3537,8 +3600,19 @@ const styles = StyleSheet.create({
   },
   chatHeadText: { flex: 1, minWidth: 0 },
   /** Oswald display, the only place the name is set in the heading face. */
-  chatName: { fontFamily: theme.font.display, color: theme.text, fontWeight: "700", fontSize: 22, textTransform: "uppercase", letterSpacing: 0.44 },
-  subtitle: { color: theme.dim, fontSize: 13 },
+  chatName: {
+    fontFamily: theme.font.display,
+    color: theme.text,
+    fontWeight: "700",
+    fontSize: 22,
+    textTransform: "uppercase",
+    letterSpacing: 0.44,
+    flexShrink: 1,
+  },
+  subtitle: { color: theme.dim, fontSize: 13, flexShrink: 1 },
+  drawerExtras: { gap: theme.space.xs, marginBottom: theme.space.sm },
+  drawerExtraBtn: { ...ghost, minHeight: 44, paddingHorizontal: theme.space.sm + 2, alignSelf: "stretch" },
+  drawerExtraText: { color: theme.text, fontSize: 13, fontWeight: "600" },
   onlineRow: { flexDirection: "row", alignItems: "center", gap: theme.space.xs },
   onlineCompact: { display: "none" },
   dot: { width: theme.space.sm, height: theme.space.sm, borderRadius: theme.space.xs },
@@ -3568,11 +3642,13 @@ const styles = StyleSheet.create({
   activityInline: { maxWidth: 420, alignSelf: "flex-start" },
   /** The corner preview lives in the flow above the composer. */
   previewRow: { alignItems: "flex-end", marginTop: theme.space.xs + 2 },
-  logWrap: { flex: 1, position: "relative" },
-  jumpWrap: { position: "absolute", left: 0, right: 0, bottom: 6, alignItems: "center" },
+  logWrap: { flex: 1, position: "relative", minHeight: 0 },
+  /** Jump sits in normal flow between the log and the composer — never overlays chips. */
+  jumpRow: { alignItems: "center", paddingVertical: theme.space.xs },
   jump: { ...panel, borderRadius: 16, minHeight: 36, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 6 },
   jumpText: { color: theme.accentText, fontSize: 12, fontWeight: "700" },
   logInner: { gap: 10, paddingVertical: 8, width: "100%" },
+  logInnerJump: { paddingBottom: theme.space.sm },
   // A bubble is capped by the screen, never by a pixel width: 420px overflowed a
   // 390px phone. flexShrink lets the row give way instead of pushing sideways.
   bubbleWrap: { flexDirection: "row", alignItems: "flex-end", gap: theme.space.sm, maxWidth: "75%", flexShrink: 1 },
@@ -3698,10 +3774,25 @@ const styles = StyleSheet.create({
   send: { ...primary, minHeight: 36, minWidth: 44, paddingHorizontal: theme.space.sm },
   sendText: { color: theme.onAccent, fontSize: theme.type.body, fontWeight: "700" },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: theme.space.xs + 2, marginTop: theme.space.sm },
+  chipsPhone: { paddingBottom: theme.space.md, marginBottom: theme.space.xs },
   chip: { borderWidth: 1, borderColor: theme.lineStrong, borderRadius: theme.radius.md, minHeight: 36, alignItems: "center", justifyContent: "center", paddingHorizontal: theme.space.sm + 2 },
   chipOff: { opacity: 0.45 },
   chipHint: { backgroundColor: theme.accentSoft },
   chipText: { color: theme.text, fontSize: 12 },
+  solidCard: {
+    backgroundColor: theme.card,
+    borderWidth: 1,
+    borderColor: theme.accentLine,
+    borderRadius: 16,
+    shadowColor: theme.shadow,
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+  },
+  pageGrid: { gap: theme.space.sm },
+  pageGridWide: { flexDirection: "row", flexWrap: "wrap" },
+  pageGridItem: { width: "48%", flexGrow: 1 },
   switchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space.sm },
   fill: { flex: 1 },
   pad: { padding: 20, gap: 8 },
@@ -3729,7 +3820,7 @@ const styles = StyleSheet.create({
   advLink: { color: theme.accentText, fontSize: 14, fontWeight: "700", paddingVertical: 4, minHeight: 36, textAlignVertical: "center" },
   memHead: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4, gap: 8 },
   emptyTab: { marginTop: 16, alignItems: "center", gap: 6 },
-  deckRow: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: theme.accentLine, borderRadius: 12, padding: 10 },
+  deckRow: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 16, padding: 12 },
   deckTitle: { color: theme.text, fontSize: 14, fontWeight: "700" },
   deckBtn: { ...ghost, paddingHorizontal: 10 },
   deckBtnText: { color: theme.text, fontSize: 12, fontWeight: "600", paddingVertical: theme.space.xs },
