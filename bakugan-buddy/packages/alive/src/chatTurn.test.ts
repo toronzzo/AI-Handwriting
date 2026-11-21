@@ -15,6 +15,7 @@ import {
   visibleReply,
   partnerFromTurns,
   resolveChatBase,
+  streamReply,
   trimHistory,
   type ChatMessage,
 } from "./chatTurn.ts";
@@ -128,4 +129,30 @@ test("thinking is stripped before the answer is spoken, including a split tag", 
     'data: {"choices":[{"delta":{"reasoning_content":"draft","content":"East window."}}]}',
   );
   assert.equal(visibleReply(answered.text, answered.reasoning).answer, "East window.");
+});
+
+test("streamReply surfaces the brain's refusal text instead of a bare status", async () => {
+  const failing = (async () =>
+    new Response(JSON.stringify({ error: "switching models, try again in a moment" }), {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch;
+  const result = await streamReply({
+    base: "http://127.0.0.1:8788",
+    model: "preyas",
+    messages: [{ role: "user", content: "hi" }],
+    fetchImpl: failing,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "switching models, try again in a moment");
+
+  const textOnly = (async () => new Response("down", { status: 502 })) as unknown as typeof fetch;
+  const fallback = await streamReply({
+    base: "http://127.0.0.1:8788",
+    model: "preyas",
+    messages: [{ role: "user", content: "hi" }],
+    fetchImpl: textOnly,
+  });
+  assert.equal(fallback.ok, false);
+  assert.equal(fallback.error, "status 502", "a non-JSON failure keeps the status text");
 });

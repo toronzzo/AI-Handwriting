@@ -103,7 +103,7 @@ import { paidCostUsd, parseJsonUsage, parseSseUsage, tokensPerSec } from "./lib/
 import { ART_WRITE_DIR, MAX_ART_BYTES, findArt, isSlot, saveArt } from "./lib/art.mjs";
 import { resolveSafePath } from "./lib/safeFs.mjs";
 import { createActivityHub } from "./lib/activity.mjs";
-import { createModelSwitch, LLAMA_PORT, llamaServerRamMb } from "./lib/modelSwitch.mjs";
+import { createModelSwitch, LLAMA_PORT, llamaServerRamMb, chatGate } from "./lib/modelSwitch.mjs";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -125,6 +125,24 @@ const modelSwitch = createModelSwitch({
   modelsDir: process.env.PREYAS_MODELS_DIR || path.join(buddyRoot, "models"),
   dataDir: dataDir || undefined,
   template: path.join(path.dirname(fileURLToPath(import.meta.url)), "templates", "qwen3.jinja"),
+  onRollback: (note) => {
+    // A failed big/huge switch brings the 8B back; say so in the newest chat
+    // so it survives a reload, like reminder lines do.
+    if (!dataDir) return;
+    try {
+      const newest = newestChat(dataDir);
+      if (newest) {
+        appendMessage(dataDir, newest.id, {
+          role: "assistant",
+          who: "preyas",
+          model: "preyas",
+          content: note,
+        });
+      }
+    } catch {
+      /* the chat note is a nicety */
+    }
+  },
 });
 
 /**
@@ -404,7 +422,9 @@ const CHAT_PROXY_TIMEOUT_MS = Number(process.env.BRAIN_UPSTREAM_TIMEOUT_MS || 90
  * Pipe one model response, but stop paying for generation after the client
  * leaves. With `events` (brain slice N2) the passthrough also reports
  * thinking/done/error into the brain, reading usage tokens from the very
- * bytes it forwards — a response is never changed for the feed.
+ * bytes it forwards — a response is never changed for the feed. When the
+ * upstream really answers, `events.onAnswered` fires (the idle auto-return
+ * window resets only then).
  */
 async function pipeChatCompletion(req, res, target, body, downError, timeoutMs = CHAT_PROXY_TIMEOUT_MS, events = null) {
   const controller = new AbortController();
@@ -471,6 +491,15 @@ async function pipeChatCompletion(req, res, target, body, downError, timeoutMs =
       brainOut({ state: "error", detail: timedOut ? "model timed out" : downError });
       sendJson(res, timedOut ? 504 : 503, { error: timedOut ? "model timed out" : downError });
       return;
+    }
+    // The model really answered: only now is it chat activity for the idle
+    // auto-return (a down model or a rejected request never reaches here).
+    if (upstream.ok && events && typeof events.onAnswered === "function") {
+      try {
+        events.onAnswered();
+      } catch {
+        /* the idle window is a nicety */
+      }
     }
     res.writeHead(upstream.status, {
       "Content-Type": upstream.headers.get("content-type") || "text/event-stream",
@@ -1971,14 +2000,15 @@ const server = http.createServer(async (req, res) => {
       } catch {
         model = "";
       }
+      // While a model switch is loading the local server is being replaced:
+      // refuse local chat with a clear message (paid traffic is unaffected).
+      const gate = chatGate(model, modelSwitch.state());
+      if (!gate.ok) return sendJson(res, gate.status, { error: gate.error });
       const sampled = withSampling(raw);
       const body = model === "paid" ? sampled : withDriveMap(withNotes(sampled));
-      // Any chat is activity for the idle auto-return. A local route never
-      // reaches the gateway: small, big and huge all go straight to llama.
-      modelSwitch.touch();
-      if (model !== "paid" && modelSwitch.state().status === "loading") {
-        return sendJson(res, 503, { error: "the model is loading — try again in a moment" });
-      }
+      // A local route never reaches the gateway: small, big and huge all go
+      // straight to llama. Only a real local-model reply resets the idle
+      // auto-return window — paid replies and unanswered calls never do.
       const target =
         model === "paid"
           ? "http://127.0.0.1:4000/v1/chat/completions"
@@ -2000,7 +2030,7 @@ const server = http.createServer(async (req, res) => {
         body,
         model === "paid" ? "paid gateway is down" : "llama is down",
         model === "paid" ? CHAT_PROXY_TIMEOUT_MS : modelSwitch.chatTimeoutMs(),
-        { neuron, paid, local: !paid, ramPromise },
+        { neuron, paid, local: !paid, ramPromise, onAnswered: () => modelSwitch.touchLocal(model) },
       );
       return;
     }

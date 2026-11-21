@@ -3,7 +3,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createModelSwitch, freeMemoryGb, IDLE_RETURN_MS } from "./modelSwitch.mjs";
+import { HUGE_TIMEOUT_MS, SWITCHING_CHAT_MESSAGE } from "../../packages/alive/src/modelSwitch.ts";
+import { chatGate, createModelSwitch, freeMemoryGb, IDLE_RETURN_MS, LOAD_TIMEOUT_MS, ROLLBACK_NOTE } from "./modelSwitch.mjs";
+
+/** Poll a condition with real timers (for the crash-rollback test). */
+async function waitFor(cond, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (cond()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("waitFor timed out");
+}
 
 /** A fake spawned llama-server that records its fate. */
 function fakeChild(pid) {
@@ -98,6 +109,7 @@ function makeSwitch(options = {}) {
     },
     now: ownClock ? undefined : () => clock.ms,
     log: () => {},
+    onRollback: options.onRollback ?? null,
   });
   return {
     switcher,
@@ -254,16 +266,18 @@ test("a port held by a stranger is never killed", async () => {
   }
 });
 
-test("a missing model file fails the switch cleanly", async () => {
+test("a missing model file fails the switch, then the 8B comes back", async () => {
   const f = makeSwitch({ healthy: true, freeGb: 40 });
   try {
     fs.rmSync(path.join(f.models, "Qwen3-30B-A3B.Q3_K_M.gguf"));
     await f.switcher.request("huge", { confirmed: true });
     await f.drain();
     const st = f.switcher.state();
-    assert.equal(st.status, "error");
-    assert.match(st.error, /not on the drive/);
-    assert.equal(f.spawned.length, 0);
+    assert.equal(st.status, "ready", "the rollback restarts the 8B");
+    assert.equal(st.current, "small");
+    assert.ok(st.rollback && st.rollback.note === ROLLBACK_NOTE);
+    assert.ok(f.events.some((event) => event.neuron === "chat-huge" && event.state === "error" && /not on the drive/.test(event.detail || "")));
+    assert.equal(f.spawned.length, 1, "only the 8B was started");
   } finally {
     fs.rmSync(f.models, { recursive: true, force: true });
   }
@@ -355,11 +369,17 @@ test("the proxy timeout grows with the tier", async () => {
     const f2 = makeSwitch({ healthy: true, freeGb: 40 });
     await f2.switcher.request("huge", { confirmed: true });
     await f2.drain();
-    assert.equal(f2.switcher.chatTimeoutMs(), 300_000);
+    assert.equal(f2.switcher.chatTimeoutMs(), HUGE_TIMEOUT_MS, "huge: the one shared budget the app also uses");
     fs.rmSync(f2.models, { recursive: true, force: true });
   } finally {
     fs.rmSync(f.models, { recursive: true, force: true });
   }
+});
+
+test("the huge tier takes one shared timeout of at least 600 s for load and reply", () => {
+  assert.ok(HUGE_TIMEOUT_MS >= 600_000, "at least 600 s");
+  assert.equal(LOAD_TIMEOUT_MS.huge, HUGE_TIMEOUT_MS, "the huge load budget is the same shared value");
+  assert.equal(SWITCHING_CHAT_MESSAGE, "switching models, try again in a moment");
 });
 
 test("use big: chat-big lights loading, chat-small goes off, then chat-big is off", async () => {
@@ -383,14 +403,15 @@ test("use big: chat-big lights loading, chat-small goes off, then chat-big is of
   }
 });
 
-test("a switch that fails reports error on the target neuron", async () => {
+test("a switch that fails reports error on the target neuron, then rolls back", async () => {
   const f = makeSwitch({ healthy: true, freeGb: 40 });
   try {
     fs.rmSync(path.join(f.models, "Huihui-Qwen3-14B-abliterated-v2.Q4_K_M.gguf"));
     const result = await f.switcher.request("big", { confirmed: true });
     assert.equal(result.ok, true, "the switch still starts");
     await f.drain();
-    assert.equal(f.switcher.state().status, "error");
+    assert.equal(f.switcher.state().status, "ready", "the 8B is back");
+    assert.equal(f.switcher.state().current, "small");
     assert.ok(f.events.some((event) => event.neuron === "chat-big" && event.state === "error"));
     assert.ok(f.events.some((event) => event.neuron === "chat-big" && event.state === "loading"));
   } finally {
@@ -412,4 +433,108 @@ test("a switch with everything already loaded emits nothing", async () => {
   } finally {
     fs.rmSync(f.models, { recursive: true, force: true });
   }
+});
+
+test("a bad model file rolls back: the 8B comes up and the note is exposed", async () => {
+  const f = makeSwitch({ healthy: true, freeGb: 40 });
+  try {
+    fs.rmSync(path.join(f.models, "Huihui-Qwen3-14B-abliterated-v2.Q4_K_M.gguf"));
+    await f.switcher.request("big", { confirmed: true });
+    await f.drain();
+    const st = f.switcher.state();
+    assert.equal(st.current, "small", "back on the 8B");
+    assert.equal(st.status, "ready");
+    assert.ok(st.rollback, "the note rides in the state for the app");
+    assert.equal(st.rollback.target, "big");
+    assert.equal(st.rollback.note, ROLLBACK_NOTE);
+    assert.equal(f.spawned.length, 1, "only the 8B was started");
+    assert.ok(f.spawned[0].args.join(" ").includes("Huihui-Qwen3-8B"), "the 8B model file");
+    assert.ok(f.events.some((event) => event.neuron === "chat-big" && event.state === "error"));
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
+test("a crash while a big model loads restarts the 8B", async () => {
+  const f = makeSwitch({ healthy: false, freeGb: 40, ownClock: true });
+  try {
+    await f.switcher.request("big", { confirmed: true });
+    await waitFor(() => f.spawned.length >= 1, 2000);
+    f.spawned[0].child.emitExit(1); // the fake server dies mid-load
+    await waitFor(() => f.spawned.length >= 2, 3000); // the rollback started the 8B
+    f.state.healthy = true; // the 8B becomes healthy
+    await waitFor(() => f.switcher.state().status === "ready" && f.switcher.state().current === "small", 3000);
+    const st = f.switcher.state();
+    assert.equal(st.current, "small");
+    assert.equal(st.status, "ready");
+    assert.ok(st.rollback && st.rollback.note === ROLLBACK_NOTE);
+    assert.equal(f.spawned.length, 2, "big failed, then the 8B was started");
+    assert.ok(f.spawned[1].args.join(" ").includes("Huihui-Qwen3-8B"));
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
+test("a failed rollback does not loop", async () => {
+  const f = makeSwitch({ healthy: false, freeGb: 40 });
+  try {
+    fs.rmSync(path.join(f.models, "Huihui-Qwen3-8B-abliterated-v2.Q4_K_M.gguf"));
+    fs.rmSync(path.join(f.models, "Huihui-Qwen3-14B-abliterated-v2.Q4_K_M.gguf"));
+    await f.switcher.request("big", { confirmed: true });
+    await f.drain();
+    assert.equal(f.spawned.length, 0, "neither model file exists");
+    const st = f.switcher.state();
+    assert.equal(st.status, "error");
+    assert.ok(st.rollback, "the note still says what happened");
+    assert.equal(f.events.filter((event) => event.state === "error").length, 2, "big failed, the rollback failed, then it stopped");
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
+test("the rollback note reaches the chat callback once the 8B is back", async () => {
+  let note = null;
+  const f = makeSwitch({ healthy: true, freeGb: 40, onRollback: (text) => (note = text) });
+  try {
+    fs.rmSync(path.join(f.models, "Huihui-Qwen3-14B-abliterated-v2.Q4_K_M.gguf"));
+    await f.switcher.request("big", { confirmed: true });
+    await f.drain();
+    assert.equal(note, ROLLBACK_NOTE, "the proxy posts the note into the chat");
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
+test("paid replies and unanswered local calls never reset the idle window", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = makeSwitch({ healthy: true, freeGb: 40, ownClock: true });
+  try {
+    assert.equal(f.switcher.touchLocal("preyas"), false, "down: nothing to reset");
+    await f.switcher.request("big", { confirmed: true });
+    await f.drain();
+    assert.equal(f.switcher.state().current, "big");
+    assert.equal(f.switcher.touchLocal("paid"), false, "a paid reply never counts");
+    t.mock.timers.tick(IDLE_RETURN_MS - 60_000); // 19 quiet minutes
+    assert.equal(f.switcher.state().current, "big", "the paid reply held nothing open");
+    assert.equal(f.switcher.touchLocal("preyas"), true, "a real local reply counts");
+    t.mock.timers.tick(IDLE_RETURN_MS - 60_000); // 19 more minutes
+    assert.equal(f.switcher.state().current, "big", "the local reply pushed the window out");
+    t.mock.timers.tick(60_000 + 1_000); // 20 min after the last local reply
+    await f.drain();
+    assert.equal(f.switcher.state().current, "small", "auto-returned to the 8B");
+    assert.equal(f.spawned.length, 2);
+  } finally {
+    fs.rmSync(f.models, { recursive: true, force: true });
+  }
+});
+
+test("chatGate: a local chat during a switch gets the clear message", () => {
+  const loading = { status: "loading", current: "big" };
+  const refused = chatGate("preyas", loading);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.status, 503);
+  assert.equal(refused.error, SWITCHING_CHAT_MESSAGE);
+  assert.equal(chatGate("paid", loading).ok, true, "paid traffic does not touch the local server");
+  assert.equal(chatGate("preyas", { status: "ready", current: "small" }).ok, true);
+  assert.equal(chatGate("preyas", { status: "down", current: "small" }).ok, true, "down keeps the old 503 path");
 });

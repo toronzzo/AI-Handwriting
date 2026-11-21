@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { confirmFor } from "./confirm.ts";
-import { BIG_MIN_FREE_GB, LOCAL_MODEL_IDS, MODEL_LABELS, parseModelCommand, switchNeedsConfirm } from "./modelSwitch.ts";
+import {
+  BIG_MIN_FREE_GB,
+  HUGE_TIMEOUT_MS,
+  LOCAL_MODEL_IDS,
+  MODEL_LABELS,
+  SWITCHING_CHAT_MESSAGE,
+  parseModelCommand,
+  switchNeedsConfirm,
+} from "./modelSwitch.ts";
 
 test("parseModelCommand reads the three use commands", () => {
   assert.equal(parseModelCommand("use small"), "small");
@@ -59,4 +67,15 @@ test("every tier has a label and an id", () => {
     assert.equal(typeof MODEL_LABELS[id], "string");
     assert.ok(MODEL_LABELS[id].length > 0);
   }
+});
+
+test("the huge tier budget is one shared value of at least 600 s", () => {
+  // The app (reply timeout) and the brain proxy (load and reply timeouts)
+  // both take their huge-tier budget from this one constant, so the two
+  // clocks can never disagree.
+  assert.ok(HUGE_TIMEOUT_MS >= 600_000);
+});
+
+test("the switching refusal is the one clear message both sides agree on", () => {
+  assert.equal(SWITCHING_CHAT_MESSAGE, "switching models, try again in a moment");
 });

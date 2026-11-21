@@ -22,6 +22,17 @@ export const MODEL_LABELS: Record<LocalModelId, string> = {
 export const BIG_MIN_FREE_GB = 10;
 
 /**
+ * One shared budget for the huge tier, taken from this single constant by
+ * BOTH the app (the reply timeout) and the brain proxy (the load timeout and
+ * the reply timeout). At least 600 s so a slow 30B load plus a slow reply
+ * never race against two different clocks.
+ */
+export const HUGE_TIMEOUT_MS = 600_000;
+
+/** The clear refusal for a chat sent while a model switch is still loading. */
+export const SWITCHING_CHAT_MESSAGE = "switching models, try again in a moment";
+
+/**
  * "use small", "use big", "use huge" — with a trailing word or two ignored,
  * so "use big please" still works.
  */
