@@ -28,6 +28,7 @@ const ALLOWED = /3d-colour/;
  */
 const FILES = [
   "src/bits/PixelSprite.tsx",
+  "src/brain/BrainScreen.tsx",
   "src/screens/ChatScreen.tsx",
   "src/screens/BenchmarkScreen.tsx",
   "src/screens/PreyasHero.tsx",

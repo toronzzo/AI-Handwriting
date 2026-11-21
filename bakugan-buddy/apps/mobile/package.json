@@ -34,7 +34,7 @@
     "web": "expo start --web",
     "check:ball": "node --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-ball-clips.mts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/nav.test.ts src/layout.test.ts src/palette.test.ts src/noLooseColours.test.ts src/productRules.test.ts src/today/layout.test.ts src/rpg/rpgMath.test.ts src/rpg/mockSource.test.ts src/rpg/logSource.test.ts src/today/radarGeometry.test.ts src/today/focusTimer.test.ts src/activity/previewMode.test.ts src/settings/dailyLimit.test.ts src/bits/bitPalette.test.ts src/bits/sprite.test.ts src/bits/lazy3d.test.ts src/voice/tapToTalk.test.ts src/voice/voiceSettings.test.ts src/bits/fitScale.test.ts"
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/nav.test.ts src/brain/brains.test.ts src/layout.test.ts src/palette.test.ts src/noLooseColours.test.ts src/productRules.test.ts src/today/layout.test.ts src/rpg/rpgMath.test.ts src/rpg/mockSource.test.ts src/rpg/logSource.test.ts src/today/radarGeometry.test.ts src/today/focusTimer.test.ts src/activity/previewMode.test.ts src/settings/dailyLimit.test.ts src/bits/bitPalette.test.ts src/bits/sprite.test.ts src/bits/lazy3d.test.ts src/voice/tapToTalk.test.ts src/voice/voiceSettings.test.ts src/bits/fitScale.test.ts"
   },
   "private": true
 }
