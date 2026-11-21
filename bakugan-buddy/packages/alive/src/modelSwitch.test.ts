@@ -12,6 +12,7 @@ import {
 } from "./modelSwitch.ts";
 
 test("parseModelCommand reads the three use commands", () => {
+  assert.equal(parseModelCommand("use tiny"), "tiny");
   assert.equal(parseModelCommand("use small"), "small");
   assert.equal(parseModelCommand("use big"), "big");
   assert.equal(parseModelCommand("use huge"), "huge");
@@ -62,7 +63,7 @@ test("the slow-model card warns about slow replies and swap", () => {
 });
 
 test("every tier has a label and an id", () => {
-  assert.deepEqual(LOCAL_MODEL_IDS, ["small", "big", "huge"]);
+  assert.deepEqual(LOCAL_MODEL_IDS, ["tiny", "small", "big", "huge"]);
   for (const id of LOCAL_MODEL_IDS) {
     assert.equal(typeof MODEL_LABELS[id], "string");
     assert.ok(MODEL_LABELS[id].length > 0);

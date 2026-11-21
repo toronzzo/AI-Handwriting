@@ -11,7 +11,16 @@ export type SearchResult = {
   title: string;
   url: string;
   snippet: string;
+  imageUrl?: string;
+  offline?: boolean;
+  sourceLabel?: string;
 };
+
+export function shouldOfflineSearch(raw: string): boolean {
+  const text = String(raw ?? "").trim();
+  if (!text) return false;
+  return /\b(astronomy|planet|star|galaxy|moon|Mars|Jupiter|Saturn|Wikipedia|encyclopedia|ifixit|repair|how do I fix|how to fix|step-by-step|diy)\b/i.test(text);
+}
 
 const PRIVATE_V4: readonly RegExp[] = [
   /^10\./,

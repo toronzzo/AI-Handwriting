@@ -29,6 +29,7 @@ import { driveMapPrompt, isDriveQuestion, isScanDriveCommand, whereIsQuery } fro
 import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
 import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
+import { proxyOfflineImage, searchOffline } from "./lib/offlineSearch.mjs";
 import { INBOX_PATH, listDocuments, readDocumentText, safeDocumentName } from "./lib/documents.mjs";
 import { collectStatus, restartArgs } from "./lib/status.mjs";
 import { collectUserNotes, ensureObsidianConfig, exportVault, searchVault, saveToVault, VAULT_DIR } from "./lib/vault.mjs";
@@ -785,7 +786,7 @@ const server = http.createServer(async (req, res) => {
     path: url.pathname,
     method: req.method,
     remoteAddress: req.socket?.remoteAddress || "",
-    token: req.headers["x-preyas-token"] || "",
+    token: req.headers["x-preyas-token"] || url.searchParams.get("token") || "",
     book: dataDir ? readDevices(dataDir) : { devices: [] },
     pairing,
   });
@@ -1487,6 +1488,57 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ ok: true, saved }));
         return;
       }
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/offline/search") {
+      const query = (url.searchParams.get("q") || "").trim();
+      if (!query) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "q is required", ok: false, results: [] }));
+        return;
+      }
+      const step = activity.begin(activityRun(req), "search_offline", query);
+      const result = await searchOffline(query);
+      if (result.ok) step.done(query);
+      else step.fail(query);
+      res.writeHead(result.ok ? 200 : 503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/offline/image") {
+      const pathValue = (url.searchParams.get("path") || "").trim();
+      const image = await proxyOfflineImage(pathValue);
+      if (!image.ok) {
+        res.writeHead(image.status || 404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "offline image unavailable" }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": image.type, "Cache-Control": "private, max-age=86400" });
+      res.end(image.buffer);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/offline/article") {
+      const pathValue = (url.searchParams.get("path") || "").trim();
+      if (!pathValue.startsWith("/")) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "bad offline article path" }));
+        return;
+      }
+      try {
+        const articleUrl = new URL(pathValue, process.env.PREYAS_KIWIX_URL || "http://127.0.0.1:8791");
+        if (!["127.0.0.1", "localhost"].includes(articleUrl.hostname)) throw new Error("remote article");
+        const article = await fetch(articleUrl.href, { signal: AbortSignal.timeout(8000) });
+        if (!article.ok) throw new Error("article unavailable");
+        const type = String(article.headers.get("content-type") || "text/html");
+        res.writeHead(200, { "Content-Type": type, "Cache-Control": "private, max-age=3600" });
+        res.end(Buffer.from(await article.arrayBuffer()));
+      } catch {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Offline article unavailable");
+      }
+      return;
     }
 
     if (req.method === "GET" && url.pathname === "/v1/search") {

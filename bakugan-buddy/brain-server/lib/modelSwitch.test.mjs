@@ -45,6 +45,7 @@ function makeSwitch(options = {}) {
   const clock = { ms: options.startMs ?? 1_000_000 };
   const models = fs.mkdtempSync(path.join(os.tmpdir(), "preyas-models-"));
   for (const file of [
+    "Qwen3.5-0.8B-Q4_K_M.gguf",
     "Huihui-Qwen3-8B-abliterated-v2.Q4_K_M.gguf",
     "Huihui-Qwen3-14B-abliterated-v2.Q4_K_M.gguf",
     "Qwen3-30B-A3B.Q3_K_M.gguf",

@@ -6,6 +6,7 @@
 import crypto from "node:crypto";
 import { parsePlan } from "../../packages/alive/src/tasks.ts";
 import { searchNotes } from "./notes.mjs";
+import { searchOffline } from "./offlineSearch.mjs";
 import { listDir, readTextFile } from "./safeFs.mjs";
 import { saveTask } from "./tasks.mjs";
 import { llamaJudge, reviewAction } from "./os/guard.mjs";
@@ -178,6 +179,19 @@ const SEARCH_NOTES_SPEC = {
   parameters: { type: "object", properties: { query: { type: "string", description: "What to search for" } }, required: ["query"] },
 };
 
+const OFFLINE_SEARCH_SPEC = {
+  name: "offline_search",
+  description: "Search installed offline Kiwix encyclopedias and how-to packs, including pictures.",
+  parameters: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "The encyclopedia or how-to question" },
+      pack: { type: "string", description: "Optional pack name" },
+    },
+    required: ["query"],
+  },
+};
+
 /** Open Yes/No confirmations, one per (task, step), resolved by the confirm route. */
 const confirmWaiters = new Map();
 
@@ -248,6 +262,7 @@ export async function runToolTask(root, task, options = {}) {
     }
   }
   if (!specs.some((spec) => spec.name === "search_notes")) specs.unshift(SEARCH_NOTES_SPEC);
+  if (!specs.some((spec) => spec.name === "offline_search")) specs.unshift(OFFLINE_SEARCH_SPEC);
 
   let mode = "gateway";
   let totalUsd = 0;
@@ -322,6 +337,16 @@ export async function runToolTask(root, task, options = {}) {
     if (name === "search_notes") {
       const hits = searchNotesImpl(root, String((args && args.query) || ""), 5);
       return hits.length ? hits.map((note) => `- ${note.text}`).join("\n") : "no notes found";
+    }
+    if (name === "offline_search") {
+      const found = await searchOffline(String((args && args.query) || ""), {
+        limit: 5,
+      });
+      if (!found.ok) return `offline search unavailable: ${found.error}`;
+      if (!found.results.length) return "no offline encyclopedia results";
+      return found.results.map((item, index) =>
+        `${index + 1}. ${item.title}: ${item.snippet || "no summary"}${item.imageUrl ? ` (image: ${item.imageUrl})` : ""}`,
+      ).join("\n");
     }
     if (!hub || typeof hub.callTool !== "function") throw new Error("tools are not available");
     if (name.startsWith("browser_") && !browserTaskHeld && typeof hub.setBrowserTaskContext === "function") {

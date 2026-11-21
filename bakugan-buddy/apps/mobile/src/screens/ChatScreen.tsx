@@ -6,6 +6,7 @@ import {
   Switch,
   Text,
   TextInput,
+  Image,
   useWindowDimensions,
   View,
   type NativeScrollEvent,
@@ -29,7 +30,7 @@ import {
 } from "../../../../packages/alive/src/chatTurn.ts";
 import type { MicPhase } from "../../../../packages/alive/src/speech.ts";
 import { currentBrainUrl, readBrainHost } from "../room/brain/brainLink";
-import { brainFetch, isUnauthorized, pairWithCode } from "../room/brain/token";
+import { brainFetch, isUnauthorized, pairWithCode, readToken } from "../room/brain/token";
 import { isValidPairingCode, microphoneAvailable, normalizePairingCode } from "../../../../packages/alive/src/phone.ts";
 import { isWhisperHallucination, resetSpeech, transcribeClip } from "../../../../packages/alive/src/speech.ts";
 import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../../../packages/alive/src/notes.ts";
@@ -45,6 +46,7 @@ import { HUGE_TIMEOUT_MS, MODEL_LABELS, SWITCHING_CHAT_MESSAGE, parseModelComman
 import {
   citedSourceEntries,
   shouldWebSearch,
+  shouldOfflineSearch,
   searchQueryFrom,
   withSources,
   type SearchResult,
@@ -121,6 +123,7 @@ type ModelStatus = {
   rollback?: { target: LocalModelId; note: string; at: number } | null;
 };
 const MODEL_BUTTONS: { id: LocalModelId; short: string }[] = [
+  { id: "tiny", short: "Tiny 0.8B" },
   { id: "small", short: "Small 8B" },
   { id: "big", short: "Big 14B" },
   { id: "huge", short: "Huge 30B" },
@@ -1441,6 +1444,25 @@ export function ChatScreen({
       setSearching(false);
     }
   }
+  /** Prefer the local Kiwix library for encyclopedic/how-to questions. */
+  async function runOfflineSearch(text: string, runId = ""): Promise<{ query: string; results: SearchResult[] }> {
+    const query = searchQueryFrom(text) || text.trim();
+    const sink = runId ? runsRef.current.get(runId) : undefined;
+    const stepId = sink ? sink.pushLocal({ kind: "tool", tool: "search_offline", label: "Searched offline library", detail: query, status: "running" }) : "";
+    try {
+      const res = await brainFetch(
+        `${bag.brainUrl}/v1/offline/search?q=${encodeURIComponent(query)}`,
+        runId ? { headers: { "x-preyas-run": runId } } : undefined,
+      );
+      const body = (await res.json()) as { ok?: boolean; results?: SearchResult[]; error?: string };
+      if (!body.ok || !body.results?.length) return { query, results: [] };
+      return { query, results: body.results.slice(0, 5) };
+    } catch {
+      return { query, results: [] };
+    } finally {
+      if (sink && stepId) sink.markDone(stepId);
+    }
+  }
   function watchTask(id: string) {
     if (taskPoll.current) clearInterval(taskPoll.current);
     taskPoll.current = setInterval(() => {
@@ -2030,12 +2052,17 @@ export function ChatScreen({
       if (!askPaid) {
         let sources: SearchResult[] = [];
         let searchQuery = "";
-        if (shouldWebSearch(trimmed)) {
+        if (shouldOfflineSearch(trimmed)) {
+          const found = await runOfflineSearch(trimmed, runId);
+          sources = found.results;
+          searchQuery = found.query;
+        }
+        if (!sources.length && shouldWebSearch(trimmed)) {
           const found = await runWebSearch(trimmed, runId);
           sources = found.results;
           searchQuery = found.query;
-          if (!sources.length && isCurrent()) setChip("Web search found nothing");
         }
+        if (!sources.length && isCurrent() && (shouldOfflineSearch(trimmed) || shouldWebSearch(trimmed))) setChip("No library or web results");
         const think = thinkForced || wantsThinking(trimmed);
         if (think && isCurrent()) setThinking(true);
         const local = await ask("local", history, trimmed, isCurrent, sources, searchQuery, think, runId).finally(() => {
@@ -3042,18 +3069,45 @@ export function ChatScreen({
                       ) : null}
                       {message.sources?.length ? (
                         <View style={styles.sources}>
-                          {citedSourceEntries(message.content, message.sources).map(({ n, source }) => (
-                            <Pressable
-                              key={`${source.url}-${n}`}
-                              onPress={() => {
-                                if (typeof window !== "undefined" && window.open) window.open(source.url, "_blank", "noopener");
-                              }}
-                            >
-                              <Text style={styles.sourceLink} numberOfLines={1}>
-                                [{n}] {source.title}
-                              </Text>
-                            </Pressable>
-                          ))}
+                          {citedSourceEntries(message.content, message.sources).map(({ n, source }) => {
+                            const offlineImageUrl = source.imageUrl;
+                            return (
+                            <View key={`${source.url}-${n}`}>
+                              {source.offline && offlineImageUrl ? (
+                                <Pressable
+                                  onPress={() => {
+                                    if (typeof window !== "undefined" && window.open) {
+                                      window.open(`${bag.brainUrl}${offlineImageUrl}${offlineImageUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(readToken())}`, "_blank", "noopener");
+                                    }
+                                  }}
+                                >
+                                  <Image
+                                    source={{
+                                      uri: `${bag.brainUrl}${offlineImageUrl}${offlineImageUrl.includes("?") ? "&" : "?"}token=${encodeURIComponent(readToken())}`,
+                                      headers: readToken() ? { "X-Preyas-Token": readToken() } : undefined,
+                                    }}
+                                    style={styles.offlineSourceImage}
+                                    resizeMode="cover"
+                                  />
+                                </Pressable>
+                              ) : null}
+                              <Pressable
+                                onPress={() => {
+                                  if (typeof window !== "undefined" && window.open) {
+                                    const target = source.offline
+                                      ? `${bag.brainUrl}${source.url.replace("/offline/article", "/v1/offline/article")}&token=${encodeURIComponent(readToken())}`
+                                      : source.url;
+                                    window.open(target, "_blank", "noopener");
+                                  }
+                                }}
+                              >
+                                <Text style={styles.sourceLink} numberOfLines={2}>
+                                  [{n}] {source.sourceLabel ? `${source.sourceLabel} · ` : ""}{source.title}
+                                </Text>
+                              </Pressable>
+                            </View>
+                            );
+                          })}
                         </View>
                       ) : null}
                       <Text style={styles.time}>{clock(message.t)}{mine ? (read ? "  ✓✓" : "  ✓") : ""}</Text>
@@ -3715,6 +3769,7 @@ const styles = StyleSheet.create({
   savePoints: { marginTop: 8, alignSelf: "flex-start", ...ghost, borderRadius: 12, paddingHorizontal: 10 },
   savePointsText: { color: theme.text, fontSize: 12, fontWeight: "600", paddingVertical: theme.space.xs },
   sourceLink: { color: theme.accentText, fontSize: 12, textDecorationLine: "underline" },
+  offlineSourceImage: { width: "100%", height: 180, borderRadius: 12, marginBottom: 6, backgroundColor: theme.off },
   thinkToggle: { color: theme.faint, fontSize: 11, marginTop: 6, minHeight: 36, textAlignVertical: "center" },
   thinkBody: { color: theme.dim, fontSize: 12, marginTop: 4 },
   note: { color: theme.note, fontSize: 13 },

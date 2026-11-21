@@ -7,12 +7,13 @@
  * - Huge always needs the heads-up (it will swap no matter what).
  */
 
-export type LocalModelId = "small" | "big" | "huge";
+export type LocalModelId = "tiny" | "small" | "big" | "huge";
 
-export const LOCAL_MODEL_IDS: readonly LocalModelId[] = ["small", "big", "huge"];
+export const LOCAL_MODEL_IDS: readonly LocalModelId[] = ["tiny", "small", "big", "huge"];
 
 /** Short labels shown in chat and on the Status switcher. */
 export const MODEL_LABELS: Record<LocalModelId, string> = {
+  tiny: "Tiny · Qwen3.5 0.8B",
   small: "Small · Qwen3 8B",
   big: "Big · Qwen3 14B",
   huge: "Huge · Qwen3 30B-A3B",
@@ -40,7 +41,7 @@ export function parseModelCommand(text: string): LocalModelId | null {
   const match = String(text)
     .trim()
     .toLowerCase()
-    .match(/^use\s+(small|big|huge)\b/);
+    .match(/^use\s+(tiny|small|big|huge)\b/);
   return match ? (match[1] as LocalModelId) : null;
 }
 

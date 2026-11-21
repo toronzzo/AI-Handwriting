@@ -40,6 +40,7 @@ export function labelForTool(name, args = {}) {
     return line ? (line.length > max ? `${line.slice(0, max)}…` : line) : "";
   };
   if (text === "search_notes") return `Search my notes for "${one(args.query, 60)}"`;
+  if (text === "offline_search") return `Search the offline library for "${one(args.query, 60)}"`;
   if (text === "files_list_directory") return `List ${one(args.path)}`;
   if (text === "files_directory_tree") return `Folder tree of ${one(args.path)}`;
   if (text === "files_search_files") return `Find "${one(args.pattern, 40)}" in ${one(args.path)}`;

@@ -8,10 +8,18 @@ import {
   parseDuckDuckGoHtml,
   searchQueryFrom,
   shouldWebSearch,
+  shouldOfflineSearch,
   sourcesPrompt,
   unwrapDuckDuckGoUrl,
   withSources,
 } from "./webSearch.ts";
+
+test("offline library topics prefer Kiwix", () => {
+  assert.equal(shouldOfflineSearch("What planet is Mars"), true);
+  assert.equal(shouldOfflineSearch("how to fix a toaster"), true);
+  assert.equal(shouldOfflineSearch("step-by-step repair for a bicycle"), true);
+  assert.equal(shouldOfflineSearch("hello Preyas"), false);
+});
 
 test("plain questions do not search; fresh-information requests do", () => {
   assert.equal(shouldWebSearch("hi Preyas"), false);
