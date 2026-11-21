@@ -2,16 +2,12 @@
  * Which addresses are local or private, for the browser_navigate guard.
  *
  * Opening the brain itself (localhost, 127/8, the LAN) or any private range
- * always needs the user's Yes/No card first — and the hostname is resolved
- * BEFORE the verdict, so a public-looking name that resolves to a private
- * address (DNS rebinding or an /etc/hosts entry) is caught too. The check
- * fails CLOSED: a host whose DNS cannot be resolved counts as private.
+ * always needs the user's Yes/No card first — and a public-looking name that
+ * currently resolves to a private address is caught too. The check fails
+ * CLOSED: a host whose DNS cannot be resolved counts as private.
  *
- * Redirects are followed hop by hop, each hop resolved again, so a public
- * page redirecting to a private address — or a host that answers with a
- * private IP on a second lookup — is caught before the browser opens it.
- *
- * Pure checks here; the DNS lookup and the HTTP fetch are injectable.
+ * The browser's actual requests are enforced by privateNetworkProxy.mjs,
+ * which pins each resolved address for the connection.
  */
 import dns from "node:dns";
 import net from "node:net";
@@ -103,13 +99,17 @@ export function urlHost(url) {
 export function isPrivateIp(ip) {
   const text = String(ip || "").trim().toLowerCase().replace(/^\[|\]$/g, "");
   if (!text) return false;
-  const mapped = text.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (mapped) return isPrivateIp(mapped[1]);
   const version = net.isIP(text);
   if (version === 4) return IPV4_PRIVATE.check(text);
   if (version === 6) {
     const groups = ipv6Groups(text);
     if (!groups) return false;
+    if (groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff) {
+      const high = groups[6];
+      const low = groups[7];
+      const mappedIpv4 = `${high >>> 8}.${high & 0xff}.${low >>> 8}.${low & 0xff}`;
+      return IPV4_PRIVATE.check(mappedIpv4);
+    }
     return isIpv6Loopback(groups) || isIpv6Ula(groups) || isIpv6LinkLocal(groups);
   }
   return false;
@@ -135,12 +135,21 @@ export async function lookupAddresses(host) {
  * checked literally first (localhost, .local, IP literals), then through DNS
  * so a public name resolving to a private IP is private too. A failed
  * lookup FAILS CLOSED: the verdict is private, so the card is asked rather
- * than letting an unresolved host through.
+ * than letting an unresolved host through. Local hostnames are resolved to
+ * capture the address that a user approval is allowed to cover.
  */
 export async function resolveNavPrivacy(url, { lookup = lookupAddresses } = {}) {
   const host = urlHost(url);
   if (!host) return { private: true, host: "unknown", address: null };
-  if (isPrivateHostname(host)) return { private: true, host, address: null };
+  if (isPrivateIp(host)) return { private: true, host, address: host };
+  if (isPrivateHostname(host)) {
+    try {
+      const addresses = await lookup(host);
+      return { private: true, host, address: addresses.find((address) => isPrivateIp(address)) || null };
+    } catch {
+      return { private: true, host, address: null };
+    }
+  }
   try {
     const addresses = await lookup(host);
     for (const address of addresses) {
@@ -152,40 +161,4 @@ export async function resolveNavPrivacy(url, { lookup = lookupAddresses } = {}) 
     return { private: true, host, address: null };
   }
   return { private: false, host, address: null };
-}
-
-/**
- * Follow a navigation's redirect chain hop by hop, resolving each hop's host
- * freshly (so a rebinding host that turns private on a later lookup is
- * caught), and return the verdict for the whole chain:
- * { private, host, address, hops } — private when ANY hop is private,
- * with `host`/`address` naming the hop that made it private.
- * Never throws: a network failure mid-chain stops the trace; the verdict
- * for the hops resolved so far (plus the fail-closed DNS rule) decides.
- */
-export async function traceNavigation(startUrl, { lookup = lookupAddresses, fetchImpl = fetch, maxHops = 5 } = {}) {
-  const hops = [];
-  let url = String(startUrl || "");
-  for (let step = 0; step <= maxHops; step += 1) {
-    if (!url) break;
-    const nav = await resolveNavPrivacy(url, { lookup });
-    hops.push({ url, host: nav.host, address: nav.address, private: nav.private });
-    if (nav.private) break;
-    try {
-      const res = await fetchImpl(url, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(5_000) });
-      const status = Number(res.status);
-      const location = typeof res.headers?.get === "function" ? res.headers.get("location") : "";
-      if ([301, 302, 303, 307, 308].includes(status) && location) {
-        url = new URL(location, url).toString();
-        continue;
-      }
-    } catch {
-      /* the network failed mid-trace; the hops so far decide */
-    }
-    break;
-  }
-  const privateHop = hops.find((hop) => hop.private);
-  if (privateHop) return { private: true, host: privateHop.host, address: privateHop.address, hops };
-  const first = hops[0];
-  return { private: false, host: first ? first.host : "", address: null, hops };
 }

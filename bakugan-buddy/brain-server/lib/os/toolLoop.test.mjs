@@ -138,6 +138,7 @@ test("writes and shell commands wait for a Yes/No card, reads do not", async () 
     })(),
     review: async () => ({ verdict: "allow", why: "reading is safe" }),
   });
+
   const readConfirm = [];
   readDeps.confirm = async () => {
     readConfirm.push(1);
@@ -189,6 +190,24 @@ test("writes and shell commands wait for a Yes/No card, reads do not", async () 
   assert.equal(shellDone.steps[0].status, "done");
   assert.match(shellDone.steps[0].result, /You said no/);
   assert.equal(shellDeps.seen.length, 0);
+});
+
+test("a confirmed private navigation passes its exact destination to execution", async () => {
+  const task = makeTask();
+  const destination = { url: "http://router.local:8080/", host: "router.local", port: 8080, address: "192.168.1.1" };
+  const model = toolThenAnswer({ name: "browser_navigate", args: { url: destination.url } });
+  let executeContext = null;
+  const deps = baseDeps({
+    callModel: model.model,
+    review: async () => ({ verdict: "ask", why: "opening router.local:8080 needs your confirmation", privateDestinations: [destination] }),
+    execute: async (_name, _args, context) => {
+      executeContext = context;
+      return "opened";
+    },
+    confirm: async () => "yes",
+  });
+  await runToolLoop(task, deps);
+  assert.deepEqual(executeContext, { privateDestinations: [destination] });
 });
 
 test("the confirm card carries the detail text for uploads", async () => {

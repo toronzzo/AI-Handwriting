@@ -11,7 +11,7 @@ import {
   loadMcpConfig,
   MCP_IDLE_MS,
   MAX_TOOL_RESULT_CHARS,
-  snapshotPageUrl,
+  spawnArgs,
   splitToolName,
   toOpenAiTools,
 } from "./mcp.mjs";
@@ -195,68 +195,24 @@ test("every curated browser tool is a known guard kind", async () => {
   }
 });
 
-test("snapshotPageUrl reads the page URL out of a snapshot", () => {
-  assert.equal(snapshotPageUrl("### Page\n- Page URL: https://example.com/contact\n- Page Title: Hi"), "https://example.com/contact");
-  assert.equal(snapshotPageUrl("ran browser_snapshot"), "");
-  assert.equal(snapshotPageUrl(""), "");
+test("the browser MCP server routes traffic through the private-network proxy", () => {
+  const { args } = spawnArgs("browser", { outputDir: "/tmp/shots", proxyServer: "http://127.0.0.1:12345" });
+  assert.deepEqual(args.slice(-4), ["--proxy-server", "http://127.0.0.1:12345", "--proxy-bypass", "<-loopback>"]);
 });
 
-test("a navigation that ends on a private address is stopped after the load", async () => {
+test("the browser hub starts a loopback proxy before connecting the MCP server", async () => {
   const config = defaultMcpConfig({ repoRoot: tempDir(), dataDir: tempDir() });
-  config.servers.files.enabled = false;
-  config.servers.shell.enabled = false;
-  let checks = 0;
+  let browserConfig = null;
   const hub = createMcpHub({
     config,
-    connect: async () => ({
-      listTools: async () => [],
-      callTool: async (name) => {
-        if (name === "browser_navigate") return { content: [{ type: "text", text: "navigated" }] };
-        if (name === "browser_snapshot") {
-          return { content: [{ type: "text", text: "### Page\n- Page URL: http://192.168.31.1/secret\n- Page Title: Private" }] };
-        }
-        return { content: [{ type: "text", text: "ok" }] };
-      },
-      close: async () => {},
-    }),
-    navCheck: async (url) => {
-      checks += 1;
-      return { private: true, host: "192.168.31.1", address: null };
+    connect: async (moduleName, serverConfig) => {
+      if (moduleName === "browser") browserConfig = serverConfig;
+      return { listTools: async () => [], callTool: async () => ({ content: [] }), close: async () => {} };
     },
   });
   try {
-    const text = await hub.callTool("browser_navigate", { url: "https://public.example/" });
-    assert.match(text, /Blocked by the guard/);
-    assert.match(text, /192\.168\.31\.1/);
-    assert.match(text, /Stop and ask/);
-    assert.equal(checks, 1, "the final URL was re-checked after the load");
-  } finally {
-    await hub.stop();
-  }
-});
-
-test("a navigation ending on a public final URL passes through", async () => {
-  const config = defaultMcpConfig({ repoRoot: tempDir(), dataDir: tempDir() });
-  config.servers.files.enabled = false;
-  config.servers.shell.enabled = false;
-  const hub = createMcpHub({
-    config,
-    connect: async () => ({
-      listTools: async () => [],
-      callTool: async (name) => {
-        if (name === "browser_navigate") return { content: [{ type: "text", text: "navigated" }] };
-        if (name === "browser_snapshot") {
-          return { content: [{ type: "text", text: "### Page\n- Page URL: https://final.example/done\n- Page Title: Fine" }] };
-        }
-        return { content: [{ type: "text", text: "ok" }] };
-      },
-      close: async () => {},
-    }),
-    navCheck: async () => ({ private: false, host: "final.example", address: null }),
-  });
-  try {
-    const text = await hub.callTool("browser_navigate", { url: "https://public.example/" });
-    assert.equal(text, "navigated");
+    await hub.callTool("browser_snapshot", {});
+    assert.match(browserConfig.proxyServer, /^http:\/\/127\.0\.0\.1:\d+$/);
   } finally {
     await hub.stop();
   }

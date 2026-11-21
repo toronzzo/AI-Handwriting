@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { addNote } from "./notes.mjs";
 import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./tasks.mjs";
-import { launchTaskRun, planTask, runTask, runToolTask, stepContext, taskRunActive } from "./taskRunner.mjs";
+import { confirmTaskStep, launchTaskRun, planTask, runTask, runToolTask, stepContext, taskRunActive } from "./taskRunner.mjs";
 
 function drive() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "preyas-tasks-"));
@@ -220,4 +220,65 @@ test("a tool-loop task records an error instead of hanging when both models are 
   assert.match(finished.steps[finished.steps.length - 1].result, /network is down/);
   assert.equal(loadTask(root, task.id).status, "error");
   done();
+});
+
+test("a private browser request during a task opens a scoped confirmation card", async () => {
+  const { root, done } = drive();
+  const task = newTask(root, { title: "open a page", chatId: "c", steps: [], toolLoop: true });
+  let onPrivateRequest;
+  let callCount = 0;
+  const hub = {
+    listTools: async () => [{ name: "browser_navigate", parameters: { type: "object" } }],
+    setBrowserTaskContext: (context) => {
+      onPrivateRequest = context.onPrivateRequest;
+      return () => { onPrivateRequest = null; };
+    },
+    approveBrowserDestination: () => true,
+    callTool: async () => {
+      const allowed = await onPrivateRequest({
+        url: "http://router.local:8080/",
+        host: "router.local",
+        port: 8080,
+        address: "192.168.1.1",
+      });
+      callCount += 1;
+      return allowed ? "opened" : "blocked";
+    },
+  };
+  let modelCalls = 0;
+  const fetchImpl = async () => {
+    modelCalls += 1;
+    const message = modelCalls === 1
+      ? {
+          tool_calls: [{
+            id: "call-1",
+            function: { name: "browser_navigate", arguments: JSON.stringify({ url: "https://public.example/" }) },
+          }],
+        }
+      : { content: "done" };
+    return { ok: true, json: async () => ({ choices: [{ message }], usage: {} }) };
+  };
+  try {
+    const running = runToolTask(root, task, {
+      gatewayUrl: "http://gateway",
+      fetchImpl,
+      hub,
+      guard: async () => ({ verdict: "allow", why: "public URL" }),
+      confirmTtlMs: 30_000,
+    });
+    for (let tries = 0; tries < 20 && !task.steps.some((step) => step.pendingConfirm); tries += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const approvalStep = task.steps.find((step) => step.pendingConfirm);
+    assert.ok(approvalStep, "the intercepted private request creates a confirmation step");
+    assert.match(approvalStep.pendingConfirm.why, /router\.local:8080 at 192\.168\.1\.1/);
+    assert.match(approvalStep.pendingConfirm.detail, /only to this host, port, address, and task/);
+    assert.equal(confirmTaskStep(task, approvalStep.id, { yes: true, token: approvalStep.pendingConfirm.token }).ok, true);
+    const finished = await running;
+    assert.equal(finished.status, "done");
+    assert.equal(callCount, 1);
+    assert.equal(onPrivateRequest, null, "the task-scoped private permission is cleared when the task ends");
+  } finally {
+    done();
+  }
 });
