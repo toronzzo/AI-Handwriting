@@ -64,8 +64,31 @@ Everything below defaults off.
 Each flag also has an `EXPO_PUBLIC_` variant for the app build
 (`EXPO_PUBLIC_PREYAS_ROUTER_MODE`, and so on).
 
-The only active provider is the local health probe (`GET /v1/health` on the
-brain proxy). `free-cloud` and `fallback` are typed, disabled placeholders;
-there are no provider keys or cloud calls in this package. Missing, invalid,
-demo, offline and timed-out providers are treated as unavailable, and
-free-cloud slots are never chosen automatically.
+The default providers are the local health probe (`GET /v1/health` on the
+brain proxy) plus two typed, disabled placeholders. Missing, invalid, demo,
+offline and timed-out providers are treated as unavailable, and free-cloud
+slots are never chosen automatically.
+## Free-cloud fallback (opt-in, one provider)
+
+`freeCloud.ts` turns the dedicated fallback slot into one explicit provider.
+`router.ts` itself still names no provider. Everything stays off by default:
+an empty environment returns the same local adapter and two placeholders.
+
+| Flag | Meaning |
+| --- | --- |
+| `PREYAS_FREE_CLOUD=1` | Select the free-cloud provider. Needs the router on, a cloud mode and the cloud opt-in. |
+| `GROQ_API_KEY` | The provider key, from the environment or the drive's `secrets/.env`. Never committed. |
+| `GROQ_MODEL` | Model id; default `llama-3.1-8b-instant`. |
+| `GROQ_BASE_URL` | Base URL; https only (loopback http for tests). |
+| `PREYAS_FREE_CLOUD_TIMEOUT_MS` | Chat deadline, 1000-120000 ms, default 90000. |
+| `PREYAS_FREE_CLOUD_PROBE_TIMEOUT_MS` | Health deadline, 50-10000 ms, default 2500. |
+
+The activated provider fills the **fallback** slot; the free-cloud slot stays a
+placeholder, so it can only be reached in fallback or manual mode after the
+cloud opt-in. A missing or malformed key, or any invalid setting, leaves the
+provider disabled and the route unavailable. The Brain view reads its status
+from the existing live-status node data and shows a provider as reachable only
+when the health check passed.
+
+Setup, limits and the full routing table: `docs/PREYAS_FREE_CLOUD.md`.
+
