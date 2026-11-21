@@ -14,6 +14,32 @@ function text(value) {
   return String(value ?? "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").trim();
 }
 
+async function readCappedBody(response, maxBytes) {
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (bytes + value.byteLength > maxBytes) {
+        try {
+          await reader.cancel();
+        } catch {
+          // The size limit still applies if the upstream cannot cancel cleanly.
+        }
+        return null;
+      }
+      chunks.push(Buffer.from(value));
+      bytes += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, bytes);
+}
+
 function normalizeResult(raw) {
   if (!raw || typeof raw !== "object") return null;
   const title = text(raw.title || raw.name || "");
@@ -21,7 +47,7 @@ function normalizeResult(raw) {
   const rawUrl = String(raw.url || raw.path || "");
   if (!title || !rawUrl) return null;
   const url = rawUrl.startsWith("/") ? rawUrl : `/${rawUrl}`;
-  const imageUrl = raw.imageUrl || raw.image || raw.thumbnail || null;
+  const imageUrl = raw.imageUrl || raw.image || raw.img || raw.thumbnail || null;
   return {
     title,
     url,
@@ -142,8 +168,13 @@ export async function proxyOfflineArticle(pathValue, options = {}) {
     return { ok: false, status: 502 };
   }
   if (!res.ok) return { ok: false, status: res.status === 404 ? 404 : 502 };
-  const buffer = Buffer.from(await res.arrayBuffer());
-  if (buffer.byteLength > maxBytes) return { ok: false, status: 413 };
+  let buffer;
+  try {
+    buffer = await readCappedBody(res, maxBytes);
+  } catch {
+    return { ok: false, status: 502 };
+  }
+  if (!buffer) return { ok: false, status: 413 };
   const declared = String(res.headers?.get?.("content-type") || "").toLowerCase();
   const type = /^text\/html|^application\/xhtml\+xml/.test(declared) ? "text/html; charset=utf-8" : declared || "text/html; charset=utf-8";
   return { ok: true, status: 200, type, buffer };
@@ -161,11 +192,21 @@ export async function proxyOfflineImage(pathValue, options = {}) {
   const url = new URL(path, baseUrl);
   if (!isLoopbackUrl(url.href, Number(url.port || 8791))) return { ok: false, status: 400 };
   if (!/^https?:/.test(url.protocol)) return { ok: false, status: 400 };
-  const res = await fetchImpl(url.href, { headers: { accept: "image/*" }, signal: AbortSignal.timeout(timeoutMs), redirect: "error" });
+  let res;
+  try {
+    res = await fetchImpl(url.href, { headers: { accept: "image/*" }, signal: AbortSignal.timeout(timeoutMs), redirect: "error" });
+  } catch {
+    return { ok: false, status: 502 };
+  }
   if (!res.ok) return { ok: false, status: res.status };
   const type = String(res.headers.get("content-type") || "").toLowerCase();
   if (!/^image\/(?:jpeg|png|gif|webp|avif)(?:;|$)/.test(type)) return { ok: false, status: 415 };
-  const buffer = Buffer.from(await res.arrayBuffer());
-  if (buffer.byteLength > maxBytes) return { ok: false, status: 413 };
+  let buffer;
+  try {
+    buffer = await readCappedBody(res, maxBytes);
+  } catch {
+    return { ok: false, status: 502 };
+  }
+  if (!buffer) return { ok: false, status: 413 };
   return { ok: true, status: 200, type, buffer };
 }

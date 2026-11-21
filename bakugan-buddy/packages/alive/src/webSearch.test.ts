@@ -53,6 +53,11 @@ test("ordinary chat, code help and long pastes stay off the offline path", () =>
   }
   const pasted = "what is this\n".repeat(40);
   assert.equal(shouldOfflineSearch(pasted), false, "a long paste is not a lookup");
+  assert.equal(
+    shouldOfflineSearch(`offline: reference this report\n${"explain this report\n".repeat(30)}`),
+    false,
+    "an offline hint does not turn a long paste into a lookup",
+  );
 });
 
 test("normal live questions still use web search exactly as before", () => {

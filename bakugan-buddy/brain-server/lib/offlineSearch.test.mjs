@@ -10,12 +10,19 @@ import {
 
 /** A fake kiwix-serve response; no sockets are opened in these tests. */
 function fakeResponse(body, { ok = true, status = 200, type = "application/json" } = {}) {
+  const bytes = Buffer.isBuffer(body) ? body : Buffer.from(typeof body === "string" ? body : JSON.stringify(body));
   return {
     ok,
     status,
     headers: { get: (name) => (name.toLowerCase() === "content-type" ? type : null) },
     json: async () => body,
-    arrayBuffer: async () => (typeof body === "string" ? Buffer.from(body) : Buffer.from(body)),
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
+    arrayBuffer: async () => bytes,
     text: async () => String(body),
   };
 }
@@ -31,6 +38,7 @@ test("parseKiwixSearchJson reads a kiwix-serve suggestions payload", () => {
   assert.equal(rows.length, 2);
   assert.equal(rows[0].title, "Mars");
   assert.equal(rows[0].snippet, "Fourth planet");
+  assert.equal(rows[0].imageUrl, "/I/mars.jpg");
   assert.equal(rows[1].title, "Moon");
 });
 
@@ -157,6 +165,30 @@ test("proxyOfflineImage enforces the byte limit", async () => {
   });
   assert.equal(result.ok, false);
   assert.equal(result.status, 413);
+});
+
+test("offline proxies stop reading once a streamed body exceeds the byte limit", async () => {
+  let cancelled = false;
+  const result = await proxyOfflineArticle("/A/Big", {
+    maxBytes: 2,
+    fetchImpl: async () => ({
+      ...fakeResponse("", { type: "text/html" }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(Buffer.from("too large"));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      arrayBuffer: async () => {
+        throw new Error("must not buffer the complete response");
+      },
+    }),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 413);
+  assert.equal(cancelled, true);
 });
 
 test("proxyOfflineImage refuses remote and traversal paths", async () => {

@@ -45,11 +45,10 @@ export function shouldOfflineSearch(raw: string): boolean {
   const text = String(raw ?? "").trim();
   if (!text) return false;
   if (PRESONAL_OR_MEMORY.test(text)) return false;
+  if (text.length > 400) return false;
   if (OFFLINE_HINT.test(text)) return true;
   const ask = OFFLINE_TOPICS.test(text) || OFFLINE_QUESTION.test(text);
   if (!ask) return false;
-  // A long pasted block is work to summarise, not a question to look up.
-  if (text.length > 400) return false;
   return true;
 }
 
