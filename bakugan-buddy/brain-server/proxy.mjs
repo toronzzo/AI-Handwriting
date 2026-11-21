@@ -101,11 +101,12 @@ import { handleOsRoute } from "./lib/os/routes.mjs";
 import { ART_WRITE_DIR, MAX_ART_BYTES, findArt, isSlot, saveArt } from "./lib/art.mjs";
 import { resolveSafePath } from "./lib/safeFs.mjs";
 import { createActivityHub } from "./lib/activity.mjs";
+import { createModelSwitch, LLAMA_PORT } from "./lib/modelSwitch.mjs";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 
-const llamaUrl = (process.env.LLAMA_URL || "http://127.0.0.1:8790").replace(/\/$/, "");
+const llamaUrl = (process.env.LLAMA_URL || `http://127.0.0.1:${LLAMA_PORT}`).replace(/\/$/, "");
 const port = Number(process.env.BRAIN_PORT || 8788);
 const host = process.env.BRAIN_HOST || "0.0.0.0";
 const dataDir = process.env.BAKUGAN_DATA_DIR || "";
@@ -113,6 +114,16 @@ const gatewayRoot = process.env.AGENT_DRIVE_ROOT || "/Volumes/Agent/agent";
 const buddyRoot = "/Volumes/Agent/BakuganBuddy";
 /** The repo folder (AI-Handwriting), the second safe root for MCP file tools. */
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+
+/**
+ * One llama-server at a time on :8790, three local tiers, an idle auto-return.
+ * Local chat stays on llamaUrl no matter which tier is live — never the gateway.
+ */
+const modelSwitch = createModelSwitch({
+  modelsDir: process.env.PREYAS_MODELS_DIR || path.join(buddyRoot, "models"),
+  dataDir: dataDir || undefined,
+  template: path.join(path.dirname(fileURLToPath(import.meta.url)), "templates", "qwen3.jinja"),
+});
 
 /**
  * One MCP hub for the whole brain process. Created lazily (it only spawns
@@ -381,14 +392,14 @@ function sendJson(res, status, body) {
 const CHAT_PROXY_TIMEOUT_MS = Number(process.env.BRAIN_UPSTREAM_TIMEOUT_MS || 90_000);
 
 /** Pipe one model response, but stop paying for generation after the client leaves. */
-async function pipeChatCompletion(req, res, target, body, downError) {
+async function pipeChatCompletion(req, res, target, body, downError, timeoutMs = CHAT_PROXY_TIMEOUT_MS) {
   const controller = new AbortController();
   let timedOut = false;
   let clientClosed = false;
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, CHAT_PROXY_TIMEOUT_MS);
+  }, timeoutMs);
   const onClose = () => {
     if (!res.writableEnded) {
       clientClosed = true;
@@ -870,6 +881,25 @@ const server = http.createServer(async (req, res) => {
         }),
       );
       return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/model") {
+      const model = await modelSwitch.refresh();
+      return sendJson(res, 200, model);
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/model/switch") {
+      const body = await readJson(req);
+      const target = String((body && body.model) || "").trim();
+      if (target !== "small" && target !== "big" && target !== "huge") {
+        return sendJson(res, 400, { error: `unknown model: ${target || "(none)"}` });
+      }
+      const result = await modelSwitch.request(target, { confirmed: Boolean(body && body.confirm) });
+      if (result.needsConfirm) return sendJson(res, 200, result);
+      if (!result.ok) {
+        return sendJson(res, result.error === "another switch is already running" ? 409 : 400, result);
+      }
+      return sendJson(res, 200, result);
     }
 
     if (req.method === "GET" && url.pathname === "/v1/speech") {
@@ -1868,6 +1898,12 @@ const server = http.createServer(async (req, res) => {
       }
       const sampled = withSampling(raw);
       const body = model === "paid" ? sampled : withDriveMap(withNotes(sampled));
+      // Any chat is activity for the idle auto-return. A local route never
+      // reaches the gateway: small, big and huge all go straight to llama.
+      modelSwitch.touch();
+      if (model !== "paid" && modelSwitch.state().status === "loading") {
+        return sendJson(res, 503, { error: "the model is loading — try again in a moment" });
+      }
       const target =
         model === "paid"
           ? "http://127.0.0.1:4000/v1/chat/completions"
@@ -1878,6 +1914,7 @@ const server = http.createServer(async (req, res) => {
         target,
         body,
         model === "paid" ? "paid gateway is down" : "llama is down",
+        model === "paid" ? CHAT_PROXY_TIMEOUT_MS : modelSwitch.chatTimeoutMs(),
       );
       return;
     }
@@ -2003,6 +2040,7 @@ server.listen(port, host, () => {
   startReminderLoop();
   tidyBriefingChat();
   missedAtStartup();
+  void modelSwitch.detect();
   if (dataDir) {
     try {
       rescanDrive();

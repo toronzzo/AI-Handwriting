@@ -41,6 +41,7 @@ import { useCoach } from "../coach/useCoach";
 import { matchDocuments, parseDocumentRequest } from "../../../../packages/alive/src/documents.ts";
 import { formatDue, parseReminder, type Reminder } from "../../../../packages/alive/src/reminders.ts";
 import { isShortAffirmation, wantsThinking } from "../../../../packages/alive/src/chatTurn.ts";
+import { MODEL_LABELS, parseModelCommand, type LocalModelId } from "../../../../packages/alive/src/modelSwitch.ts";
 import {
   citedSourceEntries,
   shouldWebSearch,
@@ -105,6 +106,22 @@ type PendingReminder = { text: string; dueAt: string; repeat: "none" | "daily" |
 type PartnerCard = { turns: number; level: number; bond: number; caption: string };
 type HealthPart = { ok: boolean; label: string; detail: string };
 type Health = { ok: boolean; parts: Record<string, HealthPart>; drive?: { mounted: boolean; freeGb: number | null }; memory?: { swapUsedMb: number | null } };
+type ModelTier = { label: string; context: number; weightsGb: number };
+type ModelStatus = {
+  current: LocalModelId;
+  status: "ready" | "loading" | "down" | "error";
+  error: string | null;
+  label: string;
+  freeGb: number | null;
+  idleMinutesLeft: number;
+  port: number;
+  tiers: Record<LocalModelId, ModelTier>;
+};
+const MODEL_BUTTONS: { id: LocalModelId; short: string }[] = [
+  { id: "small", short: "Small 8B" },
+  { id: "big", short: "Big 14B" },
+  { id: "huge", short: "Huge 30B" },
+];
 type ChatMeta = { id: string; title: string; created: number; updated: number };
 type ChatDialog =
   | { kind: "rename"; id: string; value: string }
@@ -118,7 +135,8 @@ type ChatDialog =
   | { kind: "briefingTime"; time: string }
   | { kind: "briefingOff" }
   | { kind: "taskConfirm"; taskId: string; stepId: number; token: string; title: string; body: string }
-  | { kind: "deleteDeck"; id: string; title: string };
+  | { kind: "deleteDeck"; id: string; title: string }
+  | { kind: "model"; target: "big" | "huge"; freeGb: number | null };
 type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string; briefingDay?: string };
 /** "Briefing 2026-11-07" is how an old briefing message started. */
 function briefingDayOf(row: StoredRow): string {
@@ -318,6 +336,7 @@ export function ChatScreen({
   const [docChoice, setDocChoice] = useState<{ name: string; matches: string[] } | null>(null);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
+  const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [vault, setVault] = useState<{ path: string; obsidianUrl: string; notes: number; lastSync: number } | null>(null);
   const [driveMap, setDriveMap] = useState<{ scanned: number; files: number; folders: number; models: number } | null>(null);
@@ -959,6 +978,101 @@ export function ChatScreen({
       return body;
     } catch {
       return null;
+    }
+  }
+
+  async function refreshModel() {
+    try {
+      const res = await brainFetch(`${bag.brainUrl}/v1/model`);
+      if (!res.ok) return null;
+      const body = (await res.json()) as ModelStatus;
+      setModelStatus(body);
+      return body;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Ask the brain to switch. Returns "confirm" when a Yes/No card must come first. */
+  async function switchModel(target: LocalModelId, confirmed: boolean): Promise<"started" | "confirm" | "failed"> {
+    try {
+      const res = await brainFetch(`${bag.brainUrl}/v1/model/switch`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: target, confirm: confirmed }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        needsConfirm?: boolean;
+        freeGb?: number | null;
+        current?: LocalModelId;
+        status?: ModelStatus["status"];
+        error?: string;
+      };
+      if (body.needsConfirm) {
+        if (target === "big" || target === "huge") {
+          setDialog({ kind: "model", target, freeGb: body.freeGb ?? null });
+        }
+        return "confirm";
+      }
+      if (!body.ok) {
+        setChip(body.error || "Could not switch models");
+        return "failed";
+      }
+      setModelStatus((prev) =>
+        prev
+          ? { ...prev, current: body.current ?? target, status: body.status ?? "loading", error: null }
+          : null,
+      );
+      void refreshModel();
+      return "started";
+    } catch {
+      setChip("Could not switch models");
+      return "failed";
+    }
+  }
+
+  /** "use small" / "use big" / "use huge" — switch, then say so in the chat. */
+  async function handleModelCommand(trimmed: string): Promise<boolean> {
+    const target = parseModelCommand(trimmed);
+    if (!target) return false;
+    busy.current = true;
+    try {
+      await addLocal({ t: Date.now(), role: "user", content: trimmed, who: "user" });
+      const outcome = await switchModel(target, false);
+      if (outcome === "confirm") {
+        await addLocal({
+          t: Date.now(),
+          role: "assistant",
+          content:
+            target === "big"
+              ? "The Mac is low on memory, so I'll check with you first."
+              : "The 30B model will make the Mac swap. Just say yes or no on the card.",
+          who: "preyas",
+          model: "preyas",
+        });
+        return true;
+      }
+      if (outcome === "failed") {
+        await addLocal({
+          t: Date.now(),
+          role: "assistant",
+          content: "I couldn't switch models.",
+          who: "preyas",
+          model: "preyas",
+        });
+        return true;
+      }
+      await addLocal({
+        t: Date.now(),
+        role: "assistant",
+        content: `Switching to the ${MODEL_LABELS[target]}… loading…`,
+        who: "preyas",
+        model: "preyas",
+      });
+      return true;
+    } finally {
+      busy.current = false;
     }
   }
   async function restartPreyas() {
@@ -1650,9 +1764,23 @@ export function ChatScreen({
       void refreshPhone();
       void refreshBriefing();
       void refreshDriveMap();
+      void refreshModel();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section]);
+  // While a model is loading, keep asking the brain until it is ready or failed.
+  useEffect(() => {
+    if (!modelStatus || modelStatus.status !== "loading") return;
+    const id = setInterval(() => void refreshModel(), 3000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelStatus?.status]);
+  useEffect(() => {
+    if (!modelStatus) return;
+    if (modelStatus.status === "ready") setChip(`Ready: ${modelStatus.label}`);
+    if (modelStatus.status === "error" && modelStatus.error) setChip(modelStatus.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelStatus?.status, modelStatus?.error]);
   const scrollToLatest = (animated = true) => {
     logRef.current?.scrollToEnd({ animated });
   };
@@ -1714,7 +1842,16 @@ export function ChatScreen({
       model,
       messages: toModelMessages(prior, summaryRef.current, withSources(userText, searchQuery, sources)),
       think,
-      timeoutMs: route === "paid" ? 45_000 : think ? THINK_TIMEOUT_MS : LOCAL_TIMEOUT_MS,
+      timeoutMs:
+        route === "paid"
+          ? 45_000
+          : think
+            ? THINK_TIMEOUT_MS
+            : modelStatus?.current === "huge"
+              ? 240_000
+              : modelStatus?.current === "big"
+                ? 120_000
+                : LOCAL_TIMEOUT_MS,
       onDelta: (update) => {
         const shown = splitPaidHint(update.answer).text;
         last = shown;
@@ -1787,6 +1924,7 @@ export function ChatScreen({
     if (!askPaid && !affirmation && (await handleStudyCommand(trimmed, chatId))) return;
     if (!askPaid && !affirmation && (await handleBriefingCommand(trimmed, chatId))) return;
     if (!askPaid && !affirmation && (await handleReminderCommand(trimmed, chatId))) return;
+    if (!askPaid && !affirmation && !dialog && (await handleModelCommand(trimmed))) return;
     const command = affirmation ? null : parseNoteCommand(trimmed);
     if (command?.kind === "remember") {
       await handleRemember(trimmed, command.text);
@@ -2134,6 +2272,29 @@ export function ChatScreen({
               void restartPreyas();
             },
           }
+        : dialog.kind === "model"
+          ? {
+              title: confirmFor({ kind: "slow_model", target: dialog.target, freeGb: dialog.freeGb }).title,
+              body: confirmFor({ kind: "slow_model", target: dialog.target, freeGb: dialog.freeGb }).body,
+              confirm: "Yes",
+              no: "No",
+              danger: false,
+              run: () => {
+                const target = dialog.target;
+                setDialog(null);
+                void switchModel(target, true).then((outcome) => {
+                  if (outcome === "started") {
+                    void addLocal({
+                      t: Date.now(),
+                      role: "assistant",
+                      content: `Switching to the ${MODEL_LABELS[target]}… loading…`,
+                      who: "preyas",
+                      model: "preyas",
+                    });
+                  }
+                });
+              },
+            }
         : dialog.kind === "deleteReminders"
         ? {
             title: `Cancel ${dialog.reminders.length} reminder${dialog.reminders.length === 1 ? "" : "s"}?`,
@@ -2296,6 +2457,34 @@ export function ChatScreen({
           ) : (
             <Text style={styles.dim}>Checking…</Text>
           )}
+          <View style={styles.phoneCard}>
+            <Text style={styles.kicker}>MODEL</Text>
+            <Text style={styles.dim}>
+              {modelStatus
+                ? `${modelStatus.label}${modelStatus.status === "loading" ? " · loading…" : modelStatus.status === "down" || modelStatus.status === "error" ? ` · ${modelStatus.status}` : ""}`
+                : "Checking…"}
+            </Text>
+            <View style={styles.modelRow}>
+              {MODEL_BUTTONS.map((tier) => {
+                const active = modelStatus?.current === tier.id;
+                const loading = modelStatus?.status === "loading";
+                return (
+                  <Pressable
+                    key={tier.id}
+                    disabled={loading}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Use ${tier.short}`}
+                    style={[styles.modelBtn, active && styles.modelBtnActive, loading && styles.modelBtnDim]}
+                    onPress={() => void switchModel(tier.id, false)}
+                  >
+                    <Text style={[styles.modelBtnText, active && styles.modelBtnTextActive]}>{tier.short}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {modelStatus?.freeGb != null ? <Text style={styles.dim}>About {modelStatus.freeGb} GB free on the Mac.</Text> : null}
+            <Text style={styles.dim}>Back to the 8B after 20 idle minutes. Chat: "use small", "use big", "use huge".</Text>
+          </View>
           <Text style={styles.dim}>
             Drive map:{" "}
             {driveMap
@@ -3395,6 +3584,19 @@ const styles = StyleSheet.create({
   healthRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   healthLabel: { color: theme.text, fontSize: 14, width: 120 },
   healthDetail: { color: theme.dim, fontSize: 12, flex: 1 },
+  modelRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  modelBtn: {
+    borderWidth: 1,
+    borderColor: theme.accentLine,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: theme.bg,
+  },
+  modelBtnActive: { borderColor: theme.accent, backgroundColor: theme.accent },
+  modelBtnDim: { opacity: 0.5 },
+  modelBtnText: { color: theme.text, fontSize: 13, fontWeight: "600" },
+  modelBtnTextActive: { color: theme.onAccent },
   restartBtn: { borderColor: theme.danger },
   phoneCard: { marginVertical: 10, padding: 12, ...paperSoft, borderRadius: 14, gap: 6 },
   phoneUrl: { color: theme.accentText, fontSize: 16, fontWeight: "700" },
