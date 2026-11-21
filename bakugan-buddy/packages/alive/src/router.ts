@@ -370,6 +370,15 @@ export function decideRoute(
   return routeFor(fallback);
 }
 
+/**
+ * The provider shape plus the optional one-chat-call method the free-cloud
+ * adapter adds. The router never calls chat; it only carries it through so the
+ * fallback slot keeps working when the adapter fills it.
+ */
+export type ChatCapableProvider = BrainProvider & {
+  chat?: unknown;
+};
+
 function isProviderLike(value: unknown): value is BrainProvider {
   if (!value || typeof value !== "object") return false;
   const provider = value as Partial<BrainProvider>;
@@ -646,12 +655,39 @@ export function createFallbackSlot(): BrainProvider {
   });
 }
 
-/** Local plus the two disabled slots, ready for the future chat integration. */
+/**
+ * Local plus the two cloud slots.
+ *
+ * The free-cloud slot is always a typed placeholder: no provider occupies it
+ * by default. Only an explicitly configured, opted-in provider is accepted,
+ * and it occupies the dedicated fallback slot instead, so a free-cloud route
+ * can only ever be reached through fallback or manual mode after the cloud
+ * opt-in. Without a provider, both slots stay disabled placeholders.
+ */
 export function createDefaultProviders(options: {
   localBaseUrl: string;
   fetchImpl?: typeof fetch;
   localTimeoutMs?: number;
+  /** The one activated free-cloud provider, if the operator configured one. */
+  cloudProvider?: ChatCapableProvider | null;
 }): BrainProvider[] {
+  const cloud = isUsableCloudProvider(options.cloudProvider) ? options.cloudProvider : null;
+  // The activated provider fills the dedicated fallback slot: it keeps its own
+  // probe and chat but answers to the fallback id and kind, so it can only be
+  // reached through fallback or manual mode, never as a free-cloud route.
+  const fallback: ChatCapableProvider = cloud
+    ? {
+        id: FALLBACK_PROVIDER_ID,
+        kind: "fallback",
+        label: FREE_CLOUD_LABEL,
+        enabled: true,
+        demo: false,
+        timeoutMs: cloud.timeoutMs,
+        probeTimeoutMs: cloud.probeTimeoutMs,
+        probe: (context) => cloud.probe(context),
+        ...(typeof cloud.chat === "function" ? { chat: cloud.chat } : {}),
+      }
+    : createFallbackSlot();
   return [
     createLocalProvider({
       baseUrl: options.localBaseUrl,
@@ -659,8 +695,21 @@ export function createDefaultProviders(options: {
       timeoutMs: options.localTimeoutMs,
     }),
     createFreeCloudSlot(),
-    createFallbackSlot(),
+    fallback,
   ];
+}
+
+/** The label the dedicated fallback shows when the free-cloud provider fills it. */
+export const FREE_CLOUD_LABEL = "Free cloud (fallback)";
+
+/**
+ * The provider must be a live, non-demo free-cloud adapter. A placeholder, a
+ * provider of another kind, or anything configured with an error is refused,
+ * so an invalid configuration can never occupy the fallback slot.
+ */
+export function isUsableCloudProvider(value: unknown): value is ChatCapableProvider {
+  if (!isProviderLike(value)) return false;
+  return value.kind === FREE_CLOUD_KIND && value.enabled === true && value.demo === false;
 }
 
 /** Snapshot for the Brain live status; checkedAt is only set when work happened. */
