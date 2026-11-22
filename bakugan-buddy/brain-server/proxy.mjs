@@ -120,6 +120,7 @@ import { createModelSwitch, LLAMA_PORT, llamaServerRamMb, chatGate } from "./lib
 import { createCapabilities } from "./lib/capabilities.mjs";
 import { createPowerController } from "./lib/power.mjs";
 import { createSelfKnowledge, withSelfKnowledge } from "./lib/selfKnowledge.mjs";
+import { withEmoji } from "./lib/emoji.mjs";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -2070,7 +2071,8 @@ const server = http.createServer(async (req, res) => {
       if (!gate.ok) return sendJson(res, gate.status, { error: gate.error });
       const sampled = withSampling(raw);
       const body = model === "paid" ? sampled : withDriveMap(withNotes(sampled));
-      const bodyWithKnowledge = await withSelfKnowledge(body, selfKnowledge);
+      const bodyWithEmoji = withEmoji(body, { mood: lastMood, dataDir });
+      const bodyWithKnowledge = await withSelfKnowledge(bodyWithEmoji, selfKnowledge);
       let news = "";
       try {
         const asked = JSON.parse(bodyWithKnowledge.toString("utf8"));

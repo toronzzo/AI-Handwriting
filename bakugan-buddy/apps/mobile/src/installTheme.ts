@@ -28,6 +28,8 @@ function installTheme(): void {
     `:root{${cssVars(DAY)};color-scheme:light}`,
     `html[data-pz="night"]{${cssVars(NIGHT)};color-scheme:dark}`,
     "html,body{background:var(--pz-bg);color:var(--pz-onSky);font-family:Inter,system-ui,-apple-system,sans-serif}",
+    'input,textarea{font-family:emoji,"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Twemoji Mozilla",Inter,system-ui,sans-serif !important;font-variant-emoji:emoji !important}',
+    '[data-emoji]{font-family:emoji,"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Twemoji Mozilla",sans-serif !important;font-variant-emoji:emoji;font-style:normal;font-weight:normal;letter-spacing:0;white-space:nowrap;word-break:keep-all;overflow-wrap:normal}',
     ":focus-visible{outline:3px solid var(--pz-onSky);outline-offset:2px}",
   ].join("\n");
 
