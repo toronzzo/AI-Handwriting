@@ -44,6 +44,38 @@ export function whisperModelFor(env = process.env, exists = (file) => fs.existsS
   return "";
 }
 
+/**
+ * The whisper.cpp CLI. WHISPER_BIN wins; otherwise the build setup-all.sh puts
+ * on the drive (tools/whisper/whisper-cli), then plain "whisper-cli" on PATH.
+ * scripts/preyas.sh starts the brain without brain.env, so the drive default
+ * is what makes the mic work there.
+ */
+export function whisperBinFor(env = process.env, exists = (file) => fs.existsSync(file)) {
+  const set = String(env.WHISPER_BIN || "").trim();
+  if (set) return set;
+  const root = String(env.BAKUGAN_DATA_DIR || "").trim();
+  if (root) {
+    const onDrive = path.join(root, "tools", "whisper", "whisper-cli");
+    if (exists(onDrive)) return onDrive;
+  }
+  return "whisper-cli";
+}
+
+/**
+ * The Python that has kokoro_onnx and piper. PIPER_PYTHON wins; otherwise the
+ * venv setup-all.sh makes on the drive (venvs/tts). "" when neither exists.
+ */
+export function voicePythonFor(env = process.env, exists = (file) => fs.existsSync(file)) {
+  const set = String(env.PIPER_PYTHON || "").trim();
+  if (set && exists(set)) return set;
+  const root = String(env.BAKUGAN_DATA_DIR || "").trim();
+  if (root) {
+    const onDrive = path.join(root, "venvs", "tts", "bin", "python");
+    if (exists(onDrive)) return onDrive;
+  }
+  return "";
+}
+
 export function whisperArgs(model, wavPath, outBase) {
   return ["-m", model, "-f", wavPath, "-l", "auto", "--no-timestamps", "-otxt", "-of", outBase];
 }
@@ -132,7 +164,7 @@ export async function transcribeFile(wavPath, env = process.env) {
     }
   }
   const model = whisperModelFor(env);
-  const bin = env.WHISPER_BIN || "whisper-cli";
+  const bin = whisperBinFor(env);
   if (!model || !fs.existsSync(model)) return null;
   const base = wavPath.replace(/\.wav$/i, "");
   const result = await run(bin, whisperArgs(model, wavPath, base));
@@ -156,8 +188,8 @@ export async function synthesizeFile(request, env = process.env) {
   if (root && !String(voiceId).startsWith("ru_")) {
     const model = path.join(root, "models", "kokoro", "kokoro-v1.0.onnx");
     const voices = path.join(root, "models", "kokoro", "voices-v1.0.bin");
-    const py = env.PIPER_PYTHON || "";
-    if (py && fs.existsSync(py) && fs.existsSync(model) && fs.existsSync(voices)) {
+    const py = voicePythonFor(env);
+    if (py && fs.existsSync(model) && fs.existsSync(voices)) {
       const script = `
 import sys
 from kokoro_onnx import Kokoro
@@ -178,7 +210,7 @@ sf.write(out_path, samples, rate)
   const piperId = String(voiceId).startsWith("ru_") ? voiceId : "en_US-ryan-high";
   const voice = path.join(root, "models", "piper-voices", `${piperId}.onnx`);
   if (!root || !fs.existsSync(voice)) return null;
-  const py = env.PIPER_PYTHON || "";
+  const py = voicePythonFor(env);
   const length = String(lengthScale || 1);
   const noiseScale = String(request.noiseScale || 0.6);
   let code = 1;
