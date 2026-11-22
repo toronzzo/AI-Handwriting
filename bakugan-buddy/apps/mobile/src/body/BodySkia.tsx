@@ -6,6 +6,7 @@
  */
 import { StyleSheet, Text, View } from "react-native";
 import type { Mood } from "../../../../packages/body-core/src";
+import { theme } from "../theme";
 
 type Props = {
   emotion?: Mood;
@@ -30,8 +31,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 24,
-    backgroundColor: "#121212",
+    backgroundColor: theme.bg,
   },
-  t: { color: "#f2f2f2", fontSize: 18, fontWeight: "700", marginBottom: 8 },
-  s: { color: "#b0b0b0", textAlign: "center", lineHeight: 20 },
+  t: { color: theme.text, fontSize: 18, fontWeight: "700", marginBottom: 8 },
+  s: { color: theme.dim, textAlign: "center", lineHeight: 20 },
 });

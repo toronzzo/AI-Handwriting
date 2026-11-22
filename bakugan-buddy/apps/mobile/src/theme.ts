@@ -1,15 +1,16 @@
 /**
- * One Pajero theme for the whole app, with automatic day/night colours.
- * 8px spacing grid, one type scale. Every screen reads from here.
+ * One Pajero theme for the whole app. 8px spacing grid, one type scale.
+ * Every screen reads from here.
  *
  * On the web every colour is the string `var(--pz-<key>)` so the injected
- * stylesheet can flip day/night live; on the iPhone and under node tests it
- * is a fixed hex taken from the palette at launch.
+ * stylesheet can flip light/dark live. On the iPhone and under node tests it
+ * is a fixed hex from the saved appearance choice at launch (themePrefs.ts).
  */
-import { paletteFor, type PaletteKey } from "./palette.ts";
+import type { PaletteKey } from "./palette.ts";
+import { activePalette } from "./themePrefs.ts";
 
 const isWeb = typeof document !== "undefined";
-const launch = paletteFor(new Date());
+const launch = activePalette(new Date());
 
 function colour(key: PaletteKey): string {
   return isWeb ? `var(--pz-${key})` : launch[key];

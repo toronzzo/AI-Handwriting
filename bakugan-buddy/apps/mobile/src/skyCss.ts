@@ -62,9 +62,8 @@ export function installSky(): void {
 /**
  * The shade drawn over the user's own `bg` picture (slice 10). The app has no
  * gradient package, so it is six stacked bands from the top colour to the
- * bottom one: day rgba(63,120,192,0.55) → rgba(156,196,234,0.60), night
- * rgba(22,34,60,0.80) → rgba(35,54,88,0.85). Those values live in the palette
- * (`bgShadeTop` / `bgShadeBottom`); nothing is hard-coded here.
+ * bottom one. Those values live in the palette (`bgShadeTop` /
+ * `bgShadeBottom`); nothing is hard-coded here.
  */
 export const SHADE_BANDS = [0, 0.2, 0.4, 0.6, 0.8, 1] as const;
 

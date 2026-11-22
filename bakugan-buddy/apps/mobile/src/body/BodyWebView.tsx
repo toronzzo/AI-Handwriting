@@ -2,6 +2,7 @@ import { createElement, useCallback, useRef } from "react";
 import { StyleSheet, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { BODY_HTML } from "../bodyHtml.generated";
+import { theme } from "../theme";
 
 export type BodyMetrics = {
   fps: number;
@@ -104,6 +105,6 @@ export const BodyWebViewAPI = {
 };
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: "#050505" },
+  wrap: { flex: 1, backgroundColor: theme.bg },
   web: { flex: 1, backgroundColor: "transparent" },
 });
