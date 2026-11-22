@@ -213,5 +213,65 @@ pid_matches() { return 1; }
 assert_eq "safety: a pid that is not ours is ignored" "$(status_pid llama)" ""
 pid_matches() { return 0; }
 
+# ---------------------------------------------------- resident model memory
+fp="$(parse_footprint_kb 'phys_footprint: 1.1 GB')"
+assert_eq "footprint: 1.1 GB is the mapped size in KB" "$fp" "1153434"
+fp="$(parse_footprint_kb "$(printf '%s\n' 'phys_footprint_peak: 9 GB' 'Physical footprint:         1126 MB')")"
+assert_eq "footprint: the live line, not the peak" "$fp" "1153024"
+fp="$(parse_footprint_kb 'phys_footprint_peak: 9 GB')"
+assert_eq "footprint: a peak-only line is not a size" "$fp" ""
+
+mac_kb=$(
+  ram_kb_of_pid() {
+    case "$1" in
+      10|11|12) echo 19456 ;;
+      *) echo 0 ;;
+    esac
+  }
+  child_pids() {
+    case "$1" in
+      10) printf '11\n' ;;
+      11) printf '12\n' ;;
+    esac
+  }
+  footprint_text() {
+    case "$1" in
+      12) printf 'phys_footprint: 1.1 GB\nphys_footprint_peak: 3 GB\n' ;;
+    esac
+  }
+  is_mac() { return 0; }
+  resident_tree_kb 10
+)
+mac_mb=$((mac_kb / 1024))
+if (( mac_mb >= 1100 && mac_mb < 1300 )); then
+  ok "ram: macOS footprint of a grandchild counts (${mac_mb} MB)"
+else
+  not_ok "ram: macOS footprint of a grandchild counts (${mac_mb} MB)"
+fi
+
+linux_kb=$(
+  ram_kb_of_pid() {
+    case "$1" in
+      10) echo 19456 ;;
+      11) echo 1126400 ;;
+      *) echo 0 ;;
+    esac
+  }
+  child_pids() {
+    case "$1" in
+      10) printf '11\n' ;;
+    esac
+  }
+  footprint_text() { :; }
+  is_mac() { return 1; }
+  resident_tree_kb 10
+)
+linux_mb=$((linux_kb / 1024))
+if (( linux_mb >= 1100 )); then
+  ok "ram: a child RSS counts when footprint is absent (${linux_mb} MB)"
+else
+  not_ok "ram: a child RSS counts when footprint is absent (${linux_mb} MB)"
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

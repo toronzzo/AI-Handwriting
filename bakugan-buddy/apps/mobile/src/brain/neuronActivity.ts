@@ -2,7 +2,8 @@
  * Live neuron activity for the Brain map.
  *
  * The brain already publishes one small snapshot at GET /v1/brain:
- *   { neurons: [{ neuron, state, ramMb, tps, costUsd, detail, ts }], ts }
+ *   { neurons: [{ id, state, ramMb, tps, costUsd, detail, ts, ... }], ts }
+ * Live SSE events use `neuron` instead of `id`. Both names are the same id.
  * The brain events slice (N2) calls these "neurons": chat tiers, hands,
  * ears, voice and the planned drawing/memory/free-cloud slots. This module
  * turns that feed into the one thing the map needs to know: which neurons are
@@ -203,16 +204,27 @@ function round(value: unknown, places: number): number | null {
 }
 
 /**
+ * The snapshot row's id, or the SSE event's neuron. The registry key is `id`
+ * on GET /v1/brain and `neuron` on the stream; either one is enough.
+ */
+export function neuronNameOf(row: Record<string, unknown>): NeuronId | null {
+  if (isNeuronId(row.id)) return row.id;
+  if (isNeuronId(row.neuron)) return row.neuron;
+  return null;
+}
+
+/**
  * Read one neuron row without trusting it. Unknown ids are ignored; an
  * unknown state reads as "off" rather than inventing activity.
  */
 export function parseNeuronRecord(raw: unknown, now = Date.now()): NeuronRecord | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const row = raw as Record<string, unknown>;
-  if (!isNeuronId(row.neuron)) return null;
+  const name = neuronNameOf(row);
+  if (!name) return null;
   const state = isNeuronState(row.state) ? row.state : "off";
   return {
-    id: row.neuron,
+    id: name,
     state,
     ramMb: round(row.ramMb, 0),
     tps: round(row.tps, 1),

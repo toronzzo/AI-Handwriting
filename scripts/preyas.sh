@@ -273,16 +273,83 @@ ram_kb_of_pid() {
   [[ "$kb" =~ ^[0-9]+$ ]] && printf '%s\n' "$kb"
 }
 
-ram_mb() {
-  local pid="$1" total=0 kb child
-  [[ "${pid:-}" =~ ^[0-9]+$ ]] || { echo 0; return; }
-  kb="$(ram_kb_of_pid "$pid")"
-  [[ -n "$kb" ]] && total=$((total + kb))
+# macOS footprint / vmmap text for one pid. Empty when the tool is missing.
+footprint_text() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+  if command -v footprint >/dev/null 2>&1; then
+    footprint -p "$pid" 2>/dev/null || true
+  fi
+}
+
+# One phys_footprint line, in KB. Peak lines are not the live size.
+# "1.1 GB", "1126 MB" and "Physical footprint: 1.1G" all parse.
+parse_footprint_kb() {
+  local text="$1" line value unit
+  line="$(printf '%s\n' "$text" | grep -Ei 'phys(ical)?[ _]?footprint' | grep -Eiv 'peak' | head -1 || true)"
+  [[ -n "$line" ]] || return 1
+  if [[ "$line" =~ ([0-9]+([.][0-9]+)?)[[:space:]]*([KkMmGgTt][Bb]?) ]]; then
+    value="${BASH_REMATCH[1]}"
+    unit="${BASH_REMATCH[3]}"
+  else
+    return 1
+  fi
+  awk -v v="$value" -v u="$unit" 'BEGIN {
+    unit = tolower(u)
+    mult = 1
+    if (unit ~ /^k/) mult = 1
+    else if (unit ~ /^m/) mult = 1024
+    else if (unit ~ /^g/) mult = 1024 * 1024
+    else if (unit ~ /^t/) mult = 1024 * 1024 * 1024
+    kb = int(v * mult + 0.5)
+    if (kb < 1 && v > 0) kb = 1
+    print kb
+  }'
+}
+
+# KB for one pid: macOS phys_footprint when it is present, otherwise RSS.
+resident_pid_kb() {
+  local pid="$1" kb=""
+  if is_mac; then
+    kb="$(parse_footprint_kb "$(footprint_text "$pid")" || true)"
+  fi
+  if [[ -z "${kb:-}" ]]; then
+    kb="$(ram_kb_of_pid "$pid" || true)"
+  fi
+  [[ "${kb:-}" =~ ^[0-9]+$ ]] && printf '%s\n' "$kb"
+}
+
+# The whole process tree. A launcher's RSS is not the model; descendants and
+# mapped weights are. `_resident_*` are scratch for the walk.
+_resident_seen=" "
+_resident_total=0
+_resident_walk() {
+  local pid="$1" child kb
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+  [[ "$_resident_seen" == *" $pid "* ]] && return 0
+  _resident_seen="$_resident_seen$pid "
+  kb="$(resident_pid_kb "$pid" || true)"
+  if [[ "${kb:-}" =~ ^[0-9]+$ ]]; then
+    _resident_total=$((_resident_total + kb))
+  fi
   for child in $(child_pids "$pid"); do
-    kb="$(ram_kb_of_pid "$child")"
-    [[ -n "$kb" ]] && total=$((total + kb))
+    _resident_walk "$child"
   done
-  echo $((total / 1024))
+}
+
+resident_tree_kb() {
+  _resident_seen=" "
+  _resident_total=0
+  _resident_walk "$1"
+  printf '%s\n' "$_resident_total"
+}
+
+ram_mb() {
+  local kb
+  [[ "${1:-}" =~ ^[0-9]+$ ]] || { echo 0; return; }
+  kb="$(resident_tree_kb "$1")"
+  [[ "$kb" =~ ^[0-9]+$ ]] || kb=0
+  echo $((kb / 1024))
 }
 
 human_ram() {

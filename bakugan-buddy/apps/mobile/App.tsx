@@ -18,6 +18,7 @@ import { ChatScreen } from "./src/screens/ChatScreen";
 import { TodayScreen } from "./src/today/TodayScreen";
 import { BrainScreen } from "./src/brain/BrainScreen";
 import { MAIN_TABS, SETTINGS_ENTRY, type Section } from "./src/nav";
+import { chatPaneVisible, chatSectionFor, chatStaysMounted } from "./src/stage";
 import { theme } from "./src/theme";
 import { isWide, ROOT_ATTR, SHELL_ATTR, STAGE_ATTR, WEB_SHELL_CSS } from "./src/layout";
 import { Stripe } from "./src/ui/Stripe";
@@ -193,13 +194,30 @@ export default function App() {
                 </View>
               ) : null}
             </AdvancedWrap>
-          ) : section === "today" ? (
-            <TodayScreen />
-          ) : section === "brain" ? (
-            <BrainScreen />
           ) : (
-            <ChatScreen section={section} onSection={setSection} onNavigate={openAdvanced} />
+            <>
+              {section === "today" ? (
+                <View style={styles.fill}>
+                  <TodayScreen />
+                </View>
+              ) : null}
+              {section === "brain" ? (
+                <View style={styles.fill}>
+                  <BrainScreen />
+                </View>
+              ) : null}
+            </>
           )}
+          {chatStaysMounted(section, advanced !== null) ? (
+            <View
+              style={chatPaneVisible(section, advanced !== null) ? styles.fill : styles.parked}
+              pointerEvents={chatPaneVisible(section, advanced !== null) ? "auto" : "none"}
+              accessibilityElementsHidden={!chatPaneVisible(section, advanced !== null)}
+              importantForAccessibility={chatPaneVisible(section, advanced !== null) ? "auto" : "no-hide-descendants"}
+            >
+              <ChatScreen section={chatSectionFor(section)} onSection={setSection} onNavigate={openAdvanced} />
+            </View>
+          ) : null}
         </View>
       </View>
 
@@ -229,6 +247,8 @@ const styles = StyleSheet.create({
   stage: { flex: 1, minHeight: 0, overflow: "hidden", backgroundColor: isWeb ? "transparent" : theme.bg },
   fill: { flex: 1 },
   hidden: { height: 0, overflow: "hidden", flex: 0 },
+  /** Chat stays mounted here so a reply can finish while another tab is open. */
+  parked: { display: "none" },
 
   // Mac: a slim icon rail, Settings at the bottom.
   sidebar: {

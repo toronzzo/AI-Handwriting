@@ -10,8 +10,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { partnerFromTurns } from "../../packages/alive/src/chatTurn.ts";
+import { partnerFromAreas } from "../../packages/alive/src/rpgLevel.ts";
 import { appendSummary, historyDir, normalizeEntry, writeTextAtomic } from "./history.mjs";
+import { rpgToday } from "./os/rpg.mjs";
 
 export const NEW_CHAT_TITLE = "New chat";
 export const FIRST_CHAT_TITLE = "First chat";
@@ -197,29 +198,42 @@ export function oneBriefingPerDay(rows) {
   return rows.filter((row, index) => !isBriefingRow(row) || keep.has(index));
 }
 
+/**
+ * Level and bond for every chat. They come from the life log Today already
+ * uses, so opening another thread cannot reset Preyas.
+ */
+export function drivePartner(root) {
+  let total = 0;
+  try {
+    const today = rpgToday(root);
+    for (const value of Object.values(today.areaXp || {})) total += Number(value) || 0;
+  } catch {
+    total = 0;
+  }
+  return partnerFromAreas(total);
+}
+
 /** Read one chat's newest turns, plus the shared summary and bond. */
 export function readChat(root, id, limit = 40) {
   const chat = findChat(root, id);
   if (!chat) return null;
   const summaryPath = path.join(historyDir(root), "summary.txt");
   const summary = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, "utf8") : "";
+  const partner = drivePartner(root);
   const file = chatFile(root, id);
-  if (!fs.existsSync(file)) return { chat, summary, messages: [], partner: partnerFromTurns(0) };
-  let userTurns = 0;
+  if (!fs.existsSync(file)) return { chat, summary, messages: [], partner };
   const parsed = [];
   for (const line of fs.readFileSync(file, "utf8").split("\n")) {
     if (!line) continue;
     try {
-      const row = JSON.parse(line);
-      parsed.push(row);
-      if (row.role === "user" || row.who === "user") userTurns += 1;
+      parsed.push(JSON.parse(line));
     } catch {
       /* skip a torn line */
     }
   }
   const shown = oneBriefingPerDay(parsed);
   const start = shown.length > limit ? shown.length - limit : 0;
-  return { chat, summary, messages: shown.slice(start), partner: partnerFromTurns(userTurns) };
+  return { chat, summary, messages: shown.slice(start), partner };
 }
 
 /** Append one turn, retitle a fresh chat from the first user line, touch `updated`. */

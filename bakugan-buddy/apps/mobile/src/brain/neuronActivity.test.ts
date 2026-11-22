@@ -19,6 +19,7 @@ import {
   neuronIsActive,
   neuronToNode,
   nodeActivity,
+  neuronNameOf,
   parseNeuronRecord,
   warmNeuronIds,
 } from "./neuronActivity.ts";
@@ -174,6 +175,38 @@ test("malformed, unknown and empty bodies are ignored, never turned into activit
   assert.equal(unknownState.neurons["hands"]?.state, "off");
 });
 
+test("a GET /v1/brain row keyed by id lights the node and can travel from the core", () => {
+  let feed = ingestNeuronSnapshot(
+    emptyNeuronFeed(),
+    { neurons: [{ id: "chat-small", state: "off", ts: T0 }, { id: "hands", state: "off", ts: T0 }], ts: T0 },
+    T0,
+  );
+  assert.equal(feed.seeded, true, "an id-keyed snapshot is a real feed");
+  assert.equal(activitySummary(feed, T0), "Resting");
+  assert.equal(feed.signals.length, 0);
+
+  feed = ingestNeuronSnapshot(
+    feed,
+    {
+      neurons: [
+        { id: "chat-small", state: "thinking", ts: T0 + 400 },
+        { id: "hands", state: "off", ts: T0 + 400 },
+      ],
+      ts: T0 + 400,
+    },
+    T0 + 420,
+  );
+  assert.deepEqual(activeNeuronIds(feed), ["chat-small"]);
+  assert.equal(nodeActivity(feed, "local-model", T0 + 420).active, true);
+  assert.equal(activitySummary(feed, T0 + 420), "Chat small");
+  assert.equal(feed.signals.length, 1);
+  assert.equal(feed.signals[0]?.from, "core");
+  assert.equal(feed.signals[0]?.to, "chat-small");
+  assert.equal(neuronNameOf({ id: "hands", neuron: "chat-small" }), "hands");
+  assert.equal(neuronNameOf({ neuron: "ears" }), "ears");
+  assert.equal(neuronNameOf({ id: "nope" }), null);
+});
+
 test("parse keeps only sane numbers and clips detail", () => {
   const parsed = parseNeuronRecord(
     { neuron: "hands", state: "done", ramMb: "12.6", tps: "9.44", costUsd: 0.00123456, detail: "x".repeat(500), ts: T0 },
@@ -211,4 +244,23 @@ test("the active-state helper agrees with the feed state", () => {
   assert.equal(isActiveState("loading"), true);
   assert.equal(isActiveState("done"), false);
   assert.equal(isActiveState(undefined), false);
+});
+
+test("the real brain snapshot shape lights the neuron it says is thinking", async () => {
+  const { createBrain } = await import("../../../../brain-server/lib/os/neurons.mjs");
+  const brain = createBrain({ dataDir: "", now: () => T0 });
+  brain.emit({ neuron: "chat-small", state: "thinking", ts: T0, detail: "answering" });
+  brain.emit({ neuron: "hands", state: "thinking", ts: T0 + 10 });
+  const body = { neurons: brain.neurons(), ts: T0 };
+  const row = body.neurons.find((neuron: { id?: string }) => neuron.id === "chat-small");
+  assert.equal(row?.state, "thinking");
+  assert.equal("neuron" in row, false, "the snapshot uses id, not neuron");
+
+  const feed = ingestNeuronSnapshot(emptyNeuronFeed(), body, T0);
+  assert.equal(feed.seeded, true);
+  assert.deepEqual(activeNeuronIds(feed), ["chat-small", "hands"]);
+  assert.equal(nodeActivity(feed, "local-model", T0).active, true);
+  assert.equal(nodeActivity(feed, "paid-fallback", T0).labels.join(","), "Hands");
+  assert.equal(activitySummary(feed, T0).includes("Chat small"), true);
+  assert.notEqual(activitySummary(feed, T0), "Waiting for the brain feed");
 });

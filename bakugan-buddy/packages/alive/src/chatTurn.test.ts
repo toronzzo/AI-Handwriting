@@ -14,6 +14,7 @@ import {
   stripThinking,
   visibleReply,
   partnerFromTurns,
+  chatTarget,
   resolveChatBase,
   streamReply,
   trimHistory,
@@ -78,12 +79,23 @@ test("bond and level grow only from stored turns", () => {
   assert.equal(partnerFromTurns(80).bond, 100);
 });
 
-test("the chat base falls back to the proxy when the gateway is down", async () => {
-  const found = await resolveChatBase("http://127.0.0.1:8788", async () => {
+test("chat stays on the brain when LiteLLM is down and when it is up", async () => {
+  const down = await resolveChatBase("http://127.0.0.1:8788", async () => {
     throw new Error("down");
   });
-  assert.equal(found.via, "proxy");
-  assert.equal(found.base, "http://127.0.0.1:8788");
+  assert.equal(down.via, "proxy");
+  assert.equal(down.base, "http://127.0.0.1:8788");
+
+  let probes = 0;
+  const up = await resolveChatBase("http://127.0.0.1:8788/", async () => {
+    probes += 1;
+    return new Response("{}", { status: 200 });
+  });
+  assert.equal(probes, 0, "a live :4000 /v1/models must not steal the turn");
+  assert.equal(up.via, "proxy");
+  assert.equal(up.base, "http://127.0.0.1:8788");
+  assert.deepEqual(chatTarget("local", up.base), { base: up.base, model: "preyas" });
+  assert.deepEqual(chatTarget("paid", "http://127.0.0.1:8788/"), { base: "http://127.0.0.1:8788", model: "paid" });
 });
 
 test("sse usage is kept and text deltas join", () => {
