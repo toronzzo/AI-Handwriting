@@ -129,13 +129,13 @@ function makeSwitch(options = {}) {
   };
 }
 
-test("big under 10 GB free asks for a card and starts nothing", async () => {
-  const f = makeSwitch({ freeGb: 9.5, healthy: true });
+test("big with an unreadable free figure asks for a card and starts nothing", async () => {
+  const f = makeSwitch({ freeGb: null, healthy: true });
   try {
     const result = await f.switcher.request("big");
     assert.equal(result.ok, false);
     assert.equal(result.needsConfirm, true);
-    assert.equal(result.freeGb, 9.5);
+    assert.equal(result.freeGb, null);
     assert.equal(f.spawned.length, 0, "no server may start before the card is answered");
     assert.equal(f.switcher.state().status, "down");
   } finally {
@@ -157,7 +157,7 @@ test("huge always asks for a card, even with plenty of memory", async () => {
 test("big with 10+ GB free starts right away; confirm also works under the limit", async () => {
   for (const opts of [
     { freeGb: 10, confirmed: false },
-    { freeGb: 2, confirmed: true },
+    { freeGb: null, confirmed: true },
   ]) {
     const f = makeSwitch({ ...opts, healthy: true });
     try {
@@ -206,7 +206,7 @@ test("the server starts with flash attention, one slot and the right context", a
     assert.equal(args[args.indexOf("--port") + 1], "8790");
     assert.equal(args[args.indexOf("-ngl") + 1], "99", "8B and 14B fit fully on the GPU");
     // huge gets the 8K window and a partial offload so the 16 GB Mac survives
-    const f2 = makeSwitch({ healthy: true, freeGb: 1 });
+    const f2 = makeSwitch({ healthy: true, freeGb: 20 });
     await f2.switcher.request("huge", { confirmed: true });
     await f2.drain();
     assert.equal(f2.spawned[0].args[f2.spawned[0].args.indexOf("-c") + 1], "8192");
@@ -686,4 +686,33 @@ test("model RAM counts mapped footprint and child processes, not the launcher RS
     return cb(new Error("no"), "");
   }, 8790, "darwin");
   assert.ok(listening >= 1100, `the port's process tree should report the model, got ${listening}`);
+});
+
+test("big or huge is refused when it cannot fit, even after Yes, and nothing starts", async () => {
+  for (const [target, freeGb] of [["huge", 6], ["big", 2], ["huge", 15]]) {
+    const f = makeSwitch({ freeGb, healthy: true });
+    try {
+      const result = await f.switcher.request(target, { confirmed: true });
+      assert.equal(result.ok, false);
+      assert.equal(result.notEnoughMemory, true);
+      assert.match(result.error, /Not enough free memory/);
+      assert.equal(f.spawned.length, 0, "no server may start when the model cannot fit");
+    } finally {
+      fs.rmSync(f.models, { recursive: true, force: true });
+    }
+  }
+});
+
+test("tooBigForMemory never refuses small or tiny, or an unknown free figure", async () => {
+  const { tooBigForMemory } = await import("./modelSwitch.mjs");
+  assert.equal(tooBigForMemory("small", 1), false);
+  assert.equal(tooBigForMemory("tiny", 0.5), false);
+  assert.equal(tooBigForMemory("huge", null), false);
+  assert.equal(tooBigForMemory("big", 10), false);
+  assert.equal(tooBigForMemory("big", 9.9), true);
+});
+
+test("the small 8B uses an 8K window so it fits a 16 GB Mac", async () => {
+  const { TIERS } = await import("./modelSwitch.mjs");
+  assert.equal(TIERS.small.context, 8192);
 });

@@ -10,6 +10,8 @@ import path from "node:path";
 import test from "node:test";
 import {
   explicitWhisperModel,
+  voicePythonFor,
+  whisperBinFor,
   WHISPER_FALLBACK,
   WHISPER_PREFERRED,
   whisperArgs,
@@ -85,4 +87,21 @@ test("listening keeps -l auto so Russian and English both work", () => {
     "-of",
     "/tmp/in",
   ]);
+});
+
+test("the mic finds whisper-cli on the drive when WHISPER_BIN is unset", () => {
+  const root = "/drive";
+  const onDrive = path.join(root, "tools", "whisper", "whisper-cli");
+  assert.equal(whisperBinFor({ BAKUGAN_DATA_DIR: root }, (file) => file === onDrive), onDrive);
+  assert.equal(whisperBinFor({ BAKUGAN_DATA_DIR: root }, () => false), "whisper-cli");
+  assert.equal(whisperBinFor({ BAKUGAN_DATA_DIR: root, WHISPER_BIN: "/x/whisper" }, () => true), "/x/whisper");
+});
+
+test("the voice finds the drive's tts venv when PIPER_PYTHON is unset", () => {
+  const root = "/drive";
+  const onDrive = path.join(root, "venvs", "tts", "bin", "python");
+  assert.equal(voicePythonFor({ BAKUGAN_DATA_DIR: root }, (file) => file === onDrive), onDrive);
+  assert.equal(voicePythonFor({ BAKUGAN_DATA_DIR: root }, () => false), "");
+  assert.equal(voicePythonFor({ BAKUGAN_DATA_DIR: root, PIPER_PYTHON: "/py" }, () => true), "/py");
+  assert.equal(voicePythonFor({}, () => true), "");
 });
