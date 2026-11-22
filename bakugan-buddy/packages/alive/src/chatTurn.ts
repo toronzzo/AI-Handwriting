@@ -357,6 +357,13 @@ function messagesForModel(messages: readonly ChatMessage[], model: string): Chat
   return copy;
 }
 
+/** The bubble name. A backup-brain reply says so; everything else stays as it was. */
+export function replySourceLabel(who: string | undefined, brain?: string): string {
+  if (who === "paid") return "deepseek-flash";
+  if (who === "user") return "You";
+  return brain === "backup" ? "Preyas · backup brain" : "Preyas";
+}
+
 export async function streamReply(options: {
   base: string;
   model: string;
@@ -366,7 +373,9 @@ export async function streamReply(options: {
   /** Let the local model reason first. The reasoning is never shown. */
   think?: boolean;
   onDelta?: (update: { answer: string; thinking: string; inThink: boolean }) => void;
-}): Promise<{ text: string; thinking: string; usage: TokenUsage | null; ok: boolean; error: string }> {
+  /** Fires once, when the response headers arrive. "backup" or "". */
+  onBrain?: (brain: "backup" | "") => void;
+}): Promise<{ text: string; thinking: string; usage: TokenUsage | null; ok: boolean; error: string; brain: "backup" | "" }> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? LOCAL_TIMEOUT_MS);
@@ -389,6 +398,8 @@ export async function streamReply(options: {
       }),
       signal: controller.signal,
     });
+    const brain = res.headers.get("x-preyas-brain") === "backup" ? "backup" : "";
+    options.onBrain?.(brain);
     if (!res.ok || !res.body) {
       let error = res.ok ? "empty" : `status ${res.status}`;
       // The brain explains refusals in its JSON body ("switching models…");
@@ -401,7 +412,7 @@ export async function streamReply(options: {
           /* keep the status text */
         }
       }
-      return { text: "", thinking: "", usage: null, ok: false, error };
+      return { text: "", thinking: "", usage: null, ok: false, error, brain };
     }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -438,10 +449,11 @@ export async function streamReply(options: {
       usage,
       ok: Boolean(shown.answer),
       error: shown.answer ? "" : "empty reply",
+      brain,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { text: "", thinking: "", usage: null, ok: false, error: message };
+    return { text: "", thinking: "", usage: null, ok: false, error: message, brain: "" };
   } finally {
     clearTimeout(timer);
   }

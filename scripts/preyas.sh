@@ -25,6 +25,10 @@
 #
 # Every slow or machine-specific piece is a function so scripts/preyas.test.sh
 # can replace it and exercise the logic with mock processes.
+#
+# Optional Windows helpers (whisper, a backup llama, embeddings) are read from
+# brain-server/brain.env when that file exists. A missing file changes nothing.
+# See bakugan-buddy/docs/WINDOWS_HELPER.md.
 set -uo pipefail
 
 # launchd starts with a very small PATH; node, npx and llama-server may live
@@ -506,6 +510,146 @@ kill_tree() {
   kill "-$signal" "$pid" 2>/dev/null || true
 }
 
+# Optional Windows helper URLs. A missing or broken brain.env leaves the three
+# empty and still returns 0. LLAMA_URL is never taken from the file.
+load_windows_helpers() {
+  local file="${1:-$BRAIN_DIR/brain.env}"
+  WHISPER_URL=""
+  LLAMA_FALLBACK_URL=""
+  EMBEDDINGS_URL=""
+  [[ -f "$file" ]] || return 0
+  local loaded
+  loaded="$(
+    set +e
+    # shellcheck disable=SC1090
+    source "$file" >/dev/null 2>&1
+    set +e
+    printf 'WHISPER_URL=%q\nLLAMA_FALLBACK_URL=%q\nEMBEDDINGS_URL=%q\n' \
+      "${WHISPER_URL-}" "${LLAMA_FALLBACK_URL-}" "${EMBEDDINGS_URL-}"
+  )" || true
+  if [[ "$loaded" == WHISPER_URL=* ]]; then
+    # shellcheck disable=SC2086
+    eval "$loaded"
+  fi
+  return 0
+}
+
+# Env for the brain process. LLAMA_URL stays this Mac's llama-server.
+apply_brain_env() {
+  load_windows_helpers "${1:-$BRAIN_DIR/brain.env}"
+  export LLAMA_URL="http://127.0.0.1:8790"
+  export WHISPER_URL="${WHISPER_URL:-}"
+  export LLAMA_FALLBACK_URL="${LLAMA_FALLBACK_URL:-}"
+  export EMBEDDINGS_URL="${EMBEDDINGS_URL:-}"
+}
+
+helper_url_for() {
+  case "$1" in
+    whisper) printf '%s' "${WHISPER_URL:-}" ;;
+    backup) printf '%s' "${LLAMA_FALLBACK_URL:-}" ;;
+    embeddings) printf '%s' "${EMBEDDINGS_URL:-}" ;;
+    *) printf '' ;;
+  esac
+}
+
+helper_label_for() {
+  case "$1" in
+    whisper) printf 'whisper' ;;
+    backup) printf 'backup brain' ;;
+    embeddings) printf 'embeddings' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# Whisper and the backup llama publish /health. Embeddings is probed at the
+# configured URL: any HTTP response means the process is awake.
+helper_probe_target() {
+  local name="$1" url="${2%/}"
+  case "$name" in
+    embeddings) printf '%s' "$url" ;;
+    *) printf '%s/health' "$url" ;;
+  esac
+}
+
+# up or down. Connect budget is 3s so a sleeping laptop cannot stall status.
+helper_probe() {
+  local url="$1" code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 3 "$url" 2>/dev/null || true)"
+  if [[ -n "$code" && "$code" != "000" ]]; then
+    printf 'up'
+  else
+    printf 'down'
+  fi
+}
+
+helper_state_of() {
+  local name="$1" url
+  url="$(helper_url_for "$name")"
+  if [[ -z "$url" ]]; then
+    printf 'unset'
+    return 0
+  fi
+  helper_probe "$(helper_probe_target "$name" "$url")"
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
+}
+
+read_helper_states() {
+  load_windows_helpers
+  local dir name pid
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/preyas-helper.XXXXXX")"
+  local pids=()
+  for name in whisper backup embeddings; do
+    (
+      helper_state_of "$name" >"$dir/$name"
+    ) &
+    pids+=("$!")
+  done
+  for pid in "${pids[@]}"; do
+    wait "$pid" || true
+  done
+  HELPER_WHISPER="$(cat "$dir/whisper" 2>/dev/null || printf 'unset')"
+  HELPER_BACKUP="$(cat "$dir/backup" 2>/dev/null || printf 'unset')"
+  HELPER_EMBEDDINGS="$(cat "$dir/embeddings" 2>/dev/null || printf 'unset')"
+  rm -rf "$dir"
+}
+
+helper_state_named() {
+  case "$1" in
+    whisper) printf '%s' "$HELPER_WHISPER" ;;
+    backup) printf '%s' "$HELPER_BACKUP" ;;
+    embeddings) printf '%s' "$HELPER_EMBEDDINGS" ;;
+    *) printf 'unset' ;;
+  esac
+}
+
+status_helpers_human() {
+  read_helper_states
+  local name
+  printf '%s\n' "Windows helpers"
+  for name in whisper backup embeddings; do
+    printf '%-14s %-8s %s\n' "$(helper_label_for "$name")" "$(helper_state_named "$name")" "$(helper_url_for "$name")"
+  done
+}
+
+helpers_json() {
+  read_helper_states
+  local name first=1
+  printf '['
+  for name in whisper backup embeddings; do
+    [[ "$first" -eq 0 ]] && printf ','
+    first=0
+    printf '{"name":"%s","label":"%s","state":"%s","url":"%s"}' \
+      "$name" "$(json_escape "$(helper_label_for "$name")")" "$(helper_state_named "$name")" "$(json_escape "$(helper_url_for "$name")")"
+  done
+  printf ']'
+}
+
 launch_service() {
   local name="$1" file logfile
   file="$(pidfile_for "$name")"
@@ -540,11 +684,12 @@ launch_service() {
     brain)
       (
         cd "$BRAIN_DIR" || exit 1
+        # brain.env may name the Windows helpers. LLAMA_URL stays local.
+        apply_brain_env "$BRAIN_DIR/brain.env"
         BAKUGAN_DATA_DIR="$BUDDY_DATA" \
           AGENT_DRIVE_ROOT="$AGENT_DIR" \
           BRAIN_PORT=8788 \
           BRAIN_HOST="$BRAIN_HOST" \
-          LLAMA_URL="http://127.0.0.1:8790" \
           PREYAS_WEB_PORT="$WEB_PORT" \
           nohup node --experimental-strip-types --disable-warning=ExperimentalWarning proxy.mjs >>"$logfile" 2>&1 </dev/null &
         echo $! >"$file"
@@ -782,6 +927,7 @@ status_human() {
     fi
     printf '%-14s %-8s :%-5s %s\n' "$(svc_label "$name")" "$state" "$(svc_port "$name")" "$(human_ram "$ram")"
   done
+  status_helpers_human
 }
 
 status_json() {
@@ -803,8 +949,10 @@ status_json() {
       "$name" "$(svc_label "$name")" "$(svc_port "$name")" "$running" "$health" \
       "${pid:-null}" "$ram" "$available" "$detail"
   done
-  printf '],"autostart":{"installed":%s,"supported":%s,"path":"%s"}}\n' \
-    "$autostart" "$(is_mac && echo true || echo false)" "$AUTOSTART_PLIST"
+  local helpers
+  helpers="$(helpers_json)"
+  printf '],"helpers":%s,"autostart":{"installed":%s,"supported":%s,"path":"%s"}}\n' \
+    "$helpers" "$autostart" "$(is_mac && echo true || echo false)" "$AUTOSTART_PLIST"
 }
 
 plist_escape() {
@@ -906,7 +1054,7 @@ Use: scripts/preyas.sh <command>
   stop <service>     stop one: llama|model, litellm, kiwix, brain, web
   restart            turn everything off, then on
   restart <service>  restart one: llama|model, litellm, kiwix, brain, web
-  status             one line per service: state, port, RAM
+  status             one line per service, then whether each Windows helper is up
   status --json      the same, for the app
   autostart on|off|status [--json]
                      start Preyas when you log in (off by default)

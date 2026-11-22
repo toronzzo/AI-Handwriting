@@ -402,5 +402,69 @@ else
   not_ok "ram: a child RSS counts when footprint is absent (${linux_mb} MB)"
 fi
 
+# ------------------------------------------------------- optional Windows helpers
+reset_world
+rm -f "$PREYAS_BRAIN_DIR/brain.env"
+probes="$STATE/helper-probes"
+rm -f "$probes"
+helper_probe() {
+  printf '%s\n' "$1" >>"$probes"
+  printf 'up'
+}
+out="$(status_human)"
+if [[ -f "$probes" ]]; then
+  not_ok "helpers: unset URLs are not probed"
+else
+  ok "helpers: unset URLs are not probed"
+fi
+assert_contains "helpers: status names whisper" "$out" "Windows helpers"
+assert_contains "helpers: whisper is unset" "$out" "whisper        unset"
+json="$(status_json)"
+node -e 'const j=JSON.parse(process.argv[1]); if(!Array.isArray(j.helpers)||j.helpers.length!==3) process.exit(1); if(j.helpers.some((row)=>row.state!=="unset")) process.exit(2); if(j.services.length!==5) process.exit(3);' "$json"
+assert_eq "helpers: json lists three unset helpers beside the services" "$?" "0"
+
+cat >"$PREYAS_BRAIN_DIR/brain.env" <<'EOF'
+# optional Windows laptop
+WHISPER_URL=http://192.168.31.88:8178
+LLAMA_FALLBACK_URL=http://192.168.31.88:8790
+EMBEDDINGS_URL=http://192.168.31.88:8792/v1/embeddings
+LLAMA_URL=http://192.168.31.88:8790
+EOF
+rm -f "$probes"
+out="$(status_human)"
+assert_contains "helpers: whisper URL is shown" "$out" "http://192.168.31.88:8178"
+assert_contains "helpers: backup brain is up" "$out" "backup brain   up"
+assert_contains "helpers: embeddings URL is shown" "$out" "http://192.168.31.88:8792/v1/embeddings"
+probe_log="$(cat "$probes")"
+assert_contains "helpers: whisper is probed at /health" "$probe_log" "http://192.168.31.88:8178/health"
+assert_contains "helpers: backup brain is probed at /health" "$probe_log" "http://192.168.31.88:8790/health"
+assert_contains "helpers: embeddings is probed at its URL" "$probe_log" "http://192.168.31.88:8792/v1/embeddings"
+json="$(status_json)"
+node -e 'const j=JSON.parse(process.argv[1]); const backup=j.helpers.find((row)=>row.name==="backup"); if(!backup||backup.state!=="up"||backup.label!=="backup brain") process.exit(1); if(backup.url!=="http://192.168.31.88:8790") process.exit(2);' "$json"
+assert_eq "helpers: json reports the backup brain" "$?" "0"
+
+env_out="$(
+  apply_brain_env "$PREYAS_BRAIN_DIR/brain.env"
+  printf '%s\n' "$LLAMA_URL" "$WHISPER_URL" "$LLAMA_FALLBACK_URL" "$EMBEDDINGS_URL"
+)"
+assert_eq "helpers: LLAMA_URL stays on this Mac" "$(printf '%s\n' "$env_out" | sed -n '1p')" "http://127.0.0.1:8790"
+assert_eq "helpers: whisper URL is passed through" "$(printf '%s\n' "$env_out" | sed -n '2p')" "http://192.168.31.88:8178"
+assert_eq "helpers: fallback URL is passed through" "$(printf '%s\n' "$env_out" | sed -n '3p')" "http://192.168.31.88:8790"
+assert_eq "helpers: embeddings URL is passed through" "$(printf '%s\n' "$env_out" | sed -n '4p')" "http://192.168.31.88:8792/v1/embeddings"
+
+printf 'this is not shell (\n' >"$PREYAS_BRAIN_DIR/brain.env"
+if apply_brain_env "$PREYAS_BRAIN_DIR/brain.env"; then
+  ok "helpers: a broken brain.env does not fail the launch"
+else
+  not_ok "helpers: a broken brain.env does not fail the launch"
+fi
+assert_eq "helpers: a broken brain.env does not replace LLAMA_URL" "$LLAMA_URL" "http://127.0.0.1:8790"
+rm -f "$PREYAS_BRAIN_DIR/brain.env"
+missing="$(
+  apply_brain_env "$PREYAS_BRAIN_DIR/brain.env"
+  printf '%s|%s\n' "$LLAMA_URL" "${WHISPER_URL:-}"
+)"
+assert_eq "helpers: a missing brain.env keeps the local llama and an empty whisper URL" "$missing" "http://127.0.0.1:8790|"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

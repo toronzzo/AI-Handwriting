@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { CONNECT_TIMEOUT_MS, connectWithTimeout } from "./netTimeout.mjs";
 
 /** The bigger model this Mac already has; better at Russian and English. */
 export const WHISPER_PREFERRED = "ggml-small.bin";
@@ -139,29 +140,53 @@ function languageFrom(stderr) {
   return match ? match[1].toLowerCase() : "en";
 }
 
-export async function transcribeFile(wavPath, env = process.env) {
-  if (env.WHISPER_URL) {
+/**
+ * Ask a whisper.cpp server. The connect probe is about 3s so a sleeping
+ * laptop cannot hold the mic; once the handshake succeeds, transcription
+ * itself is allowed to finish. Null means "try the local CLI".
+ */
+async function transcribeRemote(wavPath, remote, options = {}) {
+  const fetchImpl = options.fetchImpl || fetch;
+  const connect = options.connect || connectWithTimeout;
+  const connectTimeoutMs = options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
+  const base = String(remote || "").trim().replace(/\/$/, "");
+  if (!base) return null;
+  try {
+    let open = false;
     try {
-      const wav = fs.readFileSync(wavPath);
-      const boundary = `preyas${Date.now()}`;
-      const head = Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="in.wav"\r\nContent-Type: audio/wav\r\n\r\n`,
-      );
-      const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
-      const body = Buffer.concat([head, wav, tail]);
-      const res = await fetch(`${env.WHISPER_URL.replace(/\/$/, "")}/inference`, {
-        method: "POST",
-        headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
-        body,
-      });
-      if (res.ok) {
-        const json = await res.json();
-        const text = String(json.text || "").trim();
-        if (text) return { text, language: String(json.language || "en") };
-      }
+      open = await connect(`${base}/inference`, connectTimeoutMs);
     } catch {
-      /* fall through to the CLI */
+      open = false;
     }
+    if (!open) return null;
+    const wav = fs.readFileSync(wavPath);
+    const boundary = `preyas${Date.now()}`;
+    const head = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="in.wav"\r\nContent-Type: audio/wav\r\n\r\n`,
+    );
+    const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const body = Buffer.concat([head, wav, tail]);
+    const res = await fetchImpl(`${base}/inference`, {
+      method: "POST",
+      headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+      body,
+    });
+    if (res.ok) {
+      const json = await res.json();
+      const text = String(json.text || "").trim();
+      if (text) return { text, language: String(json.language || "en") };
+    }
+  } catch {
+    /* fall through to the CLI */
+  }
+  return null;
+}
+
+export async function transcribeFile(wavPath, env = process.env, options = {}) {
+  const remote = String((env && env.WHISPER_URL) || "").trim();
+  if (remote) {
+    const heard = await transcribeRemote(wavPath, remote, options);
+    if (heard) return heard;
   }
   const model = whisperModelFor(env);
   const bin = whisperBinFor(env);

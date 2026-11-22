@@ -104,6 +104,7 @@ test("a fully received reply with content resets the idle window once", async ()
     assert.equal(answered, 1, "one real answer, one reset");
     assert.equal(res.statusCode, 200);
     assert.equal(res.writableEnded, true);
+    assert.equal(res.headers["X-Preyas-Brain"], undefined);
     assert.ok(brainRecords.some((record) => record.state === "done"));
   } finally {
     server.close();
@@ -236,6 +237,63 @@ test("a failed upstream does not deliver the news sentence", async () => {
     const text = Buffer.concat(res.chunks).toString("utf8");
     assert.ok(!text.includes("New since last time"));
     assert.equal(delivered, 0);
+  } finally {
+    server.close();
+  }
+});
+
+test("deferError keeps a failed local reply off the wire", async () => {
+  const server = await startUpstream((req, res) => {
+    res.writeHead(503, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "llama is down" }));
+  });
+  try {
+    const brain = { emit: () => {} };
+    const res = new FakeResponse();
+    const result = await pipeChatCompletion(
+      brain,
+      {},
+      res,
+      upstreamUrl(server),
+      JSON.stringify({ stream: false }),
+      "llama is down",
+      3000,
+      { neuron: "chat-small", deferError: true },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.wrote, false);
+    assert.equal(res.headersSent, false);
+    assert.equal(res.chunks.length, 0);
+  } finally {
+    server.close();
+  }
+});
+
+test("a backup reply is labeled for the app and the brain log", async () => {
+  const server = await startUpstream((req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(CONTENT_CHUNK);
+    res.end();
+  });
+  try {
+    const brainRecords = [];
+    const brain = { emit: (record) => brainRecords.push(record) };
+    const res = new FakeResponse();
+    const result = await pipeChatCompletion(
+      brain,
+      {},
+      res,
+      upstreamUrl(server),
+      JSON.stringify({ stream: true }),
+      "llama is down",
+      3000,
+      { neuron: "chat-small", brainSource: "backup", local: false },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.wrote, true);
+    assert.equal(res.headers["X-Preyas-Brain"], "backup");
+    assert.ok(brainRecords.some((record) => record.state === "done" && record.detail === "backup brain"));
+    assert.ok(brainRecords.some((record) => record.state === "thinking" && record.detail === "backup brain"));
   } finally {
     server.close();
   }

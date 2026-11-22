@@ -105,6 +105,17 @@ scripts/preyas.sh status --json      # what the app reads
 scripts/preyas.sh autostart on|off|status
 ```
 
+## Windows helper (optional)
+
+A Windows laptop on the LAN can serve whisper, a backup llama, and
+embeddings. Nothing changes until `brain-server/brain.env` names them.
+`scripts/preyas.sh status` then adds a "Windows helpers" block (and a
+`helpers` array in `--json`) showing whether each one is up, down, or unset.
+A sleeping laptop is given about three seconds to answer, then marked down.
+
+The URLs, the Tailscale note, and what each helper does are in
+[WINDOWS_HELPER.md](WINDOWS_HELPER.md).
+
 ## Add a "what's new" line
 
 Edit `bakugan-buddy/CHANGELOG_PREYAS.md` and add a line at the top:
