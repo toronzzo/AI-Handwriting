@@ -447,6 +447,38 @@ export async function transcribeClip(
   }
 }
 
+const TTS_BACKOFF_MS = 2 * 60 * 1000;
+const TTS_QUIET_NOTE = "Voice isn't running on the Mac, so I'll stay quiet.";
+
+let ttsDownUntil = 0;
+let ttsNoticePending = false;
+let ttsSlot: Promise<void> | null = null;
+
+/** True while we are not going to call /v1/tts again. */
+export function ttsResting(now = Date.now()): boolean {
+  return now < ttsDownUntil;
+}
+
+/** Remember that the voice service answered 503, and keep the note for one showing. */
+export function noteTtsDown(now = Date.now(), backoffMs = TTS_BACKOFF_MS): void {
+  if (now >= ttsDownUntil) ttsNoticePending = true;
+  ttsDownUntil = Math.max(ttsDownUntil, now + backoffMs);
+}
+
+/** The quiet note, once. Later calls return "" so the screen does not repeat it. */
+export function takeTtsNotice(): string {
+  if (!ttsNoticePending) return "";
+  ttsNoticePending = false;
+  return TTS_QUIET_NOTE;
+}
+
+/** Test hook. A 503 in one case must not silence the next case. */
+export function resetTtsBackoff(): void {
+  ttsDownUntil = 0;
+  ttsNoticePending = false;
+  ttsSlot = null;
+}
+
 export async function synthesizeLine(
   baseUrl: string,
   text: string,
@@ -456,6 +488,16 @@ export async function synthesizeLine(
   timeoutMs = 8000,
   fetchImpl: typeof fetch = fetch,
 ): Promise<Uint8Array | null> {
+  if (ttsResting()) return null;
+  while (ttsSlot) {
+    await ttsSlot;
+    if (ttsResting()) return null;
+  }
+  let releaseSlot = () => {};
+  const mine = new Promise<void>((resolve) => {
+    releaseSlot = resolve;
+  });
+  ttsSlot = mine;
   const prosody = prosodyFor(mood, language, voices);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -473,6 +515,10 @@ export async function synthesizeLine(
       }),
       signal: controller.signal,
     });
+    if (res.status === 503) {
+      noteTtsDown();
+      return null;
+    }
     if (!res.ok) return null;
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (bytes.length < 44 || bytes[0] !== 0x52) return null;
@@ -481,5 +527,7 @@ export async function synthesizeLine(
     return null;
   } finally {
     clearTimeout(timer);
+    if (ttsSlot === mine) ttsSlot = null;
+    releaseSlot();
   }
 }

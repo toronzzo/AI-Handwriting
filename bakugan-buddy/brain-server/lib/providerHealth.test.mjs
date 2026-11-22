@@ -14,6 +14,7 @@ import {
   freeProviderStatus,
   healthPayloadHasSecrets,
   mergeProviderEnv,
+  providerEnvFromSources,
   paidProviderStatus,
   parseEnvText,
   providerRow,
@@ -239,6 +240,12 @@ test("parseEnvText and mergeProviderEnv keep process overrides", () => {
   const merged = mergeProviderEnv({ GROQ_API_KEY: "from-process" }, file);
   assert.equal(merged.GROQ_API_KEY, "from-process");
   assert.equal(merged.DEEPSEEK_API_KEY, "file-key");
+  assert.equal(parseEnvText("export GROQ_API_KEY = gsk_spacedkey123 # note\n").GROQ_API_KEY, "gsk_spacedkey123");
+  const rescued = providerEnvFromSources({
+    processEnv: { GROQ_API_KEY: "changeme" },
+    texts: ["GROQ_API_KEY=gsk_frombrain\n", "GROQ_API_KEY=gsk_fromsecrets\n"],
+  });
+  assert.equal(rescued.GROQ_API_KEY, "gsk_fromsecrets");
 });
 
 test("caller cancellation rejects instead of inventing a provider failure", async () => {

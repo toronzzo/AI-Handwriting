@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { stripThinking } from "../../../../../packages/alive/src/chatTurn.ts";
 import {
   BARGE_VAD,
+  ttsResting,
   clipTooShort,
   earIsMuted,
   envelopeFromPcm16,
@@ -33,6 +34,8 @@ export type TalkSinks = {
   talkUntil: number;
   spokenCount: number;
   stopTalk: (() => void) | null;
+  /** Called when the voice service is down, so the screen can say so once. */
+  onTtsQuiet?: () => void;
   playing?: boolean;
   thinking?: boolean;
   phase?: MicPhase;
@@ -50,9 +53,17 @@ export function interruptTalk(sinks: TalkSinks): void {
 
 export async function speakSentence(sinks: TalkSinks, sentence: string, mood: string): Promise<void> {
   if (!sinks.brainUrl || !sentence.trim()) return;
+  if (ttsResting()) {
+    sinks.onTtsQuiet?.();
+    return;
+  }
   const gen = sinks.talkGen;
   const wav = await synthesizeLine(sinks.brainUrl, sentence, mood, sinks.hearLang || "en");
-  if (!wav || gen !== sinks.talkGen) return;
+  if (!wav) {
+    if (ttsResting()) sinks.onTtsQuiet?.();
+    return;
+  }
+  if (gen !== sinks.talkGen) return;
   const pcm = pcm16FromWav(wav);
   const durationMs = wavDurationMs(wav) ?? (pcm && pcm.length > 0 ? (pcm.length / 16000) * 1000 : 4000);
   if (pcm && pcm.length > 0) {

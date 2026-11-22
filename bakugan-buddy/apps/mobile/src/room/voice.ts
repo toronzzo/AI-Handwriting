@@ -1,4 +1,5 @@
 import type { Mood } from "../../../../packages/mood/src/index.ts";
+import { noteTtsDown, ttsResting } from "../../../../packages/alive/src/speech.ts";
 
 /** Hermes does not always ship AbortSignal.timeout. */
 function abortAfter(ms: number): AbortSignal {
@@ -38,7 +39,7 @@ export async function probeStudio(): Promise<string | null> {
  * the wav. No bundled voice, no anime audio.
  */
 export function speakLine(text: string, mood: Mood): void {
-  if (!studioUrl || typeof fetch !== "function") return;
+  if (!studioUrl || typeof fetch !== "function" || ttsResting()) return;
   const url = studioUrl;
   void (async () => {
     try {
@@ -47,6 +48,10 @@ export function speakLine(text: string, mood: Mood): void {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text, mood }),
       });
+      if (response.status === 503) {
+        noteTtsDown();
+        return;
+      }
       if (!response.ok) return;
       const Ctor =
         typeof AudioContext !== "undefined"

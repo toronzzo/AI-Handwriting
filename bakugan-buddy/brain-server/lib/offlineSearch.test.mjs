@@ -1,13 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  cleanOfflineQuery,
+  exactOfflineTitle,
   firstArticleImage,
   isLoopbackUrl,
+  orderOfflineBooks,
   parseKiwixBookNames,
   parseKiwixSearchJson,
   parseKiwixSearchXml,
+  parseKiwixSuggest,
   proxyOfflineArticle,
   proxyOfflineImage,
+  rankOfflineHits,
   searchOffline,
 } from "./offlineSearch.mjs";
 
@@ -299,6 +304,139 @@ test("proxyOfflineArticle rejects remote, protocol-relative and bad paths", asyn
   assert.equal((await proxyOfflineArticle("A/B", { fetchImpl })).ok, false);
   assert.equal((await proxyOfflineArticle("", { fetchImpl })).ok, false);
   assert.equal(called, false);
+});
+
+const ASTRONOMY = "wikipedia_en_astronomy_maxi_2026-08";
+const GENERAL = "wikipedia_en_all_maxi_2026-08";
+const IFIXIT = "ifixit_en_all_2025-12";
+
+function itemXml(title, book, description) {
+  const path = `/content/${book}/${title.replace(/\s+/g, "_")}`;
+  return `<item><title>${title}</title><link>${path}</link><description>${description}</description></item>`;
+}
+
+function rss(...items) {
+  return `<?xml version="1.0"?><rss><channel>${items.join("")}</channel></rss>`;
+}
+
+test("filler words are stripped and the subject is kept", () => {
+  const cleaned = cleanOfflineQuery("tell me about Saturn the planet, with a picture");
+  assert.deepEqual(cleaned.terms, ["saturn", "planet"]);
+  assert.equal(cleaned.pattern, "saturn planet");
+  assert.equal(cleanOfflineQuery("Saturn").pattern, "saturn");
+});
+
+test("space questions search the astronomy pack before iFixit", () => {
+  assert.deepEqual(orderOfflineBooks([IFIXIT, GENERAL, ASTRONOMY], "tell me about Saturn the planet"), [
+    ASTRONOMY,
+    GENERAL,
+    IFIXIT,
+  ]);
+  assert.equal(orderOfflineBooks([ASTRONOMY, IFIXIT], "how do I replace an iPhone battery")[0], IFIXIT);
+});
+
+test("title match outranks a company, a disambiguation page and film awards", () => {
+  const hits = [
+    { title: "Big Fish", snippet: "Won a Saturn Award", pack: GENERAL, url: "/content/films/Big_Fish" },
+    { title: "Marjorie Prime", snippet: "Nominated for a Saturn Award", pack: GENERAL, url: "/content/films/Marjorie_Prime" },
+    { title: "Saturn Corporation", snippet: "American car company", pack: GENERAL, url: "/content/co/Saturn_Corporation" },
+    { title: "Saturn (disambiguation)", snippet: "Saturn may refer to", pack: GENERAL, url: "/content/d/Saturn_disambiguation" },
+    { title: "Saturn", snippet: "Sixth planet from the Sun", pack: ASTRONOMY, url: "/content/astro/Saturn" },
+  ];
+  const ranked = rankOfflineHits(hits, ["saturn", "planet"], { space: true });
+  assert.equal(ranked[0].title, "Saturn");
+  assert.equal(exactOfflineTitle(ranked[0], ["saturn", "planet"]), true);
+  assert.equal(exactOfflineTitle(hits[3], ["saturn"]), false);
+  assert.ok(ranked.findIndex((hit) => hit.title === "Big Fish") > 0);
+});
+
+test("parseKiwixSuggest reads an OpenSearch suggestion list", () => {
+  const rows = parseKiwixSuggest(
+    ["saturn", ["Saturn", "Saturn Corporation"], ["Sixth planet", "Carmaker"], [`/content/${ASTRONOMY}/Saturn`, `/content/${GENERAL}/Saturn_Corporation`]],
+    ASTRONOMY,
+    5,
+  );
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].title, "Saturn");
+  assert.equal(rows[0].pack, ASTRONOMY);
+  assert.equal(rows[0].url, `/content/${ASTRONOMY}/Saturn`);
+});
+
+/**
+ * A realistic kiwix-serve: full-text across a general wiki prefers film pages
+ * that mention the Saturn Award, and "Saturn" alone prefers the car company.
+ * Title search on the astronomy pack has the planet.
+ */
+function kiwixFixture(urls) {
+  return async (url) => {
+    const href = String(url);
+    urls.push(href);
+    if (href.includes("/catalog/")) {
+      return xmlResponse(
+        `<feed><link href="/content/${ASTRONOMY}"/><link href="/content/${GENERAL}"/><link href="/content/${IFIXIT}"/></feed>`,
+      );
+    }
+    const parsed = new URL(href);
+    const book = parsed.searchParams.get("books.name") || parsed.searchParams.get("content") || "";
+    const pattern = parsed.searchParams.get("pattern") || parsed.searchParams.get("term") || "";
+    if (href.includes("/suggest?") || pattern.startsWith("title:")) {
+      return href.includes("/suggest?")
+        ? fakeResponse([
+            pattern,
+            ["Saturn (disambiguation)", "Saturn", "Saturn Corporation"],
+            ["Saturn may refer to", "Sixth planet from the Sun", "Former car company"],
+            [`/content/${ASTRONOMY}/Saturn_(disambiguation)`, `/content/${ASTRONOMY}/Saturn`, `/content/${GENERAL}/Saturn_Corporation`],
+          ])
+        : xmlResponse(
+            rss(
+              itemXml("Saturn (disambiguation)", ASTRONOMY, "Saturn may refer to"),
+              itemXml("Saturn", ASTRONOMY, "Sixth planet from the Sun"),
+              itemXml("Saturn Corporation", GENERAL, "Former car company"),
+            ),
+          );
+    }
+    if (book.includes("astronomy")) {
+      return xmlResponse(
+        rss(
+          itemXml("Big Fish", GENERAL, "The film won several Saturn Awards"),
+          itemXml("Marjorie Prime", GENERAL, "Nominated for a Saturn Award"),
+          itemXml("Saturn Corporation", GENERAL, "American automobile company"),
+        ),
+      );
+    }
+    return xmlResponse(
+      rss(itemXml("The Family Man", GENERAL, "A Saturn Award nominee"), itemXml("Drag Me to Hell", GENERAL, "Saturn Award winner")),
+    );
+  };
+}
+
+test("Saturn the planet is the astronomy article, not films or the car company", async () => {
+  const urls = [];
+  const result = await searchOffline("tell me about Saturn the planet, with a picture", {
+    enrichImages: false,
+    fetchImpl: kiwixFixture(urls),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.results[0].title, "Saturn");
+  assert.match(result.results[0].url, new RegExp(ASTRONOMY));
+  assert.ok(result.results.every((hit) => !/Big Fish|Marjorie Prime|Family Man|Drag Me to Hell/.test(hit.title)));
+  const firstSearch = urls.find((href) => href.includes("/search?"));
+  assert.match(firstSearch, /pattern=saturn\+planet|pattern=saturn%20planet/);
+  assert.match(firstSearch, new RegExp(`books.name=${ASTRONOMY}`));
+  assert.ok(!/tell|picture/.test(firstSearch));
+  assert.ok(urls.some((href) => href.includes("/suggest?") && href.includes("term=saturn")));
+  assert.ok(urls.some((href) => href.includes("pattern=title%3Asaturn") || href.includes("pattern=title:saturn")));
+});
+
+test("a bare Saturn query still prefers the planet article over Saturn Corporation", async () => {
+  const result = await searchOffline("Saturn", {
+    enrichImages: false,
+    fetchImpl: kiwixFixture([]),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.results[0].title, "Saturn");
+  assert.notEqual(result.results[0].title, "Saturn Corporation");
+  assert.ok(result.results.every((hit) => hit.title !== "Big Fish"));
 });
 
 test("proxyOfflineArticle maps failures to non-200 statuses", async () => {
