@@ -34,6 +34,10 @@ That is the command you run each session. It prints a URL like `http://192.168.1
 
 `./start.sh` also starts `whisper-server` on port 8178 when the binary and `WHISPER_MODEL` are present. The proxy turns a finished utterance into text and streams a wav back one sentence at a time: Kokoro `am_puck` for English, Piper `ru_RU-dmitri-medium` for Russian.
 
+## Screen helper
+
+The menu-bar button that captures the screen and asks Preyas is a separate Mac app. Build and permission steps are in [docs/SCREEN_HELPER.md](../docs/SCREEN_HELPER.md). Questions go to `POST /v1/vision/ask` with the paired token. The text model cannot see the picture. A free Groq or Gemini vision model on the gateway can, and the bubble says when the picture leaves the Mac. A small local vision GGUF is the fallback.
+
 ## Chat, in plain words
 
 Plug in the drive named Agent. Open the Terminal app. Paste this, then press Return:
@@ -102,6 +106,7 @@ Switch the loaded tier, then start again:
 | Path | Contents |
 | --- | --- |
 | `models/` | GGUF files |
+| `models/vision/` | Optional small vision GGUF and its mmproj for the screen helper |
 | `hf/` | `HF_HOME` and the Hugging Face cache |
 | `logs/` | llama-server log |
 | `memory/` | JSONL exports plus `facts.sqlite` (at most 40 lasting facts) |

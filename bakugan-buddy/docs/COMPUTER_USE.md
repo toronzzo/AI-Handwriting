@@ -103,12 +103,15 @@ confirm needed to turn it off. Any waiting proposal dies immediately. The
 setting lives in `BakuganBuddy/settings/computer.json`
 (`enabled: false`), and only the settings endpoint ever writes that file.
 
-## How to add a vision model later
+## Screenshots are still not sent to the click model
 
-The model only ever sees text through the `Proposer` interface in
-`brain-server/lib/os/computerPropose.mjs`. To add a vision model later:
-implement a proposer that also receives the screenshot path (the adapter
-already captures it to `computer/shots/<id>.jpg`), describe each element the
-same way (`id`, `role`, `label`, position), and keep the same output JSON.
-The deny list, the Да/Нет flow, the approval tokens, the action cap and the
-log all stay exactly as they are.
+The click model only ever sees text through the `Proposer` interface in
+`brain-server/lib/os/computerPropose.mjs`. Asking Preyas about a picture is a
+separate feature: the menu-bar helper and `POST /v1/vision/ask`. Setup is in
+[SCREEN_HELPER.md](SCREEN_HELPER.md). That path does not click or type. To
+teach the click model to see later, implement a proposer that also receives
+the screenshot path (the adapter already captures it to
+`computer/shots/<id>.jpg`), describe each element the same way (`id`, `role`,
+`label`, position), and keep the same output JSON. The deny list, the Да/Нет
+flow, the approval tokens, the action cap and the log all stay exactly as
+they are.
