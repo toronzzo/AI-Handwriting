@@ -96,6 +96,7 @@ import { AboutPreyas } from "../settings/AboutPreyas";
 import { TURN_OFF_CONFIRM } from "../settings/power";
 import { SoundLab } from "../media/sounds/SoundLab.tsx";
 import { theme } from "../theme";
+import { CHAT_FONT_FAMILY, EmojiText } from "../chat/emojiText";
 
 /** Web lets the sky show through the shell; the iPhone paints the page colour. */
 const isWeb = typeof document !== "undefined";
@@ -3099,7 +3100,7 @@ export function ChatScreen({
                           {message.who === "paid" && message.costUsd != null ? ` · ~$${message.costUsd.toFixed(4)}` : ""}
                         </Text>
                       ) : null}
-                      <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{message.content}</Text>
+                      <EmojiText style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{message.content}</EmojiText>
                       {!mine && message.thinking ? (
                         <Pressable onPress={() => setOpenThink((current) => ({ ...current, [index]: !current[index] }))}>
                           <Text style={styles.thinkToggle}>{openThink[index] ? "Hide thinking" : "Show thinking"}</Text>
@@ -3176,7 +3177,7 @@ export function ChatScreen({
                   <View style={styles.miniBall} />
                   <View style={[styles.bubble, styles.bubbleHis]}>
                     <Text style={styles.bubbleWho}>{live.who === "paid" ? "deepseek-flash" : "Preyas"}</Text>
-                    <Text style={styles.bubbleText}>{live.text}</Text>
+                    <EmojiText style={styles.bubbleText}>{live.text}</EmojiText>
                   </View>
                 </View>
               ) : null}
@@ -3785,7 +3786,13 @@ const styles = StyleSheet.create({
   /** Mine: accent fill, onAccent text. */
   bubbleMine: { backgroundColor: theme.accent },
   bubbleWho: { color: theme.accentText, fontSize: theme.type.label, fontWeight: "700", marginBottom: theme.space.xs / 2 },
-  bubbleText: { color: theme.text, fontSize: 15, lineHeight: theme.lead, flexShrink: 1 },
+  bubbleText: {
+    color: theme.text,
+    fontSize: 15,
+    lineHeight: 24,
+    flexShrink: 1,
+    fontFamily: isWeb ? CHAT_FONT_FAMILY : undefined,
+  },
   /** My bubble is accent-filled, so its text is onAccent. */
   bubbleTextMine: { color: theme.onAccent },
   time: { color: theme.faint, fontSize: theme.type.label, marginTop: theme.space.xs, textAlign: "right" },
@@ -3870,7 +3877,15 @@ const styles = StyleSheet.create({
     marginTop: theme.space.sm,
     minHeight: 44,
   },
-  input: { flex: 1, minWidth: 0, color: theme.text, paddingVertical: theme.space.sm, fontSize: theme.type.input, minHeight: 44 },
+  input: {
+    flex: 1,
+    minWidth: 0,
+    color: theme.text,
+    paddingVertical: theme.space.sm,
+    fontSize: theme.type.input,
+    minHeight: 44,
+    fontFamily: isWeb ? CHAT_FONT_FAMILY : undefined,
+  },
   /** Mic and attach: 36x36 ghost squares. */
   composerBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, borderColor: theme.lineStrong, alignItems: "center", justifyContent: "center" },
   composerBtnText: { color: theme.text, fontSize: theme.type.title, lineHeight: theme.type.title + 4 },
