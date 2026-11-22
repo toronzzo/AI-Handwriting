@@ -34,6 +34,13 @@ test("web emoji runs opt into an emoji font and cannot break inside a cluster", 
   assert.match(text, /dataSet: \{ emoji: "1" \}/);
 });
 
+test("curated emoji become stickers and every other cluster stays in the emoji font", () => {
+  assert.match(text, /StickerGlyph/);
+  assert.match(text, /useReducedMotion/);
+  assert.match(text, /stickerCodeFor/);
+  assert.match(text, /dataSet: \{ emoji: "1" \}/);
+});
+
 test("the splitter the bubbles use keeps ZWJ, skin tone, and flag glyphs whole", () => {
   for (const sample of ["👨‍👩‍👧‍👦", "👍🏻", "🇯🇵", "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "🏳️‍🌈"]) {
     assert.equal(splitEmojiRuns(sample)[0]?.text, sample);
