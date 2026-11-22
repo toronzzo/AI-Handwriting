@@ -67,6 +67,8 @@ export function sanitizeReason(reason) {
   return text.slice(0, 160);
 }
 
+const PLACEHOLDER_VALUES = new Set(["", "changeme", "\"\"", "''", "your-key-here", "xxx"]);
+
 /** Parse KEY=value lines without returning the secret to callers of health. */
 export function parseEnvText(text) {
   const env = {};
@@ -75,17 +77,46 @@ export function parseEnvText(text) {
     if (!trimmed || trimmed.startsWith("#")) continue;
     const eq = trimmed.indexOf("=");
     if (eq <= 0) continue;
-    const key = trimmed.slice(0, eq).trim();
+    let key = trimmed.slice(0, eq).trim();
+    if (/^export\s+/i.test(key)) key = key.replace(/^export\s+/i, "").trim();
     let value = trimmed.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
+    const quoted =
+      (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"));
+    if (quoted) value = value.slice(1, -1);
+    else value = value.replace(/\s+#.*$/, "").trim();
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) env[key] = value;
   }
   return env;
+}
+
+function isPlaceholder(value) {
+  return PLACEHOLDER_VALUES.has(String(value ?? "").trim().toLowerCase());
+}
+
+/**
+ * Merge brain.env and secrets files under the process environment.
+ * A real key in a file is kept when the process only has a placeholder, so
+ * `GROQ_API_KEY=changeme` in the environment cannot hide the key on disk.
+ * Later files win over earlier files. A real process value wins over files.
+ */
+export function providerEnvFromSources({ processEnv = {}, texts = [] } = {}) {
+  const files = (texts || []).map((text) => parseEnvText(text));
+  const merged = {};
+  for (const file of files) {
+    for (const [key, value] of Object.entries(file)) merged[key] = value;
+  }
+  for (const [key, value] of Object.entries(processEnv || {})) {
+    if (typeof value === "string") merged[key] = value;
+  }
+  for (const name of ["GROQ_API_KEY", "PREYAS_FREE_CLOUD_KEY"]) {
+    if (!isPlaceholder(merged[name])) continue;
+    let found = "";
+    for (const file of files) {
+      if (!isPlaceholder(file[name])) found = file[name];
+    }
+    if (found) merged[name] = found;
+  }
+  return merged;
 }
 
 /**

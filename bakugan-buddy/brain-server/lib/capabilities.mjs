@@ -10,9 +10,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parseGroqConfig } from "../../packages/alive/src/freeCloud.ts";
 import { TIERS } from "./modelSwitch.mjs";
 import { paidAvailability } from "./history.mjs";
 import { latestChangelog, readChangelog } from "./changelog.mjs";
+import { providerEnvFromSources } from "./providerHealth.mjs";
 
 export const CAPABILITY_VERSION = 1;
 /** The prompt block is meant to stay well under ~400 tokens. */
@@ -36,8 +38,6 @@ const LOCAL_MODELS = [
   { id: "huge", label: "30B local", tier: "huge" },
   { id: "tiny", label: "Tiny 0.8B off-grid", tier: "tiny" },
 ];
-
-const PLACEHOLDER_KEYS = ["", "changeme", "\"\"", "''", "your-key-here", "xxx"];
 
 export function estimateTokens(text) {
   return Math.max(0, Math.ceil(String(text ?? "").length / 4));
@@ -65,30 +65,6 @@ function readText(fsImpl, file) {
   } catch {
     return "";
   }
-}
-
-function envValue(env, names) {
-  for (const name of names) {
-    const value = String(env?.[name] ?? "").trim();
-    if (value) return value;
-  }
-  return "";
-}
-
-function secretValue(text, names) {
-  for (const name of names) {
-    const match = String(text ?? "").match(new RegExp("^" + name + "=(.*)$", "m"));
-    const value = match ? match[1].trim().replace(/^["']|["']$/g, "") : "";
-    if (value) return value;
-  }
-  return "";
-}
-
-function looksLikeGroqKey(key) {
-  const value = String(key ?? "").trim();
-  if (!value) return false;
-  if (PLACEHOLDER_KEYS.includes(value.toLowerCase())) return false;
-  return /^gsk_[A-Za-z0-9_-]{8,}$/.test(value);
 }
 
 function findOnPath(bin, env, pathExists) {
@@ -244,8 +220,8 @@ function buildModels(options) {
     });
   }
 
-  const groqKey = envValue(env, ["GROQ_API_KEY", "PREYAS_FREE_CLOUD_KEY"]) || secretValue(secretsText, ["GROQ_API_KEY", "PREYAS_FREE_CLOUD_KEY"]);
-  if (looksLikeGroqKey(groqKey)) {
+  const groq = parseGroqConfig(options.providerEnv || env);
+  if (groq.enabled) {
     out.push({ id: "groq", label: "Groq free cloud", kind: "model", current: false, detail: "an opt-in free cloud key is on this Mac" });
   }
 
@@ -352,6 +328,7 @@ export function createCapabilities(options = {}) {
     changelogItems = null,
     env = process.env,
     secretsFile = path.join(agentRoot, "secrets", ".env"),
+    brainEnvFile = "",
     fsImpl = fs,
     pathExists = (file) => exists(fsImpl, file),
     fetchImpl = fetch,
@@ -368,6 +345,12 @@ export function createCapabilities(options = {}) {
 
   async function build() {
     const secretsText = options.secretsText !== undefined ? String(options.secretsText) : readText(fsImpl, secretsFile);
+    const providerTexts = [];
+    if (options.brainEnvText !== undefined) providerTexts.push(String(options.brainEnvText));
+    else if (brainEnvFile) providerTexts.push(readText(fsImpl, brainEnvFile));
+    if (options.secretsText === undefined && dataDir) providerTexts.push(readText(fsImpl, path.join(dataDir, "secrets", ".env")));
+    providerTexts.push(secretsText);
+    const providerEnv = providerEnvFromSources({ processEnv: env, texts: providerTexts });
     const serviceRows = await buildServices({ checkService, fetchImpl, probeTimeoutMs, now });
     const resolvedMcp = await mcpConfigFor(dataDir, repoRoot, mcpConfig);
     const tools = buildTools({
@@ -384,6 +367,7 @@ export function createCapabilities(options = {}) {
     const models = buildModels({
       modelsDir,
       env,
+      providerEnv,
       secretsText,
       currentModel,
       pathExists,

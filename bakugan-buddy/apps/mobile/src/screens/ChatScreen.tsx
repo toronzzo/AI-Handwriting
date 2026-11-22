@@ -30,11 +30,11 @@ import {
 import { partnerFromProgress } from "../../../../packages/alive/src/rpgLevel.ts";
 import type { MicPhase } from "../../../../packages/alive/src/speech.ts";
 import { currentBrainUrl, readBrainHost } from "../room/brain/brainLink";
-import { brainFetch, isUnauthorized, pairWithCode, readToken } from "../room/brain/token";
+import { brainFetch, isUnauthorized, pairWithCode } from "../room/brain/token";
 import { readProbe } from "../room/brain/probeJson";
 import { probeThrownError } from "../settings/probe";
 import { isValidPairingCode, microphoneAvailable, normalizePairingCode } from "../../../../packages/alive/src/phone.ts";
-import { isWhisperHallucination, resetSpeech, transcribeClip } from "../../../../packages/alive/src/speech.ts";
+import { isWhisperHallucination, resetSpeech, takeTtsNotice, transcribeClip } from "../../../../packages/alive/src/speech.ts";
 import { NOTE_KINDS, parseNoteCommand, type Note, type NoteKind } from "../../../../packages/alive/src/notes.ts";
 import { looksLikeTask, taskStatusLine, type TaskRecord } from "../../../../packages/alive/src/tasks.ts";
 import { confirmFor } from "../../../../packages/alive/src/confirm.ts";
@@ -46,6 +46,8 @@ import { formatDue, parseReminder, type Reminder } from "../../../../packages/al
 import { isShortAffirmation, wantsThinking } from "../../../../packages/alive/src/chatTurn.ts";
 import { HUGE_TIMEOUT_MS, MODEL_LABELS, SWITCHING_CHAT_MESSAGE, parseModelCommand, type LocalModelId } from "../../../../packages/alive/src/modelSwitch.ts";
 import { offlineSourceView } from "../../../../packages/alive/src/offlineSources.ts";
+import { OfflinePicture } from "./OfflinePicture.tsx";
+import { openAuthedPage } from "./offlineMedia.ts";
 import {
   citedSourceEntries,
   shouldWebSearch,
@@ -344,6 +346,12 @@ export function ChatScreen({
   const [notesQuery, setNotesQuery] = useState("");
   const [editing, setEditing] = useState<{ id: string; text: string; kind: NoteKind } | null>(null);
   const [chip, setChip] = useState("");
+  useEffect(() => {
+    bag.onTtsQuiet = () => {
+      const text = takeTtsNotice();
+      if (text) setChip(text);
+    };
+  }, [bag]);
   /** Enlarged offline picture, or null when nothing is zoomed. */
   const [zoomImage, setZoomImage] = useState("");
   const notesStamp = useRef(0);
@@ -3116,26 +3124,26 @@ export function ChatScreen({
                                   .map((source, index) => ({ n: index + 1, source }))
                                   .filter(({ source }) => source.offline);
                           })().map(({ n, source }) => {
-                            const view = offlineSourceView(source, bag.brainUrl, readToken());
+                            const view = offlineSourceView(source, bag.brainUrl, "");
                             return (
                               <View key={`${source.url}-${n}`}>
                                 {view.imageUrl ? (
-                                  <Pressable
-                                    accessibilityRole="imagebutton"
-                                    accessibilityLabel={`Enlarge picture for ${view.title}`}
-                                    onPress={() => setZoomImage(view.imageUrl)}
-                                  >
-                                    <Image
-                                      source={{ uri: view.imageUrl }}
-                                      style={styles.offlineSourceImage}
-                                      resizeMode="cover"
-                                    />
-                                  </Pressable>
+                                  <OfflinePicture
+                                    remoteUrl={view.imageUrl}
+                                    style={styles.offlineSourceImage}
+                                    label={`Enlarge picture for ${view.title}`}
+                                    onOpen={(uri) => setZoomImage(uri)}
+                                  />
                                 ) : null}
                                 <Pressable
                                   onPress={() => {
+                                    const target = view.articleUrl || source.url;
+                                    if (view.articleUrl) {
+                                      void openAuthedPage(target);
+                                      return;
+                                    }
                                     if (typeof window !== "undefined" && window.open) {
-                                      window.open(view.articleUrl || source.url, "_blank", "noopener");
+                                      window.open(target, "_blank", "noopener");
                                     }
                                   }}
                                 >

@@ -13,8 +13,10 @@ import {
   planSpeech,
   prosodyFor,
   stepVad,
+  resetTtsBackoff,
   synthesizeLine,
   takeSentences,
+  takeTtsNotice,
   transcribeClip,
 } from "./speech.ts";
 import type { AliveInput } from "./types.ts";
@@ -115,7 +117,35 @@ function wavHeader(): Buffer {
   return buf;
 }
 
+test("a missing voice is reported once and then left alone", async () => {
+  resetTtsBackoff();
+  let calls = 0;
+  const server = http.createServer((_req, res) => {
+    calls += 1;
+    res.writeHead(503, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "tts_unavailable" }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("no port");
+  const base = `http://127.0.0.1:${address.port}`;
+  try {
+    const first = synthesizeLine(base, "Hi.", "neutral", "en");
+    const second = synthesizeLine(base, "Again.", "neutral", "en");
+    assert.equal(await first, null);
+    assert.equal(await second, null);
+    assert.equal(await synthesizeLine(base, "Third.", "neutral", "en"), null);
+    assert.equal(calls, 1);
+    assert.equal(takeTtsNotice(), "Voice isn't running on the Mac, so I'll stay quiet.");
+    assert.equal(takeTtsNotice(), "");
+  } finally {
+    resetTtsBackoff();
+    server.close();
+  }
+});
+
 test("fake stt and tts answer, then a dead speech server falls back", async () => {
+  resetTtsBackoff();
   let alive = true;
   let release: () => void = () => {};
   const gate = new Promise<void>((resolve) => {

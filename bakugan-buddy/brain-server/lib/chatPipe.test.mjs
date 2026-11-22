@@ -193,3 +193,50 @@ test("a completed stream without answer content never resets the idle window", a
     server.close();
   }
 });
+
+test("a news sentence is written in front of the answer and only remembered when it was sent", async () => {
+  const server = await startUpstream((req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(CONTENT_CHUNK);
+    res.end();
+  });
+  try {
+    let delivered = 0;
+    const { running, res } = runPipe(server, {
+      ...eventsWith(() => {}),
+      introPrefix: "New since last time: I can now use Groq.",
+      onIntroDelivered: () => {
+        delivered += 1;
+      },
+    });
+    await running;
+    const text = Buffer.concat(res.chunks).toString("utf8");
+    assert.ok(text.startsWith("data: "));
+    assert.ok(text.indexOf("New since last time: I can now use Groq.") < text.indexOf("Hi there"));
+    assert.equal(delivered, 1);
+  } finally {
+    server.close();
+  }
+});
+
+test("a failed upstream does not deliver the news sentence", async () => {
+  const server = await startUpstream((req, res) => {
+    res.writeHead(503, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "llama is down" }));
+  });
+  try {
+    let delivered = 0;
+    const { running, res } = runPipe(server, {
+      introPrefix: "New since last time: I can now use Groq.",
+      onIntroDelivered: () => {
+        delivered += 1;
+      },
+    });
+    await running;
+    const text = Buffer.concat(res.chunks).toString("utf8");
+    assert.ok(!text.includes("New since last time"));
+    assert.equal(delivered, 0);
+  } finally {
+    server.close();
+  }
+});

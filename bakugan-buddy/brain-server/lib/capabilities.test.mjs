@@ -137,6 +137,27 @@ test("offline search needs packs and the kiwix program; a Groq key adds Groq", a
   }
 });
 
+test("Groq is listed from brain.env or a spaced secrets line, not hidden by a placeholder", async () => {
+  const w = workspace();
+  try {
+    const fromBrain = await build(w, {
+      env: { PATH: "/usr/bin:/bin", GROQ_API_KEY: "changeme" },
+      secretsText: "",
+      brainEnvText: "export GROQ_API_KEY=gsk_frombrainenv1234\nPREYAS_FREE_CLOUD=1\n",
+    }).refresh();
+    assert.ok(fromBrain.models.some((row) => row.id === "groq"), "brain.env key is configured");
+
+    const fromSecrets = await build(w, {
+      env: { PATH: "/usr/bin:/bin" },
+      secretsText: "GROQ_API_KEY = gsk_fromsecrets1234 # local\n",
+      brainEnvText: "",
+    }).refresh();
+    assert.ok(fromSecrets.models.some((row) => row.id === "groq"), "secrets file key is configured");
+  } finally {
+    w.cleanup();
+  }
+});
+
 test("buildSummary never exceeds its character limit and keeps the instruction", () => {
   const long = "I can now do a very long thing that should perhaps not be in the prompt. ".repeat(30);
   const summary = buildSummary(

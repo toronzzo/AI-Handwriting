@@ -57,6 +57,29 @@ export function hasAnswerContent(text, streamed) {
   return false;
 }
 
+/** One SSE delta that puts the news sentence in front of the model's answer. */
+export function introSseChunk(prefix) {
+  const text = String(prefix || "").trim();
+  if (!text) return "";
+  return `data: ${JSON.stringify({ choices: [{ delta: { content: `${text}\n\n` } }] })}\n\n`;
+}
+
+/** The same sentence, spliced into a non-streaming chat JSON body. */
+export function prefixJsonAnswer(bodyText, prefix) {
+  const text = String(prefix || "").trim();
+  const raw = String(bodyText ?? "");
+  if (!text) return raw;
+  try {
+    const json = JSON.parse(raw);
+    const message = json && json.choices && json.choices[0] && json.choices[0].message;
+    if (!message || typeof message.content !== "string") return raw;
+    message.content = `${text}\n\n${message.content}`;
+    return JSON.stringify(json);
+  } catch {
+    return raw;
+  }
+}
+
 export async function pipeChatCompletion(brain, req, res, target, body, downError, timeoutMs = CHAT_PROXY_TIMEOUT_MS, events = null) {
   const controller = new AbortController();
   let timedOut = false;
@@ -73,6 +96,29 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
       return false;
     }
   })();
+  let introWritten = false;
+  let introDelivered = false;
+  const deliverIntro = () => {
+    if (!introWritten || introDelivered) return;
+    introDelivered = true;
+    if (!events || typeof events.onIntroDelivered !== "function") return;
+    try {
+      events.onIntroDelivered();
+    } catch {
+      /* remembering the note is a nicety */
+    }
+  };
+  const writeStreamIntro = () => {
+    if (introWritten || clientClosed || !upstream || !upstream.ok || !streamed) return;
+    const chunk = introSseChunk(events && events.introPrefix);
+    if (!chunk) return;
+    introWritten = true;
+    if (buffered < MAX_BUFFER) {
+      chunks.push(Buffer.from(chunk));
+      buffered += Buffer.byteLength(chunk);
+    }
+    res.write(chunk);
+  };
   const brainOut = (record) => {
     if (!events || !events.neuron) return;
     try {
@@ -141,16 +187,25 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
       return;
     }
     res.writeHead(upstream.status, {
-      "Content-Type": upstream.headers.get("content-type") || "text/event-stream",
+      "Content-Type": upstream.headers.get("content-type") || (streamed ? "text/event-stream" : "application/json"),
       "Cache-Control": "no-cache",
     });
+    writeStreamIntro();
     if (!upstream.body) {
-      const text = await upstream.text();
+      let text = await upstream.text();
+      if (!streamed && upstream.ok && events && events.introPrefix && !clientClosed) {
+        const next = prefixJsonAnswer(text, events.introPrefix);
+        if (next !== text) {
+          text = next;
+          introWritten = true;
+        }
+      }
       if (buffered < MAX_BUFFER) {
         chunks.push(Buffer.from(text));
         buffered += text.length;
       }
       await finishEvents(upstream.ok);
+      deliverIntro();
       res.end(text);
       return;
     }
@@ -166,8 +221,10 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
     }
     if (clientClosed) {
       brainOut({ state: "off", detail: "stopped: the client left" });
+      deliverIntro();
     } else {
       await finishEvents(upstream.ok);
+      deliverIntro();
       res.end();
     }
   } catch {

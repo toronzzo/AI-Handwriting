@@ -35,8 +35,7 @@ import { collectStatus, restartArgs } from "./lib/status.mjs";
 import {
   collectProviderHealth,
   healthPayloadHasSecrets,
-  mergeProviderEnv,
-  parseEnvText,
+  providerEnvFromSources,
 } from "./lib/providerHealth.mjs";
 import { collectUserNotes, ensureObsidianConfig, exportVault, searchVault, saveToVault, VAULT_DIR } from "./lib/vault.mjs";
 import { buildDriveMap, loadDriveMap, DRIVE_ROOT } from "./lib/driveMap.mjs";
@@ -185,6 +184,7 @@ const capabilities = createCapabilities({
     return state.status === "ready" ? state.current : "";
   },
   probeTimeoutMs: 1500,
+  brainEnvFile: path.join(path.dirname(fileURLToPath(import.meta.url)), "brain.env"),
 });
 const selfKnowledge = createSelfKnowledge({ dataDir, changelogPath, capabilities });
 const power = createPowerController({
@@ -918,16 +918,24 @@ const server = http.createServer(async (req, res) => {
 
       // Additive providers block for the Brain view. Secrets stay off the wire:
       // only configured/available/reason flags, never keys or raw provider text.
-      let envText = "";
-      const secretDirs = [gatewayRoot, dataDir].filter(Boolean);
-      for (let i = 0; i < secretDirs.length && !envText; i++) {
+      const brainEnvText = (() => {
         try {
-          envText = fs.readFileSync(path.join(secretDirs[i], "secrets", ".env"), "utf8");
+          return fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "brain.env"), "utf8");
         } catch {
-          envText = "";
+          return "";
+        }
+      })();
+      const secretTexts = [];
+      const secretDirs = [dataDir, gatewayRoot].filter(Boolean);
+      for (let i = 0; i < secretDirs.length; i++) {
+        try {
+          secretTexts.push(fs.readFileSync(path.join(secretDirs[i], "secrets", ".env"), "utf8"));
+        } catch {
+          /* that secrets file is optional */
         }
       }
-      const providerEnv = mergeProviderEnv(process.env, parseEnvText(envText));
+      const envText = secretTexts.join("\n");
+      const providerEnv = providerEnvFromSources({ processEnv: process.env, texts: [brainEnvText, ...secretTexts] });
       let providers = [];
       try {
         providers = await collectProviderHealth({
@@ -2063,6 +2071,16 @@ const server = http.createServer(async (req, res) => {
       const sampled = withSampling(raw);
       const body = model === "paid" ? sampled : withDriveMap(withNotes(sampled));
       const bodyWithKnowledge = await withSelfKnowledge(body, selfKnowledge);
+      let news = "";
+      try {
+        const asked = JSON.parse(bodyWithKnowledge.toString("utf8"));
+        if (Array.isArray(asked?.messages) && asked.messages.some((message) => message && message.role === "user")) {
+          news = selfKnowledge.beginNews();
+        }
+      } catch {
+        news = "";
+      }
+      let newsDelivered = false;
       // A local route never reaches the gateway: small, big and huge all go
       // straight to llama. Only a real local-model reply resets the idle
       // auto-return window — paid replies and unanswered calls never do.
@@ -2080,16 +2098,31 @@ const server = http.createServer(async (req, res) => {
         detail: paid ? "DeepSeek Flash via gateway" : null,
       });
       const ramPromise = paid ? null : llamaServerRamMb().catch(() => null);
-      await pipeChatCompletion(
-        brain,
-        req,
-        res,
-        target,
-        bodyWithKnowledge,
-        model === "paid" ? "paid gateway is down" : "llama is down",
-        model === "paid" ? CHAT_PROXY_TIMEOUT_MS : modelSwitch.chatTimeoutMs(),
-        { neuron, paid, local: !paid, ramPromise, onAnswered: () => modelSwitch.touchLocal(model) },
-      );
+      try {
+        await pipeChatCompletion(
+          brain,
+          req,
+          res,
+          target,
+          bodyWithKnowledge,
+          model === "paid" ? "paid gateway is down" : "llama is down",
+          model === "paid" ? CHAT_PROXY_TIMEOUT_MS : modelSwitch.chatTimeoutMs(),
+          {
+            neuron,
+            paid,
+            local: !paid,
+            ramPromise,
+            introPrefix: news,
+            onIntroDelivered: () => {
+              newsDelivered = true;
+              selfKnowledge.commitNews();
+            },
+            onAnswered: () => modelSwitch.touchLocal(model),
+          },
+        );
+      } finally {
+        if (news && !newsDelivered) selfKnowledge.cancelNews();
+      }
       return;
     }
 

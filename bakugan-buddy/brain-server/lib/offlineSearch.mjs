@@ -205,6 +205,180 @@ function toClientResults(rows) {
   }));
 }
 
+/** Words that describe the request, not the article. "planet" stays: it picks a sense. */
+const FILLER_WORDS = new Set(
+  "a an the about me tell please with picture pictures photo photos image images show of for and or to in on from my your you i can could would what is are was were who how do does did explain describe give want know like just some this that there here offline library article wiki wikipedia".split(
+    " ",
+  ),
+);
+
+/** Generic senses. The title lookup uses the specific word ("saturn"), not "planet". */
+const GENERIC_TITLE_WORDS = new Set("planet planets star stars moon moons galaxy galaxies".split(" "));
+
+const SPACE_QUERY =
+  /\b(planet|planets|moon|moons|star|stars|galaxy|galaxies|orbit|orbits|astronomy|astronomical|solar|saturn|jupiter|mars|venus|mercury|neptune|uranus|pluto|comet|comets|asteroid|asteroids|nebula|supernova|eclipse|constellation|telescope|milky|universe|cosmos|black hole)\b/i;
+
+const REPAIR_QUERY = /\b(ifixit|repair|replace|replacement|battery|screen|teardown|disassembl\w*|iphone|macbook|laptop)\b/i;
+
+/**
+ * Turn a chat sentence into the words Kiwix should actually search.
+ * "tell me about Saturn the planet, with a picture" becomes "saturn planet".
+ */
+export function cleanOfflineQuery(raw) {
+  const original = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (!original) return { original: "", terms: [], pattern: "" };
+  const terms = original
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/[\s-]+/)
+    .filter((word) => word && !FILLER_WORDS.has(word) && word.length > 1);
+  const pattern = terms.length ? terms.join(" ") : original;
+  const kept = terms.length ? terms : original.toLowerCase().split(/\s+/).filter(Boolean);
+  return { original, terms: kept, pattern };
+}
+
+export function titleTermFrom(terms) {
+  const list = Array.isArray(terms) ? terms : [];
+  const specific = list.find((term) => term && !GENERIC_TITLE_WORDS.has(term));
+  return specific || list[0] || "";
+}
+
+export function isSpaceQuery(text) {
+  return SPACE_QUERY.test(String(text || ""));
+}
+
+function bookRank(name, space, repair) {
+  const label = String(name || "");
+  let score = 0;
+  if (space && /astronom/i.test(label)) score += 100;
+  if (repair && /ifixit/i.test(label)) score += 100;
+  if (space && /ifixit/i.test(label)) score -= 10;
+  if (repair && /astronom/i.test(label)) score -= 10;
+  return score;
+}
+
+/** Astronomy packs first for space questions, iFixit first for repairs. */
+export function orderOfflineBooks(books, query) {
+  const text = String(query || "");
+  const space = isSpaceQuery(text);
+  const repair = REPAIR_QUERY.test(text);
+  return [...(books || [])].sort((left, right) => bookRank(right, space, repair) - bookRank(left, space, repair));
+}
+
+function bareTitle(title) {
+  return String(title || "")
+    .toLowerCase()
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isDisambiguation(hit) {
+  const title = String(hit?.title || "");
+  const snippet = String(hit?.snippet || "");
+  return /\bdisambiguation\b/i.test(title) || /may refer to/i.test(snippet);
+}
+
+function scoreOfflineHit(hit, terms, space) {
+  const title = String(hit?.title || "").toLowerCase();
+  const bare = bareTitle(hit?.title);
+  const joined = terms.join(" ");
+  const head = terms[0] || "";
+  let score = 0;
+  if (joined && (title === joined || bare === joined || title === head || bare === head)) score += 120;
+  else if (terms.length && terms.every((term) => title.includes(term))) score += 70;
+  else if (terms.some((term) => title.includes(term))) score += 25;
+  else score -= 40;
+  if (head && title.startsWith(`${head} `) && title !== head && bare !== head) score -= 15;
+  if (isDisambiguation(hit)) score -= 90;
+  if (space && /astronom/i.test(hit?.pack || "")) score += 30;
+  if (space && /ifixit/i.test(hit?.pack || "")) score -= 20;
+  return score;
+}
+
+/** Exact or parenthetical title ("Saturn", "Saturn (planet)"), never a disambiguation page. */
+export function exactOfflineTitle(hit, terms) {
+  const title = String(hit?.title || "").toLowerCase();
+  const bare = bareTitle(hit?.title);
+  const list = Array.isArray(terms) ? terms.map((term) => String(term || "").toLowerCase()).filter(Boolean) : [];
+  const head = titleTermFrom(list);
+  const joined = list.join(" ");
+  if (!head || isDisambiguation(hit)) return false;
+  return title === head || bare === head || title === joined || bare === joined;
+}
+
+/** Higher scores first. Original order breaks ties so a stable kiwix list stays stable. */
+export function rankOfflineHits(hits, terms, options = {}) {
+  const wanted = (Array.isArray(terms) ? terms : []).map((term) => String(term || "").toLowerCase()).filter(Boolean);
+  const space = Boolean(options.space);
+  return [...(hits || [])]
+    .map((hit, index) => ({ hit, index, score: scoreOfflineHit(hit, wanted, space) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map((row) => row.hit);
+}
+
+/**
+ * kiwix-serve `/suggest` is an OpenSearch suggestion list:
+ * [query, titles, descriptions, urls]. Older JSON `{ suggestions }` still works.
+ */
+export function parseKiwixSuggest(json, book, limit = 5) {
+  if (Array.isArray(json) && Array.isArray(json[1])) {
+    const titles = json[1];
+    const descriptions = Array.isArray(json[2]) ? json[2] : [];
+    const urls = Array.isArray(json[3]) ? json[3] : [];
+    const out = [];
+    const seen = new Set();
+    for (let index = 0; index < titles.length && out.length < limit; index += 1) {
+      const title = text(titles[index]);
+      if (!title) continue;
+      const rawUrl = String(urls[index] || "");
+      const url = rawUrl.startsWith("/") ? rawUrl : `/content/${book}/${title.replace(/\s+/g, "_")}`;
+      const item = normalizeResult({ title, url, description: descriptions[index] || "", pack: book });
+      if (!item) continue;
+      const key = `${item.title}\n${item.url}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
+    }
+    return out;
+  }
+  return parseKiwixSearchJson(json, limit).map((item) => ({
+    ...item,
+    pack: item.pack || book,
+    url: item.url.startsWith("/content/") ? item.url : `/content/${book}/${item.url.replace(/^\//, "")}`,
+  }));
+}
+
+function dedupeHits(rows) {
+  const out = [];
+  const seen = new Set();
+  for (const item of rows) {
+    if (!item) continue;
+    const key = `${item.title}\n${item.url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+function searchUrlFor(root, book, pattern, pageLength) {
+  const searchUrl = new URL("/search", root);
+  searchUrl.searchParams.set("pattern", pattern);
+  searchUrl.searchParams.set("format", "xml");
+  searchUrl.searchParams.set("pageLength", String(pageLength));
+  searchUrl.searchParams.set("start", "0");
+  if (book) searchUrl.searchParams.append("books.name", book);
+  return searchUrl;
+}
+
+async function fetchSearchXml(fetchImpl, url, timeoutMs) {
+  return fetchImpl(url, {
+    headers: { accept: "application/xml,text/xml,*/*" },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
 export async function searchOffline(query, options = {}) {
   const {
     baseUrl = process.env.PREYAS_KIWIX_URL || OFFLINE_KIWIX_URL,
@@ -226,51 +400,100 @@ export async function searchOffline(query, options = {}) {
     return { ok: false, error: "offline search is restricted to loopback", results: [] };
   }
 
+  const cleaned = cleanOfflineQuery(clean);
+  if (!cleaned.pattern) return { ok: false, error: "empty query", results: [] };
+  const space = isSpaceQuery(cleaned.original);
+  const head = titleTermFrom(cleaned.terms);
+
   try {
-    const books = await listBooks(root.href, fetchImpl, timeoutMs);
-    if (!books.length) {
+    const listed = await listBooks(root.href, fetchImpl, timeoutMs);
+    if (!listed.length) {
       return { ok: false, error: "no offline packs are loaded in kiwix-serve", results: [] };
     }
+    const books = orderOfflineBooks(listed, cleaned.original);
+    const preferred = books[0];
+    const pageLength = Math.min(20, Math.max(8, limit * 3));
 
-    const searchUrl = new URL("/search", root.href);
-    searchUrl.searchParams.set("pattern", clean);
-    searchUrl.searchParams.set("format", "xml");
-    searchUrl.searchParams.set("pageLength", String(Math.min(20, Math.max(1, limit))));
-    searchUrl.searchParams.set("start", "0");
-    for (const book of books) searchUrl.searchParams.append("books.name", book);
+    const primary = await fetchSearchXml(
+      fetchImpl,
+      searchUrlFor(root.href, preferred, cleaned.pattern, pageLength).href,
+      timeoutMs,
+    );
+    if (!primary.ok) return { ok: false, error: `offline search answered ${primary.status}`, results: [] };
+    let rows = parseKiwixSearchXml(await primary.text(), pageLength).map((item) => ({
+      ...item,
+      pack: item.pack || preferred,
+    }));
 
-    const res = await fetchImpl(searchUrl.href, {
-      headers: { accept: "application/xml,text/xml,*/*" },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!res.ok) return { ok: false, error: `offline search answered ${res.status}`, results: [] };
-    const xml = await res.text();
-    let rows = parseKiwixSearchXml(xml, limit);
-    if (!rows.length) {
-      // Title suggestions are a useful fallback when full-text finds nothing.
-      const suggestUrl = new URL("/suggest", root.href);
-      suggestUrl.searchParams.set("content", books[0]);
-      suggestUrl.searchParams.set("term", clean);
-      suggestUrl.searchParams.set("count", String(Math.min(20, Math.max(1, limit))));
-      const suggestRes = await fetchImpl(suggestUrl.href, {
-        headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (suggestRes.ok) {
-        const json = await suggestRes.json();
-        rows = parseKiwixSearchJson(json, limit).map((item) => ({
-          ...item,
-          url: item.url.startsWith("/content/")
-            ? item.url
-            : `/content/${books[0]}/${item.url.replace(/^\//, "")}`,
-          pack: item.pack || books[0],
-        }));
+    // Full-text alone ranks "Saturn" as a car company or a film award. A title
+    // lookup on the pack that matches the question, then a rerank, fixes that.
+    const titled = rankOfflineHits(rows, cleaned.terms, { space }).some((hit) => exactOfflineTitle(hit, cleaned.terms));
+    if (!titled) {
+      const extra = [];
+      if (head) {
+        try {
+          const suggestUrl = new URL("/suggest", root.href);
+          suggestUrl.searchParams.set("content", preferred);
+          suggestUrl.searchParams.set("term", head);
+          suggestUrl.searchParams.set("count", String(pageLength));
+          const suggestRes = await fetchImpl(suggestUrl.href, {
+            headers: { accept: "application/json,application/x-suggestions+json,*/*" },
+            signal: AbortSignal.timeout(timeoutMs),
+          });
+          if (suggestRes.ok) extra.push(...parseKiwixSuggest(await suggestRes.json(), preferred, pageLength));
+        } catch {
+          /* title suggestions are optional */
+        }
+        try {
+          const titleRes = await fetchSearchXml(
+            fetchImpl,
+            searchUrlFor(root.href, preferred, `title:${head}`, pageLength).href,
+            timeoutMs,
+          );
+          if (titleRes.ok) {
+            extra.push(
+              ...parseKiwixSearchXml(await titleRes.text(), pageLength).map((item) => ({
+                ...item,
+                pack: item.pack || preferred,
+              })),
+            );
+          }
+        } catch {
+          /* a title-field search is optional */
+        }
       }
+      for (const book of books.slice(1, 3)) {
+        try {
+          const res = await fetchSearchXml(
+            fetchImpl,
+            searchUrlFor(root.href, book, cleaned.pattern, pageLength).href,
+            timeoutMs,
+          );
+          if (!res.ok) continue;
+          extra.push(
+            ...parseKiwixSearchXml(await res.text(), pageLength).map((item) => ({
+              ...item,
+              pack: item.pack || book,
+            })),
+          );
+        } catch {
+          /* another pack is optional once one pack answered */
+        }
+      }
+      rows = dedupeHits([...rows, ...extra]);
     }
-    if (enrichImages && rows.length) {
-      rows = await enrichWithImages(rows, { baseUrl: root.href, fetchImpl, timeoutMs });
+
+    let ranked = rankOfflineHits(rows, cleaned.terms, { space });
+    const withTitle = ranked.filter((hit) => {
+      const title = String(hit.title || "").toLowerCase();
+      return cleaned.terms.some((term) => title.includes(term));
+    });
+    if (withTitle.length) ranked = withTitle;
+    ranked = ranked.slice(0, limit);
+    if (enrichImages && ranked.length) {
+      ranked = await enrichWithImages(ranked, { baseUrl: root.href, fetchImpl, timeoutMs });
     }
-    return { ok: true, results: toClientResults(rows) };
+    return { ok: true, results: toClientResults(ranked) };
   } catch (error) {
     return {
       ok: false,

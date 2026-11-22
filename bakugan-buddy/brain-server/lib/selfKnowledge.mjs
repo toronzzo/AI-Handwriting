@@ -68,14 +68,11 @@ function trimTo(text, maxChars) {
   return (at > 0 ? cut.slice(0, at) : cut) + "…";
 }
 
-function introInstruction(items) {
+/** The sentence the user actually sees. The model is not asked to invent it. */
+export function newsSentence(items) {
   const lines = (items || []).map((item) => String(item.text || "").trim()).filter(Boolean);
   if (!lines.length) return "";
-  return (
-    'This is the first chat since an update. Start this reply with exactly "New since last time: " followed by: ' +
-    lines.join(" ") +
-    " Say it only once, in this reply."
-  );
+  return "New since last time: " + lines.join(" ");
 }
 
 export function createSelfKnowledge(options = {}) {
@@ -94,6 +91,8 @@ export function createSelfKnowledge(options = {}) {
   let changelog = Array.isArray(items) ? items : readChangelog(changelogPath, { fsImpl }).items;
   let introItems = [];
   let introPending = false;
+  /** Set while one reply is carrying the sentence, cleared when it is shown or dropped. */
+  let claim = "";
 
   function recomputeIntro() {
     const seen = new Set(state.seen || []);
@@ -111,6 +110,32 @@ export function createSelfKnowledge(options = {}) {
     writeState(stateFile, state, fsImpl, now);
     introPending = false;
     introItems = [];
+    claim = "";
+  }
+
+  /**
+   * Take the one-time sentence for the reply that is about to be sent.
+   * Nothing is stored yet: a failed reply calls cancelNews and the next chat
+   * can still say it. A second chat in flight gets "" so it is not said twice.
+   */
+  function beginNews() {
+    if (claim || !introPending) return "";
+    const line = newsSentence(introItems);
+    if (!line) return "";
+    claim = line;
+    return line;
+  }
+
+  function commitNews() {
+    if (!claim) return false;
+    markSeen();
+    return true;
+  }
+
+  function cancelNews() {
+    if (!claim) return false;
+    claim = "";
+    return true;
   }
 
   function reload() {
@@ -131,11 +156,10 @@ export function createSelfKnowledge(options = {}) {
       }
     }
     const summary = String(snapshot?.summary || "").trim() || "What you can do right now: not checked yet.";
-    const note = introPending ? introInstruction(introItems) : "";
-    if (note) markSeen();
-    if (!note) return trimTo(summary, promptMaxChars);
-    const room = Math.max(200, promptMaxChars - note.length - 1);
-    return trimTo(summary, room).trimEnd() + "\n" + note;
+    // The news sentence is written onto the reply itself. Asking the model to
+    // start with it, and marking it seen before the user sees anything, is why
+    // "New since last time" never showed up.
+    return trimTo(summary, promptMaxChars);
   }
 
   function about() {
@@ -152,6 +176,9 @@ export function createSelfKnowledge(options = {}) {
     about,
     reload,
     markSeen,
+    beginNews,
+    commitNews,
+    cancelNews,
     state: () => ({ ...state, seen: [...state.seen] }),
     introPending: () => introPending,
   };
