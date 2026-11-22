@@ -11,11 +11,17 @@
 #
 #   scripts/preyas.sh start
 #   scripts/preyas.sh stop
+#   scripts/preyas.sh stop <service>
 #   scripts/preyas.sh restart
 #   scripts/preyas.sh restart model
 #   scripts/preyas.sh status
 #   scripts/preyas.sh status --json
 #   scripts/preyas.sh autostart on|off|status [--json]
+#
+# A listener counts as one of our services only when its process args match
+# (or the pid file names that process). Another app on Expo's port, such as
+# an editor on :8081, is left running. Expo web then takes the next free port
+# and the brain is started with PREYAS_WEB_PORT so local-origin trust matches.
 #
 # Every slow or machine-specific piece is a function so scripts/preyas.test.sh
 # can replace it and exercise the logic with mock processes.
@@ -35,7 +41,10 @@ BRAIN_DIR="${PREYAS_BRAIN_DIR:-$BUDDY_DIR/brain-server}"
 GATEWAY_SH="${PREYAS_GATEWAY_SH:-$REPO_ROOT/tools/agent-drive/gateway/start.sh}"
 LLAMA_LAUNCHER="${PREYAS_LLAMA_LAUNCHER:-$AGENT_DIR/bin/local-llm.sh}"
 ZIM_DIR="${PREYAS_ZIM_DIR:-$AGENT_DIR/knowledge/zim}"
-WEB_PORT="${PREYAS_WEB_PORT:-8081}"
+# The port we would like. A foreign listener can move Expo web upward;
+# WEB_PORT is the port actually in use and is what the brain must trust.
+PREFERRED_WEB_PORT="${PREYAS_WEB_PORT:-8081}"
+WEB_PORT="$PREFERRED_WEB_PORT"
 BRAIN_HOST="${PREYAS_BRAIN_HOST:-0.0.0.0}"
 LAUNCH_AGENTS_DIR="${PREYAS_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 AUTOSTART_LABEL="com.preyas.control"
@@ -147,6 +156,124 @@ pid_matches() {
   line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
   [[ -n "$line" ]] || return 1
   printf '%s' "$line" | grep -qi "$pattern"
+}
+
+process_name() {
+  local name
+  name="$(ps -p "$1" -o comm= 2>/dev/null | sed 's#.*/##' | tr -d '[:space:]' || true)"
+  printf '%s\n' "$name"
+}
+
+# One variable from a process environment. Empty when the process has none.
+process_env_var() {
+  local pid="$1" key="$2" line=""
+  if [[ -r "/proc/$pid/environ" ]]; then
+    line="$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -m1 "^${key}=" || true)"
+  else
+    line="$(ps eww -p "$pid" 2>/dev/null | tr ' ' '\n' | grep -m1 "^${key}=" || true)"
+  fi
+  printf '%s' "${line#"${key}="}"
+}
+
+web_port_file() { printf '%s/web.port\n' "$LOG_DIR"; }
+
+save_web_port() {
+  ensure_dirs
+  printf '%s\n' "$WEB_PORT" >"$(web_port_file)" 2>/dev/null || true
+}
+
+load_saved_web_port() {
+  local file value
+  file="$(web_port_file)"
+  [[ -f "$file" ]] || return 0
+  value="$(tr -d '[:space:]' < "$file" 2>/dev/null || true)"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    WEB_PORT="$value"
+    export PREYAS_WEB_PORT="$WEB_PORT"
+  fi
+}
+
+# Health alone is not identity: a foreign server can answer HTTP. When a
+# listener exists it must be our process. When nothing is listening, a passing
+# health check is enough (the tests, and a service whose pid we cannot see).
+service_already_running() {
+  local name="$1" pid
+  health_ok "$name" || return 1
+  pid="$(port_pid "$(svc_port "$name")")"
+  if [[ -z "$pid" ]]; then
+    return 0
+  fi
+  pid_matches "$pid" "$(service_expected_pattern "$name")"
+}
+
+# Expo's preferred port is often taken by an editor. Keep it when it is free
+# or already Expo; otherwise take the next free port (or a later one that is
+# already our Expo). The chosen port is exported as PREYAS_WEB_PORT.
+resolve_web_port() {
+  local preferred pattern holder owner next tries=0
+  preferred="$PREFERRED_WEB_PORT"
+  pattern="$(service_expected_pattern web)"
+  # A port chosen earlier in this run stays, so start does not announce it twice
+  # and a restart of Expo does not bounce back onto a busy preferred port.
+  if [[ "$WEB_PORT" != "$preferred" ]]; then
+    holder="$(port_pid "$WEB_PORT")"
+    if [[ -z "$holder" ]] || pid_matches "$holder" "$pattern"; then
+      export PREYAS_WEB_PORT="$WEB_PORT"
+      return 0
+    fi
+  fi
+  holder="$(port_pid "$preferred")"
+  if [[ -z "$holder" ]] || pid_matches "$holder" "$pattern"; then
+    WEB_PORT="$preferred"
+    export PREYAS_WEB_PORT="$WEB_PORT"
+    return 0
+  fi
+  owner="$(process_name "$holder")"
+  next=$((preferred + 1))
+  while (( tries < 20 )); do
+    holder="$(port_pid "$next")"
+    if [[ -z "$holder" ]] || pid_matches "$holder" "$pattern"; then
+      say "Port $preferred is used by ${owner:-another app}, not Expo web. Expo web will use port $next."
+      WEB_PORT="$next"
+      export PREYAS_WEB_PORT="$WEB_PORT"
+      return 0
+    fi
+    tries=$((tries + 1))
+    next=$((next + 1))
+  done
+  say "No free port for Expo web near $preferred."
+  return 1
+}
+
+# The brain trusts local pages on PREYAS_WEB_PORT (8081 when the variable was
+# never set). Empty output means the brain is not running.
+brain_trusted_port() {
+  local pid value
+  pid="$(status_pid brain)"
+  [[ -n "$pid" ]] || return 0
+  value="$(process_env_var "$pid" PREYAS_WEB_PORT)"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$value"
+  else
+    printf '8081\n'
+  fi
+}
+
+brain_trusts_web_port() {
+  local current
+  current="$(brain_trusted_port)"
+  [[ -z "$current" || "$current" == "$WEB_PORT" ]]
+}
+
+resolve_service() {
+  case "$1" in
+    model|llama|llama-server) printf 'llama\n' ;;
+    gateway|litellm) printf 'litellm\n' ;;
+    offline|kiwix|kiwix-serve) printf 'kiwix\n' ;;
+    brain|proxy|brain-server) printf 'brain\n' ;;
+    web|expo|app) printf 'web\n' ;;
+    *) return 1 ;;
+  esac
 }
 
 http_ok() {
@@ -349,6 +476,7 @@ launch_service() {
           BRAIN_PORT=8788 \
           BRAIN_HOST="$BRAIN_HOST" \
           LLAMA_URL="http://127.0.0.1:8790" \
+          PREYAS_WEB_PORT="$WEB_PORT" \
           nohup node --experimental-strip-types --disable-warning=ExperimentalWarning proxy.mjs >>"$logfile" 2>&1 </dev/null &
         echo $! >"$file"
       )
@@ -370,9 +498,20 @@ start_service() {
   local name="$1" label holder pid owner
   label="$(svc_label "$name")"
 
-  if health_ok "$name"; then
-    say "$label is already running."
-    return 0
+  if [[ "$name" == "web" ]]; then
+    resolve_web_port || return 1
+    save_web_port
+  fi
+
+  if service_already_running "$name"; then
+    if [[ "$name" == "brain" ]] && ! brain_trusts_web_port; then
+      say "Restarting $label so it trusts http://localhost:${WEB_PORT}."
+      stop_service "$name" || true
+    else
+      say "$label is already running."
+      align_brain_with_web "$name"
+      return 0
+    fi
   fi
 
   if ! service_available "$name"; then
@@ -393,7 +532,7 @@ start_service() {
         return 1
       fi
     else
-      owner="$(ps -p "$holder" -o comm= 2>/dev/null | sed 's#.*/##')"
+      owner="$(process_name "$holder")"
       say "Port $(svc_port "$name") is used by ${owner:-another app}; leaving it alone."
       return 1
     fi
@@ -417,12 +556,32 @@ start_service() {
   else
     say "$label is up (port $(svc_port "$name"))."
   fi
+  align_brain_with_web "$name"
   return 0
+}
+
+# Expo can move to a new port after the brain is already up. Restart only the
+# brain so local-origin trust matches; every other service stays as it is.
+align_brain_with_web() {
+  [[ "$1" == "web" ]] || return 0
+  if brain_trusts_web_port; then
+    return 0
+  fi
+  say "Restarting brain-server so it trusts http://localhost:${WEB_PORT}."
+  stop_service brain || true
+  start_service brain
 }
 
 start_all() {
   ensure_dirs
   log "start requested"
+  WEB_PORT="$PREFERRED_WEB_PORT"
+  export PREYAS_WEB_PORT="$WEB_PORT"
+  if ! resolve_web_port; then
+    say "Expo web has no free port. Nothing was started."
+    return 1
+  fi
+  save_web_port
   local name
   for name in "${SERVICES[@]}"; do
     if ! start_service "$name"; then
@@ -492,16 +651,18 @@ stop_all() {
   return "$failed"
 }
 
+stop_named() {
+  local target
+  target="$(resolve_service "$1")" || {
+    say "Unknown service: $1. Use llama|model, litellm, kiwix, brain or web."
+    return 2
+  }
+  stop_service "$target"
+}
+
 restart_one() {
-  local name="$1" target="$1"
-  case "$name" in
-    model|llama) target="llama" ;;
-    gateway|litellm) target="litellm" ;;
-    offline|kiwix) target="kiwix" ;;
-    brain|proxy|brain-server) target="brain" ;;
-    web|expo|app) target="web" ;;
-    *) return 2 ;;
-  esac
+  local target
+  target="$(resolve_service "$1")" || return 2
   stop_service "$target" || true
   start_service "$target"
 }
@@ -513,10 +674,11 @@ restart_all() {
     start_all
     return $?
   fi
-  if ! restart_one "$target"; then
+  if ! resolve_service "$target" >/dev/null; then
     say "Unknown service: $target. Use llama|model, litellm, kiwix, brain or web."
     return 2
   fi
+  restart_one "$target"
 }
 
 status_pid() {
@@ -672,6 +834,7 @@ Use: scripts/preyas.sh <command>
 
   start              turn everything on (skips what is already running)
   stop               turn everything off (SIGTERM, then SIGKILL after 5s)
+  stop <service>     stop one: llama|model, litellm, kiwix, brain, web
   restart            turn everything off, then on
   restart <service>  restart one: llama|model, litellm, kiwix, brain, web
   status             one line per service: state, port, RAM
@@ -688,9 +851,16 @@ main() {
   shift 2>/dev/null || true
   case "$command" in
     start) start_all ;;
-    stop) stop_all ;;
-    restart) restart_all "${1:-all}" ;;
+    stop)
+      load_saved_web_port
+      if [[ -n "${1:-}" ]]; then stop_named "$1"; else stop_all; fi
+      ;;
+    restart)
+      load_saved_web_port
+      restart_all "${1:-all}"
+      ;;
     status)
+      load_saved_web_port
       if [[ "${1:-}" == "--json" ]]; then status_json; else status_human; fi
       ;;
     autostart) autostart_command "${1:-status}" "${2:-}" ;;

@@ -26,6 +26,9 @@ export const theme = {
   text: colour("text"),
   dim: colour("dim"),
   faint: colour("faint"),
+  /** Text drawn on the sky (page titles and subtitles), not on a paper card. */
+  onSky: colour("onSky"),
+  onSkyMuted: colour("onSkyMuted"),
   danger: colour("danger"),
   good: colour("good"),
   /** New palette colours added for the Retro RPG redesign. */

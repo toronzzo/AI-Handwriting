@@ -9,7 +9,7 @@ On the Desktop there are three files:
 
 | Double-click | What happens |
 | --- | --- |
-| **Preyas ON.command** | Starts everything that is not already running, waits for each piece, then opens the app at `http://localhost:8081`. |
+| **Preyas ON.command** | Starts everything that is not already running, waits for each piece, then opens the app. That is `http://localhost:8081` unless another program already holds that port. |
 | **Preyas OFF.command** | Stops everything cleanly (SIGTERM first, SIGKILL after 5 s) and frees the RAM. |
 | **Preyas RESTART.command** | Stops everything, then starts it again. |
 
@@ -59,8 +59,18 @@ exactly once. The brain remembers that it said it in
 | brain-server | 8788 | the brain the app talks to |
 | Expo web | 8081 | the app in the browser |
 
-`start` skips anything already healthy and waits for each health check before
-starting the next service. `stop` goes in reverse order.
+`start` skips a service only when its health check passes **and** the process
+listening on its port is actually that service (pid file or process arguments).
+Another app on the port is never killed. If something else is listening on
+8081, Expo web takes the next free port (8082, then 8083, …) and the controller
+prints which port and who was in the way. The brain is restarted with
+`PREYAS_WEB_PORT` set to that port, so the Mac page stays a trusted local
+origin. The Desktop launcher opens the URL the controller prints.
+
+`stop` goes in reverse order. `stop <service>` stops only that one service
+(the same names as `restart`). `restart <service>` stops and starts only that
+service. Moving Expo off a busy port also restarts the brain so the new origin
+is trusted; the other services stay up.
 
 ## Logs and PID files
 
@@ -75,7 +85,9 @@ Everything lives in:
 | `llama.pid`, `litellm.pid`, `kiwix.pid`, `brain.pid`, `web.pid` | the process ids |
 
 If a service will not start, open its log first. Ports in use by another app
-are never killed; the controller says which port is busy and stops there.
+are never killed. For the model, the brain, LiteLLM and kiwix the controller
+says which port is busy and stops there. For Expo web it moves to the next
+free port instead, and writes that port to `web.port` in the log folder.
 
 ## The commands behind the buttons
 
@@ -84,6 +96,7 @@ For the curious, or when something is stuck:
 ```sh
 scripts/preyas.sh start
 scripts/preyas.sh stop
+scripts/preyas.sh stop litellm      # only LiteLLM; the rest keep running
 scripts/preyas.sh restart
 scripts/preyas.sh restart model      # only the model
 scripts/preyas.sh restart brain      # only the brain

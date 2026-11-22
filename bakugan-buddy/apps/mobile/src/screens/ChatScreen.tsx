@@ -115,8 +115,6 @@ type Briefing = { day: string; opening: string; items: string[]; empty: boolean 
 type InboxFile = { name: string; size: number; type: string; modified: number };
 type PendingReminder = { text: string; dueAt: string; repeat: "none" | "daily" | "weekly" | "weekdays"; label: string };
 type PartnerCard = { turns: number; level: number; bond: number; caption: string };
-type HealthPart = { ok: boolean; label: string; detail: string };
-type Health = { ok: boolean; parts: Record<string, HealthPart>; drive?: { mounted: boolean; freeGb: number | null }; memory?: { swapUsedMb: number | null } };
 type ModelTier = { label: string; context: number; weightsGb: number };
 type ModelStatus = {
   current: LocalModelId;
@@ -350,13 +348,11 @@ export function ChatScreen({
   const [docProgress, setDocProgress] = useState("");
   const [docChoice, setDocChoice] = useState<{ name: string; matches: string[] } | null>(null);
   const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [health, setHealth] = useState<Health | null>(null);
-  const [healthError, setHealthError] = useState("");
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [modelError, setModelError] = useState("");
   const [vaultError, setVaultError] = useState("");
-  // Until the mount effect has worked out where the brain is, a probe would
-  // ask `/v1/status` relative to the web page and get HTML back.
+  // Until the mount effect has worked out where the brain is, a settings probe
+  // would ask a relative URL and get the web page back as HTML.
   const [brainReady, setBrainReady] = useState(false);
   /** The `at` of the last rollback note already shown, so it appears once. */
   const rollbackSeenRef = useRef(0);
@@ -998,26 +994,6 @@ export function ChatScreen({
       setDriveMap(body);
       return body;
     } catch {
-      return null;
-    }
-  }
-
-  async function refreshHealth() {
-    if (!bag.brainUrl) return null;
-    try {
-      const res = await brainFetch(`${bag.brainUrl}/v1/status`, {
-        signal: AbortSignal.timeout(SETTINGS_PROBE_MS),
-      });
-      const read = await readProbe<Health>("Status", res);
-      if (!read.ok) {
-        setHealthError(read.error);
-        return null;
-      }
-      setHealth(read.body);
-      setHealthError("");
-      return read.body;
-    } catch (error) {
-      setHealthError(probeThrownError("Status", error));
       return null;
     }
   }
@@ -1840,11 +1816,9 @@ export function ChatScreen({
       void refreshInbox();
     }
     if (section === "settings") {
-      setHealthError("");
       setModelError("");
       setVaultError("");
       if (!brainReady) return;
-      void refreshHealth();
       void refreshPhone();
       void refreshBriefing();
       void refreshDriveMap();
@@ -2596,26 +2570,8 @@ export function ChatScreen({
       <VoiceSession sinks={bag} handsFreeOn={voice.handsFree} />
       {section === "settings" ? (
         <ScrollView style={styles.fill} contentContainerStyle={[styles.pad, page]}>
-          <Text style={styles.sectionTitle} accessibilityRole="header">Settings</Text>
+          <Text style={styles.skyTitle} accessibilityRole="header">Settings</Text>
           <BackgroundPhotoCard />
-          <Text style={styles.kicker}>STATUS</Text>
-          {health ? (
-            <View style={styles.healthList}>
-              {Object.entries(health.parts).map(([key, part]) => (
-                <View key={key} style={styles.healthRow}>
-                  <View style={[styles.dot, part.ok ? styles.dotOn : styles.dotOff]} />
-                  <Text style={styles.healthLabel}>{part.label}</Text>
-                  <Text style={styles.healthDetail}>{part.detail}</Text>
-                </View>
-              ))}
-              <Text style={styles.dim}>
-                Drive: {health.drive?.mounted ? `mounted, ${health.drive.freeGb ?? "?"} GB free` : "not mounted"}
-                {health.memory?.swapUsedMb != null ? ` · swap ${health.memory.swapUsedMb} MB` : ""}
-              </Text>
-            </View>
-          ) : (
-            <Text style={styles.dim}>{healthError || "Checking…"}</Text>
-          )}
           <PowerPanel brainUrl={bag.brainUrl} onTurnOff={() => setDialog({ kind: "powerOff" })} />
           <View style={styles.phoneCard}>
             <Text style={styles.kicker}>MODEL</Text>
@@ -2657,10 +2613,8 @@ export function ChatScreen({
           <Pressable
             style={styles.profileBtn}
             onPress={() => {
-              setHealthError("");
               setModelError("");
               setVaultError("");
-              void refreshHealth();
               void refreshPhone();
               void refreshVault();
               void refreshDriveMap();
@@ -2771,11 +2725,11 @@ export function ChatScreen({
         </ScrollView>
       ) : section === "learn" ? (
         <ScrollView style={styles.fill} contentContainerStyle={[styles.pad, page]}>
-          <Text style={styles.sectionTitle} accessibilityRole="header">Learn</Text>
-          <Text style={styles.dim}>{tabById("learn").empty}</Text>
+          <Text style={styles.skyTitle} accessibilityRole="header">Learn</Text>
+          <Text style={styles.skyNote}>{tabById("learn").empty}</Text>
           {decks.length === 0 ? (
             <View style={styles.emptyTab}>
-              <Text style={styles.dim}>{tabById("learn").example}</Text>
+              <Text style={styles.skyNote}>{tabById("learn").example}</Text>
             </View>
           ) : null}
           <View style={[styles.pageGrid, pageCols === 2 && styles.pageGridWide]}>
@@ -2807,10 +2761,10 @@ export function ChatScreen({
       ) : section === "memory" ? (
         <View style={styles.fill}>
           <View style={[styles.memHead, page]}>
-            <Text style={styles.sectionTitle} accessibilityRole="header">Memory</Text>
-            <Text style={styles.dim}>{tabById("memory").empty}</Text>
+            <Text style={styles.skyTitle} accessibilityRole="header">Memory</Text>
+            <Text style={styles.skyNote}>{tabById("memory").empty}</Text>
             <TextInput
-              style={styles.modalInput}
+              style={styles.searchInput}
               value={notesQuery}
               onChangeText={setNotesQuery}
               placeholder="Search memory…"
@@ -2825,13 +2779,13 @@ export function ChatScreen({
               {(["all", "notes", "reminders", "docs"] as const).map((filter) => (
                 <Pressable
                   key={filter}
-                  style={[styles.chip, memFilter === filter && styles.chipHint]}
+                  style={[styles.filterChip, memFilter === filter && styles.filterChipOn]}
                   onPress={() => {
                     setMemFilter(filter);
                     if (filter === "notes" || filter === "all") void refreshNotes(notesQuery);
                   }}
                 >
-                  <Text style={styles.chipText}>{filter === "all" ? "All" : filter === "notes" ? "Notes" : filter === "reminders" ? "Reminders" : "Documents"}</Text>
+                  <Text style={[styles.filterChipText, memFilter === filter && styles.filterChipTextOn]}>{filter === "all" ? "All" : filter === "notes" ? "Notes" : filter === "reminders" ? "Reminders" : "Documents"}</Text>
                 </Pressable>
               ))}
             </View>
@@ -2840,7 +2794,7 @@ export function ChatScreen({
             {(memFilter === "all" || memFilter === "notes") ? (
               <>
                 {notesList.length === 0 && memFilter === "notes" ? (
-                  <Text style={styles.dim}>{tabById("memory").example}</Text>
+                  <Text style={styles.skyNote}>{tabById("memory").example}</Text>
                 ) : null}
                 {notesList.map((noteRow) => (
                   <View key={noteRow.id} style={[styles.noteRow, styles.solidCard]}>
@@ -2883,7 +2837,7 @@ export function ChatScreen({
             {(memFilter === "all" || memFilter === "reminders") ? (
               <>
                 {reminders.filter((row) => row.status !== "done").length === 0 && memFilter === "reminders" ? (
-                  <Text style={styles.dim}>No reminders. Tell Preyas: "remind me to call mum at 6".</Text>
+                  <Text style={styles.skyNote}>No reminders. Tell Preyas: "remind me to call mum at 6".</Text>
                 ) : null}
                 {reminders.filter((row) => row.status !== "done").map((row) => (
                   <View key={row.id} style={[styles.noteRow, styles.solidCard]}>
@@ -2915,7 +2869,7 @@ export function ChatScreen({
             {(memFilter === "all" || memFilter === "docs") ? (
               <>
                 {inbox.length === 0 && memFilter === "docs" ? (
-                  <Text style={styles.dim}>
+                  <Text style={styles.skyNote}>
                     No documents yet. Drop a PDF or text file into the inbox folder{inboxPath ? ` (${inboxPath})` : ""} and ask Preyas to read it.
                   </Text>
                 ) : null}
@@ -2939,7 +2893,7 @@ export function ChatScreen({
               </>
             ) : null}
             {memFilter === "all" && notesList.length === 0 && reminders.length === 0 && inbox.length === 0 ? (
-              <Text style={styles.dim}>{tabById("memory").example}</Text>
+              <Text style={styles.skyNote}>{tabById("memory").example}</Text>
             ) : null}
           </ScrollView>
         </View>
@@ -3784,7 +3738,6 @@ const styles = StyleSheet.create({
   time: { color: theme.faint, fontSize: theme.type.label, marginTop: theme.space.xs, textAlign: "right" },
   typing: { color: theme.dim, fontSize: 13, marginTop: 4 },
   sources: { marginTop: 6, gap: 2 },
-  healthList: { gap: 8, marginVertical: 10 },
   briefingTop: { marginTop: theme.space.sm },
   /** The briefing card: soft paper, hairline edge, 14px radius. */
   briefingCard: { ...paperSoft, borderRadius: 14, padding: theme.space.sm + 2, gap: theme.space.xs + 2, width: "100%" },
@@ -3794,9 +3747,6 @@ const styles = StyleSheet.create({
   briefingBullet: { color: theme.text, fontSize: 14, lineHeight: 19 },
   briefingItem: { color: theme.text, fontSize: 14, lineHeight: 19, flexShrink: 1 },
   briefingActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
-  healthRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  healthLabel: { color: theme.text, fontSize: 14, width: 120 },
-  healthDetail: { color: theme.dim, fontSize: 12, flex: 1 },
   modelRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
   modelBtn: {
     borderWidth: 1,
@@ -3915,6 +3865,32 @@ const styles = StyleSheet.create({
   chipOff: { opacity: 0.45 },
   chipHint: { backgroundColor: theme.accentSoft },
   chipText: { color: theme.text, fontSize: 12 },
+  /** Memory filters sit on the sky, so they use a paper fill. Text on card, and onAccent on the selected accent fill, both pass WCAG AA. */
+  filterChip: {
+    borderWidth: 1,
+    borderColor: theme.lineStrong,
+    borderRadius: theme.radius.md,
+    minHeight: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: theme.space.sm + 2,
+    backgroundColor: theme.card,
+  },
+  filterChipOn: { backgroundColor: theme.accent, borderColor: theme.accent },
+  filterChipText: { color: theme.text, fontSize: 12, fontWeight: "600" },
+  filterChipTextOn: { color: theme.onAccent },
+  /** Search field on the sky: paper fill so placeholder and typed text meet AA. */
+  searchInput: {
+    borderWidth: 1,
+    borderColor: theme.lineStrong,
+    borderRadius: 12,
+    backgroundColor: theme.card,
+    color: theme.text,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 16,
+    minHeight: 44,
+  },
   solidCard: {
     backgroundColor: theme.card,
     borderWidth: 1,
@@ -3948,6 +3924,9 @@ const styles = StyleSheet.create({
   profileHero: { height: theme.space.xl * 8 },
   /** One heading per screen, in the same Oswald style as SectionTitle. */
   sectionTitle: { fontFamily: theme.font.display, color: theme.text, fontWeight: "700", fontSize: theme.type.display.section, textTransform: "uppercase", letterSpacing: 0.78 },
+  /** Page titles and notes drawn on the sky (Learn, Memory, Settings). */
+  skyTitle: { fontFamily: theme.font.display, color: theme.onSky, fontWeight: "700", fontSize: theme.type.display.section, textTransform: "uppercase", letterSpacing: 0.78 },
+  skyNote: { color: theme.onSkyMuted, fontSize: 14, lineHeight: 20 },
   gearBtn: { ...ghost },
   gearText: { color: theme.text, fontSize: 18, lineHeight: 22 },
   briefingCardHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

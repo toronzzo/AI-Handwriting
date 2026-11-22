@@ -16,6 +16,8 @@ export type PaletteKey =
   | "text"
   | "dim"
   | "faint"
+  | "onSky"
+  | "onSkyMuted"
   | "accent"
   | "accentText"
   | "onAccent"
@@ -52,6 +54,8 @@ const KEYS: readonly PaletteKey[] = [
   "text",
   "dim",
   "faint",
+  "onSky",
+  "onSkyMuted",
   "accent",
   "accentText",
   "onAccent",
@@ -86,6 +90,10 @@ export const DAY: Palette = {
   text: "#121212",
   dim: "#4A4A4A",
   faint: "#5E5E5E",
+  /* Text that sits on the sky, not on a paper card. Day sky is mid blue, so
+     this has to be near-black; night sky is navy, so this is white. */
+  onSky: "#000000",
+  onSkyMuted: "#050505",
   accent: "#1E64C8",
   accentText: "#1957B4",
   onAccent: "#FFFFFF",
@@ -121,6 +129,8 @@ export const NIGHT: Palette = {
   text: "#121212",
   dim: "#3F3F3F",
   faint: "#4A4A4A",
+  onSky: "#FFFFFF",
+  onSkyMuted: "#B9C7DC",
   accent: "#1E64C8",
   accentText: "#123F8C",
   onAccent: "#FFFFFF",

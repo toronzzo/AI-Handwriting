@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { AppState, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { AppState, Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import * as Network from "expo-network";
 import { brainFetch } from "./brain/token";
 import {
@@ -613,7 +613,9 @@ export function RoomScreen() {
   const sinks = useRef<Sinks | null>(null);
   if (sinks.current === null) sinks.current = makeSinks();
   const bag = sinks.current;
-  const [debug, setDebug] = useState(typeof __DEV__ !== "undefined" && __DEV__);
+  // Off for everyone. A local Expo server runs in dev mode, so that flag
+  // cannot be the gate for these controls.
+  const [devControls, setDevControls] = useState(false);
   const [bark, setBark] = useState<string | null>(null);
   const [hud, setHud] = useState<ReadoutState>({
     skill: "idle-roll",
@@ -805,7 +807,7 @@ export function RoomScreen() {
   }, [bag]);
 
   useEffect(() => {
-    if (!debug) return;
+    if (!devControls) return;
     const interval = setInterval(() => {
       const now = Date.now();
       const elapsed = (now - bag.frameStamp) / 1000;
@@ -829,7 +831,7 @@ export function RoomScreen() {
       });
     }, 250);
     return () => clearInterval(interval);
-  }, [bag, debug]);
+  }, [bag, devControls]);
 
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
@@ -842,7 +844,7 @@ export function RoomScreen() {
       if (event.key === "ArrowDown" || event.key === "s") player.vz = 1;
       if (event.key.startsWith("Arrow") || "wasd".includes(event.key)) {
         player.auto = false;
-        if (debug) setTick((n) => n + 1);
+        if (devControls) setTick((n) => n + 1);
       }
     };
     const up = (event: KeyboardEvent) => {
@@ -860,7 +862,7 @@ export function RoomScreen() {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [bag, debug]);
+  }, [bag, devControls]);
 
   const refresh = () => setTick((n) => n + 1);
   const player = bag.player;
@@ -874,13 +876,7 @@ export function RoomScreen() {
           <World sinks={bag} />
         </Canvas>
         <VoiceSession sinks={bag} handsFreeOn={readVoiceSettings().handsFree} />
-        <Pressable
-          accessibilityLabel="debug"
-          delayLongPress={700}
-          onLongPress={() => setDebug((value) => !value)}
-          style={styles.debugHit}
-        />
-        {debug && (
+        {devControls && (
           <View pointerEvents="none" style={styles.readout}>
             <Text style={styles.name}>PREYAS</Text>
             <Text style={styles.meta}>
@@ -909,53 +905,66 @@ export function RoomScreen() {
           </View>
         )}
       </View>
-      <View style={styles.brainRow}>
-        <TextInput
-          value={brainHost}
-          onChangeText={setBrainHost}
-          onEndEditing={() => {
-            const url = normalizeBrainUrl(brainHost);
-            setBrainHost(url);
-            void writeBrainHost(url);
-          }}
-          autoCapitalize="none"
-          autoCorrect={false}
-          placeholder="Mac :8788 or LiteLLM :4000"
-          placeholderTextColor={theme.faint}
-          style={styles.brainInput}
+      {devControls ? (
+        <View style={styles.brainRow}>
+          <TextInput
+            value={brainHost}
+            onChangeText={setBrainHost}
+            onEndEditing={() => {
+              const url = normalizeBrainUrl(brainHost);
+              setBrainHost(url);
+              void writeBrainHost(url);
+            }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="Mac :8788 or LiteLLM :4000"
+            placeholderTextColor={theme.faint}
+            style={styles.brainInput}
+          />
+          <Pressable
+            style={styles.pad}
+            onPress={() => {
+              void (async () => {
+                setBrainStatus("looking");
+                let localIp: string | null = null;
+                try {
+                  localIp = await Network.getIpAddressAsync();
+                } catch {
+                  localIp = null;
+                }
+                const found = await findBrain({
+                  saved: brainHost,
+                  envUrl: process.env.EXPO_PUBLIC_BRAIN_URL,
+                  localIp,
+                });
+                if (found) {
+                  setBrainHost(found);
+                  void writeBrainHost(found);
+                  setBrainStatus("connected");
+                } else {
+                  setBrainStatus("offline, barks");
+                }
+              })();
+            }}
+          >
+            <Text style={styles.padText}>find</Text>
+          </Pressable>
+          <Text style={styles.brainStatus}>{micPhaseLabel}</Text>
+          <Text style={styles.brainStatus}>{brainStatus}</Text>
+        </View>
+      ) : null}
+      <View style={styles.devRow}>
+        <View style={styles.devCopy}>
+          <Text style={styles.devLabel}>Dev controls</Text>
+          <Text style={styles.devHint}>Host, debug readout and movement</Text>
+        </View>
+        <Switch
+          value={devControls}
+          onValueChange={setDevControls}
+          accessibilityLabel="Dev controls"
         />
-        <Pressable
-          style={styles.pad}
-          onPress={() => {
-            void (async () => {
-              setBrainStatus("looking");
-              let localIp: string | null = null;
-              try {
-                localIp = await Network.getIpAddressAsync();
-              } catch {
-                localIp = null;
-              }
-              const found = await findBrain({
-                saved: brainHost,
-                envUrl: process.env.EXPO_PUBLIC_BRAIN_URL,
-                localIp,
-              });
-              if (found) {
-                setBrainHost(found);
-                void writeBrainHost(found);
-                setBrainStatus("connected");
-              } else {
-                setBrainStatus("offline, barks");
-              }
-            })();
-          }}
-        >
-          <Text style={styles.padText}>find</Text>
-        </Pressable>
-        <Text style={styles.brainStatus}>{micPhaseLabel}</Text>
-        <Text style={styles.brainStatus}>{brainStatus}</Text>
       </View>
-      {debug && (
+      {devControls && (
         <View style={styles.controls}>
           <View style={styles.row}>
             {(
@@ -1061,7 +1070,19 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.bg },
   stage: { flex: 1 },
   canvas: { flex: 1 },
-  debugHit: { position: "absolute", top: 0, right: 0, width: 56, height: 56 },
+  devRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: theme.accentLine,
+  },
+  devCopy: { flex: 1, gap: 2 },
+  devLabel: { color: theme.onSky, fontSize: 14, fontWeight: "700" },
+  devHint: { color: theme.onSkyMuted, fontSize: 12 },
   brainRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1080,7 +1101,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.accentLine,
   },
-  brainStatus: { color: theme.dim, fontSize: 11, width: 92 },
+  brainStatus: { color: theme.onSkyMuted, fontSize: 11, width: 92 },
   readout: {
     position: "absolute",
     top: 8,
@@ -1090,11 +1111,11 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
   },
-  name: { color: theme.text, fontWeight: "800", letterSpacing: 1.5, fontSize: 13 },
-  meta: { color: theme.text, fontSize: 13, marginTop: 2 },
-  advice: { color: theme.accentText, fontSize: 12, marginTop: 2 },
-  memory: { color: theme.dim, fontSize: 11, marginTop: 2 },
-  log: { color: theme.dim, fontSize: 11, marginTop: 1 },
+  name: { color: theme.onAccent, fontWeight: "800", letterSpacing: 1.5, fontSize: 13 },
+  meta: { color: theme.onAccent, fontSize: 13, marginTop: 2 },
+  advice: { color: theme.onAccent, fontSize: 12, marginTop: 2 },
+  memory: { color: theme.onAccent, fontSize: 11, marginTop: 2 },
+  log: { color: theme.onAccent, fontSize: 11, marginTop: 1 },
   noticeTrack: {
     marginTop: 6,
     height: 4,
