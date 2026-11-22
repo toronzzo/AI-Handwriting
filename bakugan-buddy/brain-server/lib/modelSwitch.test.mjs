@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { HUGE_TIMEOUT_MS, SWITCHING_CHAT_MESSAGE } from "../../packages/alive/src/modelSwitch.ts";
-import { chatGate, createModelSwitch, DEFAULT_IDLE_MODEL, freeMemoryGb, IDLE_RETURN_MS, LOAD_TIMEOUT_MS, ROLLBACK_NOTE } from "./modelSwitch.mjs";
+import { chatGate, createModelSwitch, DEFAULT_IDLE_MODEL, freeMemoryGb, IDLE_RETURN_MS, llamaServerRamMb, LOAD_TIMEOUT_MS, parseFootprintMb, residentTreeMb, ROLLBACK_NOTE, rssMbFromPs } from "./modelSwitch.mjs";
 
 /** Poll a condition with real timers (for the crash-rollback test). */
 async function waitFor(cond, timeoutMs) {
@@ -631,4 +631,59 @@ test("a missing tiny file rolls back to the 8B with the usual note", async () =>
   } finally {
     fs.rmSync(f.models, { recursive: true, force: true });
   }
+});
+
+test("model RAM counts mapped footprint and child processes, not the launcher RSS", async () => {
+  assert.equal(parseFootprintMb("phys_footprint: 1.1 GB\nphys_footprint_peak: 2 GB\n"), 1126);
+  assert.equal(parseFootprintMb("Physical footprint:         19 MB"), 19);
+  assert.equal(parseFootprintMb("phys_footprint_peak: 9 GB"), null);
+  assert.equal(rssMbFromPs("19456\n"), 19);
+
+  const tree = await residentTreeMb(10, (cmd, args, _opts, cb) => {
+    if (cmd === "footprint") {
+      const pid = args[args.indexOf("-p") + 1];
+      cb(null, pid === "12" ? "phys_footprint: 1.1 GB\n" : "");
+      return;
+    }
+    if (cmd === "ps") {
+      const pid = args[args.indexOf("-p") + 1];
+      const rss = { 10: "20480", 11: "19456", 12: "19456" };
+      cb(null, `${rss[pid] || "0"}\n`);
+      return;
+    }
+    if (cmd === "pgrep") {
+      const parent = args[args.indexOf("-P") + 1];
+      cb(null, parent === "10" ? "11\n" : parent === "11" ? "12\n" : "");
+      return;
+    }
+    cb(new Error("unexpected"), "");
+  }, "darwin");
+  assert.ok(tree >= 1100, `expected the 1.1 GB model, got ${tree}`);
+  assert.ok(tree < 1300, `did not double-count, got ${tree}`);
+
+  const rssOnly = await residentTreeMb(10, (cmd, args, _opts, cb) => {
+    if (cmd === "ps") {
+      const pid = args[args.indexOf("-p") + 1];
+      cb(null, pid === "11" ? "1126400\n" : "19456\n");
+      return;
+    }
+    if (cmd === "pgrep") {
+      cb(null, args[args.indexOf("-P") + 1] === "10" ? "11\n" : "");
+      return;
+    }
+    cb(new Error("no"), "");
+  }, "linux");
+  assert.ok(rssOnly >= 1100, `a child holding the weights must count, got ${rssOnly}`);
+
+  const listening = await llamaServerRamMb((cmd, args, _opts, cb) => {
+    if (cmd === "lsof") return cb(null, "10\n");
+    if (cmd === "ps") return cb(null, "19456\n");
+    if (cmd === "pgrep") return cb(null, args.includes("10") ? "11\n" : "");
+    if (cmd === "footprint") {
+      cb(null, args[args.indexOf("-p") + 1] === "11" ? "phys_footprint: 1.1 GB\n" : "phys_footprint: 19 MB\n");
+      return;
+    }
+    return cb(new Error("no"), "");
+  }, 8790, "darwin");
+  assert.ok(listening >= 1100, `the port's process tree should report the model, got ${listening}`);
 });

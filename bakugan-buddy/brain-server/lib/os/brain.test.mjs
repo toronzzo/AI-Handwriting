@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { handleOsRoute } from "./routes.mjs";
 import { createBrain } from "./neurons.mjs";
+import { activitySummary, emptyNeuronFeed, ingestNeuronSnapshot, activeNeuronIds } from "../../../apps/mobile/src/brain/neuronActivity.ts";
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "brain-route-"));
@@ -135,6 +136,26 @@ test("the stream survives a client disconnect: no throw, other viewers keep even
     const text = staying.out.writes.join("");
     assert.match(text, /"neuron":"ears"/, "the surviving viewer still receives events");
     assert.equal(gone.out.writes.join("").includes('"neuron":"ears"'), false, "the gone viewer receives nothing");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the app reads the real GET /v1/brain body, including rows keyed by id", async () => {
+  const dir = tempDir();
+  try {
+    const brain = createBrain({ dataDir: dir, now: () => 42 });
+    brain.emit({ neuron: "chat-small", state: "thinking", ts: 41 });
+    const { res, out } = fakeRes();
+    const answered = await handleOsRoute(route({ pathname: "/v1/brain", dataDir: dir, brain, res }));
+    assert.equal(answered, true);
+    const body = JSON.parse(out.body);
+    const small = body.neurons.find((neuron) => neuron.id === "chat-small");
+    assert.equal(small.id, "chat-small");
+    assert.equal(Object.hasOwn(small, "neuron"), false);
+    const feed = ingestNeuronSnapshot(emptyNeuronFeed(), body, 42);
+    assert.deepEqual(activeNeuronIds(feed), ["chat-small"]);
+    assert.equal(activitySummary(feed, 42), "Chat small");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

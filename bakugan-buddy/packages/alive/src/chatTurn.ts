@@ -150,6 +150,21 @@ export function modelId(route: "local" | "paid", via: "gateway" | "proxy"): stri
   return via === "gateway" ? "local" : "preyas";
 }
 
+/**
+ * Where one chat turn is sent.
+ *
+ * Always the brain. LiteLLM on :4000 answers /v1/models, but its `local`
+ * model calls the brain without the pairing token, so the brain returns 401
+ * and the app says Preyas didn't answer. The brain itself forwards model
+ * "paid" to that gateway when a key is configured, and local model "preyas"
+ * to llama. The browser request still carries the token (or the Mac page's
+ * own Origin); nothing here relaxes that check.
+ */
+export function chatTarget(route: "local" | "paid", brainUrl: string): { base: string; model: string } {
+  const base = String(brainUrl || "").replace(/\/$/, "");
+  return { base, model: route === "paid" ? "paid" : "preyas" };
+}
+
 export function splitPaidHint(text: string): { text: string; suggestPaid: boolean } {
   const suggestPaid = text.includes("[[ASK_PAID]]");
   const cleaned = text.replace(/\[\[ASK_PAID\]\]/g, "").trim();
@@ -320,32 +335,16 @@ export function visibleReply(text: string, reasoning: string): { answer: string;
   return { answer: stripped.answer, thinking, inThink: stripped.inThink };
 }
 
-/** Pull text and optional usage out of one OpenAI SSE block. */
+/**
+ * The brain base for a chat turn. A running gateway is ignored on purpose:
+ * sending the turn to :4000 drops the pairing token on the way back to the brain.
+ */
 export async function resolveChatBase(
   brainUrl: string,
-  fetchImpl: typeof fetch = fetch,
-): Promise<{ base: string; via: "gateway" | "proxy" }> {
-  const candidates = ["http://127.0.0.1:4000"];
-  try {
-    const host = new URL(brainUrl).hostname;
-    if (host && host !== "127.0.0.1" && host !== "localhost") candidates.push(`http://${host}:4000`);
-  } catch {
-    /* brain URL was not absolute */
-  }
-  for (let i = 0; i < candidates.length; i++) {
-    const base = candidates[i]!;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 600);
-    try {
-      const res = await fetchImpl(`${base}/v1/models`, { signal: controller.signal });
-      if (res.ok) return { base, via: "gateway" };
-    } catch {
-      /* try the proxy */
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  return { base: brainUrl.replace(/\/$/, ""), via: "proxy" };
+  _fetchImpl: typeof fetch = fetch,
+): Promise<{ base: string; via: "proxy" }> {
+  void _fetchImpl;
+  return { base: chatTarget("local", brainUrl).base, via: "proxy" };
 }
 
 function messagesForModel(messages: readonly ChatMessage[], model: string): ChatMessage[] {
@@ -448,7 +447,11 @@ export async function streamReply(options: {
   }
 }
 
-/** Bond and level come only from how many turns are stored on the drive. */
+/**
+ * A turn-count meter kept for the legacy single-file history.
+ * The chat header and Today use the life-log level in rpgLevel.ts instead,
+ * so this must not be shown per chat.
+ */
 export function partnerFromTurns(turns: number): { turns: number; level: number; bond: number; caption: string } {
   const n = Number.isFinite(turns) ? Math.max(0, Math.floor(turns)) : 0;
   const level = Math.min(40, 1 + Math.floor(n / 3));

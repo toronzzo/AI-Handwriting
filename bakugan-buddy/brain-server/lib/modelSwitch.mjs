@@ -45,22 +45,83 @@ export function chatGate(model, switchState) {
   return { ok: true, paid };
 }
 
-/** Resident memory of one pid in MB (ps reports rss in KB); null when unreadable. */
-export function ramOfPid(pid, execImpl = execFile) {
+function execText(execImpl, cmd, args) {
   return new Promise((resolve) => {
-    execImpl("ps", ["-p", String(pid), "-o", "rss="], { timeout: 4000 }, (error, stdout) => {
-      if (error) return resolve(null);
-      const kb = Number(String(stdout).trim().split(/\s+/)[0]);
-      resolve(Number.isFinite(kb) && kb > 0 ? Math.round(kb / 1024) : null);
+    execImpl(cmd, args, { timeout: 4000 }, (error, stdout) => {
+      if (error) return resolve("");
+      resolve(String(stdout ?? ""));
     });
   });
 }
 
 /**
- * Resident memory of whatever llama-server holds :8790 — ours or the drive
- * launcher's — or null when nothing listens. Used by the brain feed.
+ * macOS `footprint` / vmmap "phys_footprint" in MB. That figure includes
+ * compressed pages and resident mapped weights; `ps` RSS does not, which is
+ * why a 1 GB llama-server was reported as a few dozen MB. Peak lines are
+ * ignored. Returns null when the text has no live footprint.
  */
-export async function llamaServerRamMb(execImpl = execFile, port = LLAMA_PORT) {
+export function parseFootprintMb(text) {
+  const lines = String(text || "").split("\n");
+  for (const line of lines) {
+    if (/peak/i.test(line)) continue;
+    if (!/phys(?:ical)?[ _]?footprint/i.test(line)) continue;
+    const match = line.match(/([0-9]+(?:\.[0-9]+)?)\s*([kmgt]b?)\b/i);
+    if (!match) continue;
+    const value = Number(match[1]);
+    if (!Number.isFinite(value) || value < 0) continue;
+    const unit = match[2].toLowerCase();
+    const mult = unit.startsWith("g") ? 1024 : unit.startsWith("k") ? 1 / 1024 : unit.startsWith("t") ? 1024 * 1024 : 1;
+    return Math.round(value * mult);
+  }
+  return null;
+}
+
+/** RSS of one pid in MB, from `ps -o rss=` (kilobytes). Null when unreadable. */
+export function rssMbFromPs(text) {
+  const kb = Number(String(text || "").trim().split(/\s+/)[0]);
+  return Number.isFinite(kb) && kb > 0 ? kb / 1024 : null;
+}
+
+/**
+ * Resident MB for a process and its descendants.
+ * On macOS each process prefers phys_footprint, then RSS. Children are
+ * walked so a small launcher is not reported instead of llama-server.
+ */
+export async function residentTreeMb(rootPid, execImpl = execFile, platform = process.platform) {
+  const seen = new Set();
+  async function walk(pid) {
+    const id = Number(pid);
+    if (!Number.isInteger(id) || id <= 0 || seen.has(id)) return 0;
+    seen.add(id);
+    let own = null;
+    if (platform === "darwin") {
+      own = parseFootprintMb(await execText(execImpl, "footprint", ["-p", String(id)]));
+    }
+    if (own === null) own = rssMbFromPs(await execText(execImpl, "ps", ["-p", String(id), "-o", "rss="]));
+    let total = own && own > 0 ? own : 0;
+    const kids = await execText(execImpl, "pgrep", ["-P", String(id)]);
+    for (const line of kids.split("\n")) {
+      const child = Number(line.trim());
+      if (Number.isInteger(child) && child > 0) total += await walk(child);
+    }
+    return total;
+  }
+  const total = await walk(rootPid);
+  if (total <= 0) return null;
+  return Math.round(total);
+}
+
+/** Resident memory of one pid in MB; null when unreadable. */
+export function ramOfPid(pid, execImpl = execFile, platform = process.platform) {
+  return residentTreeMb(pid, execImpl, platform);
+}
+
+/**
+ * Resident memory of whatever llama-server holds :8790 — ours or the drive
+ * launcher's — including child processes and, on macOS, mapped model memory.
+ * Null when nothing listens. Used by the brain feed.
+ */
+export async function llamaServerRamMb(execImpl = execFile, port = LLAMA_PORT, platform = process.platform) {
   const pid = await new Promise((resolve) => {
     execImpl("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], { timeout: 4000 }, (error, stdout) => {
       if (error) return resolve(null);
@@ -69,7 +130,7 @@ export async function llamaServerRamMb(execImpl = execFile, port = LLAMA_PORT) {
     });
   });
   if (pid === null) return null;
-  return ramOfPid(pid, execImpl);
+  return residentTreeMb(pid, execImpl, platform);
 }
 
 /**
@@ -208,7 +269,7 @@ export function createModelSwitch(options = {}) {
   async function probeRamMb() {
     const pid = await portPid();
     if (pid === null) return null;
-    return ramOfPid(pid, execImpl);
+    return residentTreeMb(pid, execImpl);
   }
 
   /** Stop whatever llama-server holds the port — ours or the drive launcher's. */

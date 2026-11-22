@@ -16,19 +16,18 @@ import {
   type ViewStyle,
 } from "react-native";
 import {
+  chatTarget,
   chooseRoute,
   deepseekIsPeak,
   LOCAL_TIMEOUT_MS,
   estimatePaidCost,
-  modelId,
   paidButton,
-  partnerFromTurns,
-  resolveChatBase,
   splitPaidHint,
   streamReply,
   toModelMessages,
   type ChatMessage,
 } from "../../../../packages/alive/src/chatTurn.ts";
+import { partnerFromProgress } from "../../../../packages/alive/src/rpgLevel.ts";
 import type { MicPhase } from "../../../../packages/alive/src/speech.ts";
 import { currentBrainUrl, readBrainHost } from "../room/brain/brainLink";
 import { brainFetch, isUnauthorized, pairWithCode, readToken } from "../room/brain/token";
@@ -75,6 +74,8 @@ import {
 } from "../voice/tapToTalk";
 import { patchVoiceSettings, readVoiceSettings, type VoiceSettings } from "../voice/voiceSettings";
 import { PreyasHeroSwitch } from "../today/PreyasHeroSwitch";
+import { useRpg } from "../today/useRpg";
+import { clearFlight, mergeFlightReply, peekFlight, publishFlight, subscribeFlight } from "./chatFlight";
 import { tabById, type Section } from "../nav";
 import { chatColumn, isPhone, isWide, pageColumn, pageGridColumns, SETTINGS_PROBE_MS } from "../layout";
 import { useArt } from "../art/slots.ts";
@@ -312,7 +313,6 @@ export function ChatScreen({
   const [draft, setDraft] = useState("");
   const [phase, setPhase] = useState<MicPhase>("listening");
   const [paid, setPaid] = useState<PaidInfo>({ available: false, offPeakOnly: false, reason: "Paid model off" });
-  const [via, setVia] = useState<"gateway" | "proxy">("proxy");
   const [escalate, setEscalate] = useState(false);
   const [hintPaid, setHintPaid] = useState(false);
   const [note, setNote] = useState("");
@@ -323,7 +323,14 @@ export function ChatScreen({
   /** True while the thread is parked at the newest message. */
   const pinned = useRef(true);
   const [jumpVisible, setJumpVisible] = useState(false);
-  const [partner, setPartner] = useState<PartnerCard>(partnerFromTurns(0));
+  const { snapshot: life } = useRpg();
+  const partner: PartnerCard = partnerFromProgress({
+    level: life.level,
+    into: life.levelInto,
+    need: life.levelNeed,
+    rankName: life.rank.name,
+    totalXp: life.totalXp,
+  });
   const [chats, setChats] = useState<ChatMeta[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const activeIdRef = useRef<string | null>(null);
@@ -425,12 +432,22 @@ export function ChatScreen({
       };
       if (cancelled?.()) return false;
       summaryRef.current = body.summary || "";
-      if (body.partner) setPartner(body.partner);
-      const restored = toShown(body.messages || []);
+      const pending = peekFlight(id);
+      let restored = toShown(body.messages || []);
+      let restoredError = "";
+      if (pending?.reply) {
+        const merged = mergeFlightReply(restored, pending.reply as Shown | null);
+        if (merged.length === restored.length) clearFlight(id);
+        else restoredError = pending.error;
+        restored = merged;
+      } else if (pending?.error) {
+        restoredError = pending.error;
+        clearFlight(id);
+      }
       messagesRef.current = restored;
       setMessages(restored);
       setLive(null);
-      setNote("");
+      setNote(restoredError);
       setOpenThink({});
       pinned.current = true;
       setJumpVisible(false);
@@ -1693,9 +1710,7 @@ export function ChatScreen({
       const brain = saved || currentBrainUrl();
       bag.brainUrl = brain.replace(/\/$/, "");
       setBrainReady(Boolean(bag.brainUrl));
-      const endpoint = await resolveChatBase(bag.brainUrl);
       if (cancel) return;
-      setVia(endpoint.via);
       void coach.refresh();
       try {
         const res = await brainFetch(`${bag.brainUrl}/v1/chats`);
@@ -1802,7 +1817,21 @@ export function ChatScreen({
       cancel = true;
       clearInterval(id);
     };
-  }, [bag, via]);
+  }, [bag]);
+  // A reply that finishes after this screen was hidden still belongs in the thread.
+  useEffect(() => {
+    return subscribeFlight((outcome) => {
+      if (outcome.chatId !== activeIdRef.current) return;
+      if (outcome.reply) {
+        const merged = mergeFlightReply(messagesRef.current, outcome.reply as Shown | null);
+        if (merged.length !== messagesRef.current.length) {
+          messagesRef.current = merged;
+          setMessages(merged);
+        }
+      }
+      if (outcome.error) setNote(outcome.error);
+    });
+  }, []);
   // New turns follow the newest bubble only while the thread is parked at the bottom.
   useEffect(() => {
     if (pinned.current) logRef.current?.scrollToEnd({ animated: true });
@@ -1887,10 +1916,11 @@ export function ChatScreen({
     think = false,
     runId = "",
   ) {
-    const endpoint = await resolveChatBase(bag.brainUrl);
-    if (isCurrent()) setVia(endpoint.via);
-    const model = modelId(route, endpoint.via);
-    const base = route === "paid" && endpoint.via === "proxy" ? bag.brainUrl : endpoint.base;
+    // Local and paid both talk to the brain. The gateway forwards without the
+    // pairing token, so a direct :4000 call comes back 401.
+    const target = chatTarget(route, bag.brainUrl);
+    const model = target.model;
+    const base = target.base;
     let last = "";
     let lastThink = "";
     let spoke = false;
@@ -1946,7 +1976,7 @@ export function ChatScreen({
       thinking: result.thinking || lastThink,
       suggestPaid: parsed.suggestPaid,
       model,
-      endpoint,
+      endpoint: { base, via: "proxy" as const },
     };
   }
   async function send(text: string, askPaid: boolean) {
@@ -2027,7 +2057,6 @@ export function ChatScreen({
     if (!duplicate) {
       messagesRef.current = [...existing, userMsg];
       setMessages(messagesRef.current);
-      setPartner(partnerFromTurns(messagesRef.current.filter((row) => row.who === "user").length));
       void remember(userMsg, chatId);
     }
     if (isCurrent()) setNote("");
@@ -2073,15 +2102,23 @@ export function ChatScreen({
             thinking: local.thinking || undefined,
             sources: sources.length ? sources : undefined,
           };
+          publishFlight({ chatId, reply, error: "" });
           void remember(reply, chatId);
           if (isCurrent()) {
-            messagesRef.current = [...messagesRef.current, reply];
+            messagesRef.current = mergeFlightReply(messagesRef.current, reply);
             setMessages(messagesRef.current);
           }
           scheduleNotesCheck();
           return;
         }
-        if (!isCurrent()) return;
+        if (!isCurrent()) {
+          publishFlight({
+            chatId,
+            reply: null,
+            error: local.error === SWITCHING_CHAT_MESSAGE ? SWITCHING_CHAT_MESSAGE : "Preyas didn't answer. You can ask a paid model if it's on.",
+          });
+          return;
+        }
         route = chooseRoute({
           askPaid: false,
           localFailed: true,
@@ -2103,30 +2140,34 @@ export function ChatScreen({
               runId,
               sources,
             };
+            const offlineNote =
+              local.error === SWITCHING_CHAT_MESSAGE
+                ? SWITCHING_CHAT_MESSAGE
+                : "Preyas didn't finish answering, but offline sources are above.";
+            publishFlight({ chatId, reply, error: offlineNote });
             void remember(reply, chatId);
             if (isCurrent()) {
-              messagesRef.current = [...messagesRef.current, reply];
+              messagesRef.current = mergeFlightReply(messagesRef.current, reply);
               setMessages(messagesRef.current);
-              setNote(
-                local.error === SWITCHING_CHAT_MESSAGE
-                  ? SWITCHING_CHAT_MESSAGE
-                  : "Preyas didn't finish answering, but offline sources are above.",
-              );
+              setNote(offlineNote);
             }
             return;
           }
-          setNote(
+          const missed =
             local.error === SWITCHING_CHAT_MESSAGE
               ? SWITCHING_CHAT_MESSAGE
-              : "Preyas didn't answer. You can ask a paid model if it's on.",
-          );
+              : "Preyas didn't answer. You can ask a paid model if it's on.";
+          publishFlight({ chatId, reply: null, error: missed });
+          setNote(missed);
           return;
         }
       }
       if (route.route !== "paid") return;
       const paidReply = await ask("paid", history, trimmed, isCurrent, [], "", false, runId);
       if (!paidReply.ok) {
-        if (isCurrent()) setNote(paidReply.error || "The paid model didn't answer.");
+        const missed = paidReply.error || "The paid model didn't answer.";
+        publishFlight({ chatId, reply: null, error: missed });
+        if (isCurrent()) setNote(missed);
         return;
       }
       const cost = estimatePaidCost(paidReply.usage, deepseekIsPeak(new Date()));
@@ -2140,9 +2181,10 @@ export function ChatScreen({
         runId,
         thinking: paidReply.thinking || undefined,
       };
+      publishFlight({ chatId, reply: paidMsg, error: "" });
       void remember(paidMsg, chatId);
       if (isCurrent()) {
-        messagesRef.current = [...messagesRef.current, paidMsg];
+        messagesRef.current = mergeFlightReply(messagesRef.current, paidMsg);
         setMessages(messagesRef.current);
       }
       scheduleNotesCheck();
@@ -2168,9 +2210,10 @@ export function ChatScreen({
           runId,
           thinking: reaction.thinking || undefined,
         };
+        publishFlight({ chatId, reply, error: "" });
         void remember(reply, chatId);
         if (isCurrent()) {
-          messagesRef.current = [...messagesRef.current, reply];
+          messagesRef.current = mergeFlightReply(messagesRef.current, reply);
           setMessages(messagesRef.current);
         }
         scheduleNotesCheck();
@@ -3546,7 +3589,7 @@ export function ChatScreen({
                 </View>
                 <Text style={styles.caption}>{partner.caption}</Text>
               </View>
-              <Text style={styles.dim}>{via === "gateway" ? "Talking through the gateway." : "Talking to the local brain."}</Text>
+              <Text style={styles.dim}>Talking to the local brain.</Text>
             </ScrollView>
           </View>
         </View>

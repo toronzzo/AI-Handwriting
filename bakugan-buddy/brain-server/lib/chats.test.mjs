@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { appendEvent } from "./os/events.mjs";
+import { partnerFromAreas } from "../../packages/alive/src/rpgLevel.ts";
 import {
   FIRST_CHAT_TITLE,
   NEW_CHAT_TITLE,
@@ -15,6 +17,7 @@ import {
   createChat,
   dayFromContent,
   deleteChat,
+  drivePartner,
   indexPath,
   listChats,
   migrateLegacy,
@@ -304,5 +307,34 @@ test("the one-time cleanup keeps the newest message per day and writes a .bak co
 
   // Nothing left to drop: no second copy.
   assert.deepEqual(collapseBriefingChat(root, chat.id, 888), { removed: 0, backup: "" });
+  done();
+});
+
+test("level and bond are one Preyas, shared by every chat and the life log", () => {
+  const { root, done } = drive();
+  const quiet = createChat(root, "hi");
+  const busy = createChat(root, "long");
+  appendMessage(root, quiet.id, { role: "user", who: "user", content: "hi" });
+  for (let i = 0; i < 14; i += 1) {
+    appendMessage(root, busy.id, { role: "user", who: "user", content: `turn ${i}` });
+  }
+  appendEvent(root, {
+    v: 1,
+    id: "evt_level",
+    ts: Date.UTC(2026, 10, 22, 12, 0, 0),
+    day: "2026-11-22",
+    type: "focus",
+    data: { minutes: 1000, area: "intel" },
+    src: "tool",
+    raw: "",
+    parser: "p1",
+  });
+  const partner = drivePartner(root);
+  assert.equal(partner.level, 2, "200 XP from the life log is level 2, the Today number");
+  assert.deepEqual(readChat(root, quiet.id).partner, partner);
+  assert.deepEqual(readChat(root, busy.id).partner, partner);
+  assert.deepEqual(partner, partnerFromAreas(partner.turns));
+  assert.notEqual(partner.bond, 4, "one turn in the open chat is not the bond");
+  assert.notEqual(partner.bond, 56, "fourteen turns in another chat are not the bond");
   done();
 });
