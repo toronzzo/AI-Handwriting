@@ -53,8 +53,24 @@ for (const [label, palette] of [
   });
 }
 
+const SKY = ["bg", "skyTop", "skyMid", "skyBottom"] as const;
+
+for (const [label, palette] of [
+  ["day", DAY],
+  ["night", NIGHT],
+] as const) {
+  for (const colour of ["onSky", "onSkyMuted"] as const) {
+    for (const sky of SKY) {
+      test(`${label}: ${colour} on ${sky} meets WCAG AA`, () => {
+        const ratio = contrast(palette[colour], palette[sky]);
+        assert.ok(ratio >= 4.5, `expected >= 4.5, got ${ratio.toFixed(3)}`);
+      });
+    }
+  }
+}
+
 /** Every palette key that the contrast tests rely on is a hex colour. */
-const HEX_COLOURS = ["text", "dim", "faint", "accentText", "accent", "onAccent", "card", "cardSoft", "note"] as const;
+const HEX_COLOURS = ["text", "dim", "faint", "accentText", "accent", "onAccent", "card", "cardSoft", "note", "onSky", "onSkyMuted", "bg", "skyTop", "skyMid", "skyBottom"] as const;
 
 test("contrast-checked colours are plain hex", () => {
   for (const palette of [DAY, NIGHT]) {

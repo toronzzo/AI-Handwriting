@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.64,
     color: theme.text,
   },
-  brandNote: { color: theme.dim, fontSize: theme.type.caption, fontWeight: "600" },
+  brandNote: { color: theme.onSkyMuted, fontSize: theme.type.caption, fontWeight: "600" },
 
   row: { flexDirection: "row", alignItems: "flex-start", gap: 20 },
   stacked: { gap: 20 },

@@ -42,3 +42,33 @@ test("every page cap comes from one helper, not a literal per screen", () => {
   assert.equal(/maxWidth:\s*9\d\d/.test(memory), false, "no loose 900 in the Memory section");
   assert.match(SCREEN, /const page = pageColumn\(width\)/);
 });
+
+test("Learn, Memory and Settings titles use the sky text token", () => {
+  for (const heading of ["Learn", "Memory", "Settings"]) {
+    assert.match(SCREEN, new RegExp(`styles\\.skyTitle[^>]*>${heading}<`), `${heading} sits on the sky`);
+  }
+  assert.match(SCREEN, /skyTitle:[\s\S]*color: theme\.onSky/);
+  assert.match(SCREEN, /skyNote:[\s\S]*color: theme\.onSkyMuted/);
+  assert.match(SCREEN, /searchInput:[\s\S]*backgroundColor: theme\.card/);
+  assert.match(SCREEN, /filterChipOn:[\s\S]*backgroundColor: theme\.accent/);
+});
+
+test("Settings no longer renders the old STATUS block", () => {
+  const start = SCREEN.indexOf('section === "settings"');
+  assert.ok(start > 0);
+  const settings = SCREEN.slice(start, start + 1800);
+  assert.equal(settings.includes(">STATUS<"), false);
+  assert.equal(settings.includes("health.parts"), false);
+});
+
+test("the room hides host and movement controls behind the dev switch", () => {
+  const room = readFileSync(join(process.cwd(), "src/room/RoomScreen.tsx"), "utf8");
+  assert.match(room, /useState\(false\)/);
+  assert.equal(/__DEV__/.test(room), false, "Metro's __DEV__ flag must not reveal the controls");
+  const host = room.indexOf("Mac :8788 or LiteLLM :4000");
+  const gate = room.lastIndexOf("devControls ?", host);
+  assert.ok(gate > 0 && gate < host, "the host field is inside the dev controls branch");
+  const pads = room.indexOf('["left", -1, 0]');
+  const padsGate = room.lastIndexOf("devControls &&", pads);
+  assert.ok(padsGate > 0 && padsGate < pads, "movement pads are inside the dev controls branch");
+});
