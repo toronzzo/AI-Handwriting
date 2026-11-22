@@ -141,7 +141,8 @@ export async function llamaServerRamMb(execImpl = execFile, port = LLAMA_PORT, p
  */
 export const TIERS = {
   tiny: { id: "tiny", file: "Qwen3.5-0.8B-Q4_K_M.gguf", context: 16384, weightsGb: 0.6, ngl: 99 },
-  small: { id: "small", file: "Huihui-Qwen3-8B-abliterated-v2.Q4_K_M.gguf", context: 16384, weightsGb: 5.0, ngl: 99 },
+  // 8K, not 16K: at 16K the 8B ran out of memory on the 16 GB Mac and exited.
+  small: { id: "small", file: "Huihui-Qwen3-8B-abliterated-v2.Q4_K_M.gguf", context: 8192, weightsGb: 5.0, ngl: 99 },
   big: { id: "big", file: "Huihui-Qwen3-14B-abliterated-v2.Q4_K_M.gguf", context: 16384, weightsGb: 9.0, ngl: 99 },
   huge: { id: "huge", file: "Qwen3-30B-A3B.Q3_K_M.gguf", context: 8192, weightsGb: 14.7, ngl: 24 },
 };
@@ -170,6 +171,23 @@ export function freeMemoryGb(execImpl = execFile) {
       resolve(Math.round((((free + speculative + purgeable + inactive) * pageSize) / 1e9) * 10) / 10);
     });
   });
+}
+
+/** Head room on top of the weights for the KV cache, Metal buffers and the app. */
+export const LOAD_HEADROOM_GB = 1.0;
+
+/**
+ * True when a big or huge model clearly cannot fit in the memory that is free
+ * right now. Saying Yes on the memory card does not override this: loading
+ * anyway crashed llama-server and left Preyas with no model at all. Small and
+ * tiny are never refused (they are the rollback), and an unreadable free
+ * figure (null) is not a refusal.
+ */
+export function tooBigForMemory(target, freeGb) {
+  if (target !== "big" && target !== "huge") return false;
+  const tier = TIERS[target];
+  if (!tier || typeof freeGb !== "number" || !Number.isFinite(freeGb)) return false;
+  return freeGb < tier.weightsGb + LOAD_HEADROOM_GB;
 }
 
 export function createModelSwitch(options = {}) {
@@ -443,6 +461,18 @@ export function createModelSwitch(options = {}) {
       return { ok: true, unchanged: true, current, status };
     }
     lastFreeGb = await probeFree().catch(() => null);
+    if (opts.rollback !== true && tooBigForMemory(target, lastFreeGb)) {
+      const needGb = Math.ceil(TIERS[target].weightsGb + LOAD_HEADROOM_GB);
+      return {
+        ok: false,
+        notEnoughMemory: true,
+        error: `Not enough free memory for ${target}: it needs about ${needGb} GB and ${lastFreeGb} GB is free. Staying on ${current}.`,
+        target,
+        freeGb: lastFreeGb,
+        current,
+        status,
+      };
+    }
     if (!confirmed && switchNeedsConfirm(target, lastFreeGb)) {
       return { ok: false, needsConfirm: true, target, freeGb: lastFreeGb, current, status };
     }

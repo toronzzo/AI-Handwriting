@@ -513,7 +513,9 @@ launch_service() {
 
   case "$name" in
     llama)
-      "$LLAMA_LAUNCHER" start >>"$logfile" 2>&1 </dev/null
+      # 8K context: at the launcher's old 16K default the 8B ran out of memory
+      # on a 16 GB Mac. PREYAS_LLAMA_CTX overrides it.
+      "$LLAMA_LAUNCHER" start "${PREYAS_LLAMA_CTX:-8192}" >>"$logfile" 2>&1 </dev/null
       local llama_pidfile="$AGENT_DIR/logs/local-llm.pid"
       if [[ -f "$llama_pidfile" ]]; then
         cat "$llama_pidfile" >"$file" 2>/dev/null || true
