@@ -8,8 +8,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { CONNECT_TIMEOUT_MS } from "./netTimeout.mjs";
 import {
   explicitWhisperModel,
+  transcribeFile,
   voicePythonFor,
   whisperBinFor,
   WHISPER_FALLBACK,
@@ -95,6 +97,46 @@ test("the mic finds whisper-cli on the drive when WHISPER_BIN is unset", () => {
   assert.equal(whisperBinFor({ BAKUGAN_DATA_DIR: root }, (file) => file === onDrive), onDrive);
   assert.equal(whisperBinFor({ BAKUGAN_DATA_DIR: root }, () => false), "whisper-cli");
   assert.equal(whisperBinFor({ BAKUGAN_DATA_DIR: root, WHISPER_BIN: "/x/whisper" }, () => true), "/x/whisper");
+});
+
+test("a sleeping whisper host is abandoned before the request, within the connect budget", async () => {
+  let fetched = false;
+  let timeoutMs = 0;
+  const heard = await transcribeFile(
+    "/tmp/does-not-need-to-exist.wav",
+    { WHISPER_URL: "http://192.168.31.88:8178" },
+    {
+      connect: async (url, ms) => {
+        timeoutMs = ms;
+        assert.match(String(url), /192\.168\.31\.88:8178\/inference$/);
+        return false;
+      },
+      fetchImpl: async () => {
+        fetched = true;
+        throw new Error("should not be called");
+      },
+    },
+  );
+  assert.equal(heard, null);
+  assert.equal(fetched, false);
+  assert.equal(timeoutMs, CONNECT_TIMEOUT_MS);
+});
+
+test("a reachable whisper server's text is used and the local CLI is not required", async () => {
+  const wav = path.join(os.tmpdir(), `preyas-wav-${process.pid}.wav`);
+  fs.writeFileSync(wav, "not really a wav");
+  try {
+    const heard = await transcribeFile(wav, { WHISPER_URL: "http://192.168.31.88:8178/" }, {
+      connect: async () => true,
+      fetchImpl: async (url) => {
+        assert.match(String(url), /\/inference$/);
+        return { ok: true, json: async () => ({ text: "  privet  ", language: "ru" }) };
+      },
+    });
+    assert.deepEqual(heard, { text: "privet", language: "ru" });
+  } finally {
+    fs.rmSync(wav, { force: true });
+  }
 });
 
 test("the voice finds the drive's tts venv when PIPER_PYTHON is unset", () => {

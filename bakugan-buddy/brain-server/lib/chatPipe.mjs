@@ -14,9 +14,25 @@
  * Kept out of proxy.mjs so the wire behaviour is testable with a fake
  * upstream and a fake response.
  */
+import { BACKUP_BRAIN, BACKUP_SOURCE } from "./llamaFallback.mjs";
 import { paidCostUsd, parseJsonUsage, parseSseUsage, tokensPerSec } from "./os/brainUsage.mjs";
 
 export const CHAT_PROXY_TIMEOUT_MS = Number(process.env.BRAIN_UPSTREAM_TIMEOUT_MS || 90_000);
+/** Response header the app reads to label a backup-brain reply. Value is "backup". */
+export const BRAIN_SOURCE_HEADER = "X-Preyas-Brain";
+
+function pipeResult(fields = {}) {
+  return {
+    ok: fields.ok === true,
+    wrote: fields.wrote === true,
+    timedOut: fields.timedOut === true,
+    clientClosed: fields.clientClosed === true,
+  };
+}
+
+function backupDetail(events) {
+  return events && events.brainSource === BACKUP_SOURCE ? BACKUP_BRAIN : null;
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -130,7 +146,9 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
   const finishEvents = async (ok) => {
     if (!events) return;
     if (!ok) {
-      brainOut({ state: "error", detail: `upstream answered ${upstream ? upstream.status : "?"}` });
+      const why = `upstream answered ${upstream ? upstream.status : "?"}`;
+      const sourceDetail = backupDetail(events);
+      brainOut({ state: "error", detail: sourceDetail ? `${sourceDetail}: ${why}` : why });
       return;
     }
     const text = Buffer.concat(chunks).toString("utf8");
@@ -159,7 +177,7 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
         /* the idle window is a nicety */
       }
     }
-    brainOut({ state: "done", ...stats, ramMb });
+    brainOut({ state: "done", ...stats, ramMb, detail: backupDetail(events) });
   };
   const timer = setTimeout(() => {
     timedOut = true;
@@ -181,15 +199,33 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
         signal: controller.signal,
       });
     } catch {
-      if (clientClosed) return;
-      brainOut({ state: "error", detail: timedOut ? "model timed out" : downError });
-      sendJson(res, timedOut ? 504 : 503, { error: timedOut ? "model timed out" : downError });
-      return;
+      if (clientClosed) return pipeResult({ clientClosed: true, timedOut });
+      // The caller can retry a backup brain only when the client has seen nothing.
+      if (events && events.deferError) return pipeResult({ timedOut });
+      const failDetail = timedOut ? "model timed out" : downError;
+      const sourceDetail = backupDetail(events);
+      brainOut({ state: "error", detail: sourceDetail ? `${sourceDetail}: ${failDetail}` : failDetail });
+      sendJson(res, timedOut ? 504 : 503, { error: failDetail });
+      return pipeResult({ wrote: true, timedOut });
     }
-    res.writeHead(upstream.status, {
+    if (!upstream.ok && events && events.deferError && !clientClosed) {
+      try {
+        if (upstream.body && typeof upstream.body.cancel === "function") await upstream.body.cancel();
+      } catch {
+        /* the failed local body is discarded so the backup can answer */
+      }
+      return pipeResult({});
+    }
+    const sourceDetail = backupDetail(events);
+    const headers = {
       "Content-Type": upstream.headers.get("content-type") || (streamed ? "text/event-stream" : "application/json"),
       "Cache-Control": "no-cache",
-    });
+    };
+    if (sourceDetail) {
+      headers[BRAIN_SOURCE_HEADER] = BACKUP_SOURCE;
+      brainOut({ state: "thinking", detail: sourceDetail });
+    }
+    res.writeHead(upstream.status, headers);
     writeStreamIntro();
     if (!upstream.body) {
       let text = await upstream.text();
@@ -207,7 +243,7 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
       await finishEvents(upstream.ok);
       deliverIntro();
       res.end(text);
-      return;
+      return pipeResult({ ok: upstream.ok, wrote: true, clientClosed });
     }
     const reader = upstream.body.getReader();
     for (;;) {
@@ -222,16 +258,22 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
     if (clientClosed) {
       brainOut({ state: "off", detail: "stopped: the client left" });
       deliverIntro();
-    } else {
-      await finishEvents(upstream.ok);
-      deliverIntro();
-      res.end();
+      return pipeResult({ wrote: true, clientClosed: true, timedOut });
     }
+    await finishEvents(upstream.ok);
+    deliverIntro();
+    res.end();
+    return pipeResult({ ok: upstream.ok, wrote: true, timedOut });
   } catch {
     if (!clientClosed && !res.writableEnded) {
-      if (!res.headersSent) sendJson(res, timedOut ? 504 : 503, { error: timedOut ? "model timed out" : downError });
-      else res.end();
+      if (!res.headersSent) {
+        if (events && events.deferError) return pipeResult({ timedOut });
+        sendJson(res, timedOut ? 504 : 503, { error: timedOut ? "model timed out" : downError });
+        return pipeResult({ wrote: true, timedOut });
+      }
+      res.end();
     }
+    return pipeResult({ wrote: res.headersSent === true, timedOut, clientClosed });
   } finally {
     clearTimeout(timer);
     res.off("close", onClose);

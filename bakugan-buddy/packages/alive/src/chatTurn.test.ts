@@ -11,6 +11,7 @@ import {
   estimateTokens,
   paidButton,
   parseSseBlock,
+  replySourceLabel,
   stripThinking,
   visibleReply,
   partnerFromTurns,
@@ -167,4 +168,31 @@ test("streamReply surfaces the brain's refusal text instead of a bare status", a
   });
   assert.equal(fallback.ok, false);
   assert.equal(fallback.error, "status 502", "a non-JSON failure keeps the status text");
+  assert.equal(fallback.brain, "");
+});
+
+test("streamReply marks a backup-brain reply from the response header", async () => {
+  const fetchImpl = (async () =>
+    new Response('data: {"choices":[{"delta":{"content":"hi from the laptop"}}]}\n\n', {
+      status: 200,
+      headers: { "content-type": "text/event-stream", "x-preyas-brain": "backup" },
+    })) as unknown as typeof fetch;
+  let seen = "";
+  const result = await streamReply({
+    base: "http://127.0.0.1:8788",
+    model: "preyas",
+    messages: [{ role: "user", content: "hi" }],
+    fetchImpl,
+    onBrain: (brain) => {
+      seen = brain;
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "hi from the laptop");
+  assert.equal(result.brain, "backup");
+  assert.equal(seen, "backup");
+  assert.equal(replySourceLabel("preyas", "backup"), "Preyas · backup brain");
+  assert.equal(replySourceLabel("preyas", ""), "Preyas");
+  assert.equal(replySourceLabel("paid"), "deepseek-flash");
+  assert.equal(replySourceLabel("user"), "You");
 });

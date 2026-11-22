@@ -113,6 +113,7 @@ import {
 import { handleOsRoute } from "./lib/os/routes.mjs";
 import { sharedBrain } from "./lib/os/neurons.mjs";
 import { CHAT_PROXY_TIMEOUT_MS, pipeChatCompletion } from "./lib/chatPipe.mjs";
+import { createLlamaRouter } from "./lib/llamaFallback.mjs";
 import { ART_WRITE_DIR, MAX_ART_BYTES, findArt, isSlot, saveArt } from "./lib/art.mjs";
 import { resolveSafePath } from "./lib/safeFs.mjs";
 import { createActivityHub } from "./lib/activity.mjs";
@@ -126,6 +127,8 @@ import { fileURLToPath } from "node:url";
 import os from "node:os";
 
 const llamaUrl = (process.env.LLAMA_URL || `http://127.0.0.1:${LLAMA_PORT}`).replace(/\/$/, "");
+/** Optional Windows llama.cpp. With LLAMA_FALLBACK_URL unset this never probes. */
+const llamaRouter = createLlamaRouter();
 const port = Number(process.env.BRAIN_PORT || 8788);
 const host = process.env.BRAIN_HOST || "0.0.0.0";
 const dataDir = process.env.BAKUGAN_DATA_DIR || "";
@@ -2086,10 +2089,6 @@ const server = http.createServer(async (req, res) => {
       // A local route never reaches the gateway: small, big and huge all go
       // straight to llama. Only a real local-model reply resets the idle
       // auto-return window — paid replies and unanswered calls never do.
-      const target =
-        model === "paid"
-          ? "http://127.0.0.1:4000/v1/chat/completions"
-          : `${llamaUrl}/v1/chat/completions`;
       // The brain sees the chat neuron that serves this call: the live tier
       // for local routes, hands (the paid gateway) for paid ones.
       const paid = model === "paid";
@@ -2100,28 +2099,68 @@ const server = http.createServer(async (req, res) => {
         detail: paid ? "DeepSeek Flash via gateway" : null,
       });
       const ramPromise = paid ? null : llamaServerRamMb().catch(() => null);
+      const chatEvents = {
+        neuron,
+        paid,
+        local: !paid,
+        ramPromise,
+        introPrefix: news,
+        onIntroDelivered: () => {
+          newsDelivered = true;
+          selfKnowledge.commitNews();
+        },
+        onAnswered: () => modelSwitch.touchLocal(model),
+      };
       try {
-        await pipeChatCompletion(
-          brain,
-          req,
-          res,
-          target,
-          bodyWithKnowledge,
-          model === "paid" ? "paid gateway is down" : "llama is down",
-          model === "paid" ? CHAT_PROXY_TIMEOUT_MS : modelSwitch.chatTimeoutMs(),
-          {
-            neuron,
-            paid,
-            local: !paid,
-            ramPromise,
-            introPrefix: news,
-            onIntroDelivered: () => {
-              newsDelivered = true;
-              selfKnowledge.commitNews();
-            },
-            onAnswered: () => modelSwitch.touchLocal(model),
-          },
-        );
+        if (paid) {
+          await pipeChatCompletion(
+            brain,
+            req,
+            res,
+            "http://127.0.0.1:4000/v1/chat/completions",
+            bodyWithKnowledge,
+            "paid gateway is down",
+            CHAT_PROXY_TIMEOUT_MS,
+            chatEvents,
+          );
+        } else {
+          // Local llama, then at most one try on LLAMA_FALLBACK_URL. Unset
+          // means the router never probes and this is the old single call.
+          const outcome = await llamaRouter.run(async (url, source) => {
+            const fallback = Boolean(String(process.env.LLAMA_FALLBACK_URL || "").trim());
+            return pipeChatCompletion(
+              brain,
+              req,
+              res,
+              `${url}/v1/chat/completions`,
+              bodyWithKnowledge,
+              "llama is down",
+              modelSwitch.chatTimeoutMs(),
+              {
+                ...chatEvents,
+                local: source !== "backup",
+                ramPromise: source === "backup" ? null : ramPromise,
+                brainSource: source,
+                deferError: fallback && source !== "backup",
+                onAnswered: () => {
+                  if (source !== "backup") modelSwitch.touchLocal(model);
+                },
+              },
+            );
+          });
+          if (
+            outcome &&
+            !outcome.ok &&
+            !outcome.wrote &&
+            !outcome.clientClosed &&
+            !res.headersSent &&
+            !res.writableEnded
+          ) {
+            sendJson(res, outcome.timedOut ? 504 : 503, {
+              error: outcome.timedOut ? "model timed out" : "llama is down",
+            });
+          }
+        }
       } finally {
         if (news && !newsDelivered) selfKnowledge.cancelNews();
       }

@@ -22,6 +22,7 @@ import {
   LOCAL_TIMEOUT_MS,
   estimatePaidCost,
   paidButton,
+  replySourceLabel,
   splitPaidHint,
   streamReply,
   toModelMessages,
@@ -117,6 +118,8 @@ type Shown = ChatMessage & {
   sources?: SearchResult[];
   document?: { name: string; summary?: string; points?: { text: string; kind: NoteKind }[] };
   briefingDay?: string;
+  /** Set when the Windows backup brain wrote this reply. */
+  brain?: "backup";
 };
 type Briefing = { day: string; opening: string; items: string[]; empty: boolean };
 type InboxFile = { name: string; size: number; type: string; modified: number };
@@ -155,7 +158,7 @@ type ChatDialog =
   | { kind: "taskConfirm"; taskId: string; stepId: number; token: string; title: string; body: string }
   | { kind: "deleteDeck"; id: string; title: string }
   | { kind: "model"; target: "big" | "huge"; freeGb: number | null };
-type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string; briefingDay?: string };
+type StoredRow = { t?: number; role?: string; content?: string; who?: string; model?: string; costUsd?: number | null; thinking?: string; briefingDay?: string; brain?: string };
 /** "Briefing 2026-11-07" is how an old briefing message started. */
 function briefingDayOf(row: StoredRow): string {
   if (row.briefingDay) return row.briefingDay;
@@ -199,6 +202,7 @@ function toShown(rows: StoredRow[]): Shown[] {
     costUsd: row.costUsd,
     thinking: typeof row.thinking === "string" ? row.thinking : undefined,
     briefingDay: briefingDayOf(row) || undefined,
+    brain: row.brain === "backup" ? "backup" : undefined,
   }));
 }
 function dayLabel(t: number): string {
@@ -322,7 +326,7 @@ export function ChatScreen({
   const [escalate, setEscalate] = useState(false);
   const [hintPaid, setHintPaid] = useState(false);
   const [note, setNote] = useState("");
-  const [live, setLive] = useState<{ who: "preyas" | "paid"; text: string } | null>(null);
+  const [live, setLive] = useState<{ who: "preyas" | "paid"; text: string; brain?: "backup" } | null>(null);
   const [openThink, setOpenThink] = useState<Record<number, boolean>>({});
   const [online, setOnline] = useState(false);
   const logRef = useRef<ScrollViewInstance>(null);
@@ -1937,6 +1941,7 @@ export function ChatScreen({
     let last = "";
     let lastThink = "";
     let spoke = false;
+    let sawBackup = false;
     let thinkStarted = 0;
     let thinkStep = "";
     const result = await streamReply({
@@ -1956,6 +1961,9 @@ export function ChatScreen({
               : modelStatus?.current === "big"
                 ? 120_000
                 : LOCAL_TIMEOUT_MS,
+      onBrain: (source) => {
+        if (source === "backup") sawBackup = true;
+      },
       onDelta: (update) => {
         const shown = splitPaidHint(update.answer).text;
         last = shown;
@@ -1972,7 +1980,7 @@ export function ChatScreen({
           thinkStep = "";
         }
         if (!isCurrent()) return;
-        setLive(shown ? { who: route === "paid" ? "paid" : "preyas", text: shown } : null);
+        setLive(shown ? { who: route === "paid" ? "paid" : "preyas", text: shown, brain: sawBackup ? "backup" : undefined } : null);
         if (route === "local" && shown) {
           void speakPreyas(shown, false, !spoke);
           spoke = true;
@@ -1983,12 +1991,15 @@ export function ChatScreen({
     if (isCurrent()) setLive(null);
     const parsed = splitPaidHint(result.text || last);
     if (isCurrent() && route === "local" && parsed.text) void speakPreyas(parsed.text, true, !spoke);
+    const { brain: headerBrain, ...rest } = result;
+    const brain: "backup" | undefined = headerBrain === "backup" || sawBackup ? "backup" : undefined;
     return {
-      ...result,
+      ...rest,
       text: parsed.text,
       thinking: result.thinking || lastThink,
       suggestPaid: parsed.suggestPaid,
       model,
+      brain,
       endpoint: { base, via: "proxy" as const },
     };
   }
@@ -2114,6 +2125,7 @@ export function ChatScreen({
             runId,
             thinking: local.thinking || undefined,
             sources: sources.length ? sources : undefined,
+            brain: local.brain === "backup" ? "backup" : undefined,
           };
           publishFlight({ chatId, reply, error: "" });
           void remember(reply, chatId);
@@ -3091,7 +3103,7 @@ export function ChatScreen({
               {messages.map((message, index) => {
                 const mine = message.who === "user";
                 const read = mine && messages.slice(index + 1).some((row) => row.who !== "user");
-                const label = message.who === "paid" ? "deepseek-flash" : message.who === "preyas" ? "Preyas" : "You";
+                const label = replySourceLabel(message.who, message.brain);
                 // Skip history rows that duplicate today's "Your day" card.
                 if (
                   message.briefingDay &&
@@ -3191,7 +3203,7 @@ export function ChatScreen({
                 <View style={[styles.bubbleWrap, styles.bubbleLeft]}>
                   <View style={styles.miniBall} />
                   <View style={[styles.bubble, styles.bubbleHis]}>
-                    <Text style={styles.bubbleWho}>{live.who === "paid" ? "deepseek-flash" : "Preyas"}</Text>
+                    <Text style={styles.bubbleWho}>{replySourceLabel(live.who, live.brain)}</Text>
                     <EmojiText style={styles.bubbleText}>{live.text}</EmojiText>
                   </View>
                 </View>

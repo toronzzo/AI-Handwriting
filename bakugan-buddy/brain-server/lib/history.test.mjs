@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { appendHistory, mergeHistoryFiles, paidAvailability, readHistory } from "./history.mjs";
+import { appendHistory, mergeHistoryFiles, normalizeEntry, paidAvailability, readHistory } from "./history.mjs";
 
 test("history on the drive keeps every turn and a short summary", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "preyas-chat-"));
@@ -49,4 +49,17 @@ test("a missing or placeholder DeepSeek key stays unavailable and the key is not
   const real = paidAvailability("DEEPSEEK_API_KEY=sk-test-secret\n");
   assert.equal(real.available, true);
   assert.equal(JSON.stringify(real).includes("sk-test-secret"), false);
+});
+
+test("only a backup-brain reply stores a source, and a local reply does not grow a field", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "preyas-brain-src-"));
+  appendHistory(root, { role: "assistant", who: "preyas", content: "from the laptop", brain: "backup" });
+  appendHistory(root, { role: "assistant", who: "preyas", content: "from the mac", brain: "local" });
+  const book = readHistory(root, 10);
+  assert.equal(book.messages[0].brain, "backup");
+  assert.equal(book.messages[1].brain, undefined);
+  assert.equal("brain" in book.messages[1], false);
+  const local = normalizeEntry({ role: "assistant", content: "hi" });
+  assert.equal("brain" in local, false);
+  fs.rmSync(root, { recursive: true, force: true });
 });

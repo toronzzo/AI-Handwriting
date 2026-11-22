@@ -21,7 +21,7 @@ export function writeTextAtomic(file, text) {
 
 /** One stored turn, with every field the client may send. */
 export function normalizeEntry(entry) {
-  return {
+  const line = {
     t: entry.t || Date.now(),
     role: entry.role || "user",
     content: String(entry.content || ""),
@@ -30,6 +30,9 @@ export function normalizeEntry(entry) {
     costUsd: typeof entry.costUsd === "number" ? entry.costUsd : null,
     thinking: entry.thinking ? String(entry.thinking) : "",
   };
+  // Only a backup-brain reply grows this field, so local history stays as it was.
+  if (entry && entry.brain === "backup") line.brain = "backup";
+  return line;
 }
 
 /**
