@@ -15,6 +15,7 @@ import { reviewAction } from "./guard.mjs";
 import { readGuardLog } from "./guardLog.mjs";
 import { exampleStats, listExamples, removeExample, saveLastPair, savePair } from "./gold.mjs";
 import { listVersions, loadPersona } from "./persona.mjs";
+import { VISION_BODY_LIMIT, defaultVisionRuntime, handleVisionHttp } from "../vision.mjs";
 import { allowPaid } from "../coach/spendGate.mjs";
 import { loadSkills } from "../coach/skills.mjs";
 import { createFakeAdapter } from "./computerAdapter.mjs";
@@ -509,7 +510,34 @@ export async function handleOsRoute(ctx) {
     return true;
   }
 
+  // Screen questions (Preyas Helper). The proxy pairing gate already ran:
+  // /v1/vision and /v1/vision/ask need X-Preyas-Token. Pictures stay on this
+  // Mac unless the chosen route is a cloud vision model, and the JSON says so.
+  if ((url.pathname === "/v1/vision" && req.method === "GET") || (url.pathname === "/v1/vision/ask" && req.method === "POST")) {
+    let raw = Buffer.from("");
+    if (req.method === "POST") {
+      try {
+        raw = await ctx.readBody(ctx.req, VISION_BODY_LIMIT);
+      } catch (err) {
+        if (err && typeof err.status === "number") throw err;
+        return answered(res, 400, { error: "bad_json", message: "bad json", leavesMac: false });
+      }
+    }
+    const result = await handleVisionHttp({
+      method: req.method,
+      pathname: url.pathname,
+      rawBody: raw,
+      runtime: visionRuntime(ctx),
+    });
+    return answered(res, result.status, result.body);
+  }
+
   return false;
+}
+
+function visionRuntime(ctx) {
+  if (ctx.visionRuntime) return ctx.visionRuntime;
+  return defaultVisionRuntime({ dataDir: ctx.dataDir });
 }
 
 /** Reads the persisted coach session and tells whether the current step is Danger. */
