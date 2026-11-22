@@ -55,7 +55,12 @@ SUMMARY="$(printf '%s\n' "$OUTPUT" | tail -n 5 | cut -c1-160 | tr '\n' ' ')"
 if (( RESULT == 0 )); then
   show_dialog "$SUCCESS_TITLE" "$SUMMARY"
   if [[ "$OPEN_APP" == "1" && "${PREYAS_NO_OPEN:-0}" != "1" ]]; then
-    open "http://localhost:8081" >/dev/null 2>&1 || true
+    # The controller prints the real page, including when Expo moved off 8081.
+    APP_URL="$(printf '%s\n' "$OUTPUT" | grep -Eo 'http://localhost:[0-9]+' | tail -n 1)"
+    if [[ -z "$APP_URL" ]]; then
+      APP_URL="http://localhost:8081"
+    fi
+    open "$APP_URL" >/dev/null 2>&1 || true
   fi
 else
   show_dialog "Preyas had a problem" "$SUMMARY Logs: /Volumes/Agent/agent/logs/preyas/"
