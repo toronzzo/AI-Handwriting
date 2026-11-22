@@ -97,6 +97,8 @@ import { TURN_OFF_CONFIRM } from "../settings/power";
 import { SoundLab } from "../media/sounds/SoundLab.tsx";
 import { theme } from "../theme";
 import { CHAT_FONT_FAMILY, EmojiText } from "../chat/emojiText";
+import { FaceButton, FaceMode } from "../face/FaceMode";
+import { EXPRESSION_LABEL, liveExpression, speechMood, type FacePlayback, type FaceSignals } from "../face/expression.ts";
 
 /** Web lets the sky show through the shell; the iPhone paints the page colour. */
 const isWeb = typeof document !== "undefined";
@@ -408,6 +410,7 @@ export function ChatScreen({
   const [tapMs, setTapMs] = useState(0);
   const [tapNote, setTapNote] = useState<"" | "heardNothing" | "denied">("");
   const [voice, setVoice] = useState<VoiceSettings>(() => readVoiceSettings());
+  const [faceOpen, setFaceOpen] = useState(false);
   const tapEar = useRef<TapEar | null>(null);
   const tapRef = useRef<TapState>(idleTapState());
   const draftRef = useRef("");
@@ -1914,7 +1917,7 @@ export function ChatScreen({
   }
   async function speakPreyas(text: string, final: boolean, fresh = false) {
     if (fresh) resetSpeech(bag);
-    queueSpokenLine(bag, text, "happy", final);
+    queueSpokenLine(bag, text, speechMood(text), final);
   }
   async function ask(
     route: "local" | "paid",
@@ -2618,6 +2621,19 @@ export function ChatScreen({
       )}
     </View>
   );
+  const lastAssistant = [...messages].reverse().find((row) => row.role === "assistant");
+  const faceSignals: FaceSignals = {
+    recording: tap.phase === "recording",
+    generating: thinking || searching || Boolean(docBusy) || phase === "thinking" || Boolean(live),
+    speaking: phase === "speaking",
+    reply: live?.text || lastAssistant?.content || "",
+  };
+  const facePlayback = (): FacePlayback => ({
+    envelope: bag.talkEnv,
+    talkStart: bag.talkStart,
+    playing: Boolean(bag.playing),
+  });
+  const faceNow = liveExpression(faceSignals, Boolean(bag.playing));
   return (
     <View style={styles.root}>
       <VoiceSession sinks={bag} handsFreeOn={voice.handsFree} />
@@ -2966,22 +2982,21 @@ export function ChatScreen({
               >
                 <Text style={styles.drawerBtnText}>☰</Text>
               </Pressable>
-              <Pressable
-                onPress={() => setProfile(true)}
-                hitSlop={6}
-                accessibilityRole="button"
-                accessibilityLabel="Preyas profile"
-              >
-                <View style={styles.ball}>
-                  <View style={styles.ballCore} />
-                </View>
-              </Pressable>
+              <FaceButton
+                signals={faceSignals}
+                playback={facePlayback}
+                size={wide ? 56 : 46}
+                open={faceOpen}
+                paused={faceOpen}
+                onToggle={() => setFaceOpen((open) => !open)}
+                onLongPress={() => setProfile(true)}
+              />
               <View style={styles.chatHeadText}>
                 <Text style={styles.chatName} numberOfLines={1} ellipsizeMode="tail">
                   Preyas
                 </Text>
                 <Text style={styles.subtitle} numberOfLines={1} ellipsizeMode="tail">
-                  Aquos · level {partner.level}
+                  {faceNow === "idle" ? `Aquos · level ${partner.level}` : `Aquos · ${EXPRESSION_LABEL[faceNow]}`}
                 </Text>
               </View>
               {wide ? <CoachChip state={coach.state} compact={false} onPress={() => setCoachPanel(true)} /> : null}
@@ -3605,6 +3620,9 @@ export function ChatScreen({
           </View>
         </View>
       ) : null}
+      {faceOpen ? (
+        <FaceMode signals={faceSignals} playback={facePlayback} onClose={() => setFaceOpen(false)} />
+      ) : null}
     </View>
   );
 }
@@ -3745,18 +3763,6 @@ const styles = StyleSheet.create({
   dotOn: { backgroundColor: theme.good },
   dotOff: { backgroundColor: theme.off },
   online: { color: theme.dim, fontSize: theme.type.caption },
-  /** The 40px ball in the header: a ring, no 3D canvas. */
-  ball: {
-    width: theme.size.avatar,
-    height: theme.size.avatar,
-    borderRadius: theme.size.avatar / 2,
-    borderWidth: 2,
-    borderColor: aqua,
-    backgroundColor: theme.accentSoft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ballCore: { width: theme.space.md, height: theme.space.md, borderRadius: theme.space.sm, backgroundColor: theme.accentSoft, borderWidth: 2, borderColor: aqua },
   bondInline: { width: theme.size.bond, gap: theme.space.xs },
   bondInlineText: { color: theme.dim, fontSize: theme.type.label },
   miniBall: { width: theme.size.dot, height: theme.size.dot, borderRadius: theme.size.dot / 2, backgroundColor: theme.accentSoft, borderWidth: 1, borderColor: aqua },
