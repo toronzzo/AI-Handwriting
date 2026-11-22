@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -16,6 +17,12 @@ AUTO_ALIAS = "auto"
 AUTO_TIMEOUT_S = 60
 KIMI_API_BASE = "https://api.moonshot.ai/v1"
 KIMI_MODEL = "kimi-k3"
+# Free vision ids the screen helper asks the gateway for. Override in secrets
+# with GROQ_VISION_MODEL or GEMINI_VISION_MODEL if a provider renames them.
+DEFAULT_GROQ_VISION = "meta-llama/llama-4-scout-17b-16e-instruct"
+DEFAULT_GEMINI_VISION = "gemini-2.5-flash"
+_MODEL_ID = re.compile(r"[A-Za-z0-9_./:-]{1,160}")
+_ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,60}")
 
 
 def local_api_base() -> str:
@@ -102,13 +109,73 @@ def _local_entry(name: str, local_base: str, *, timeout: int | None = None) -> l
     return lines
 
 
-def render_config(root: Path, *, include_paid: bool, local_base: str, include_kimi: bool = False) -> str:
+def _safe_model_id(value: str | None, default: str) -> str:
+    text = (value or "").strip()
+    if _MODEL_ID.fullmatch(text):
+        return text
+    return default
+
+
+def _safe_env_name(value: str | None, default: str) -> str:
+    text = (value or "").strip()
+    if _ENV_NAME.fullmatch(text):
+        return text
+    return default
+
+
+def _provider_model(provider: str, upstream: str) -> str:
+    prefix = provider + "/"
+    if upstream.startswith(prefix):
+        return upstream
+    return prefix + upstream
+
+
+def _groq_vision_entry(upstream: str) -> list[str]:
+    """Explicit free Groq vision route. Not a fallback for text chat."""
+    return [
+        "  - model_name: groq-vision",
+        "    litellm_params:",
+        f"      model: {_yaml_string(_provider_model('groq', upstream))}",
+        "      api_key: os.environ/GROQ_API_KEY",
+        "    model_info:",
+        "      input_cost_per_token: 0",
+        "      output_cost_per_token: 0",
+    ]
+
+
+def _gemini_vision_entry(upstream: str, key_env: str) -> list[str]:
+    """Explicit Gemini free vision route. Not a fallback for text chat."""
+    return [
+        "  - model_name: gemini-flash",
+        "    litellm_params:",
+        f"      model: {_yaml_string(_provider_model('gemini', upstream))}",
+        f"      api_key: os.environ/{_safe_env_name(key_env, 'GEMINI_API_KEY')}",
+        "    model_info:",
+        "      input_cost_per_token: 0",
+        "      output_cost_per_token: 0",
+    ]
+
+
+def render_config(
+    root: Path,
+    *,
+    include_paid: bool,
+    local_base: str,
+    include_kimi: bool = False,
+    include_groq: bool = False,
+    include_gemini: bool = False,
+    groq_vision_model: str = DEFAULT_GROQ_VISION,
+    gemini_vision_model: str = DEFAULT_GEMINI_VISION,
+    gemini_key_env: str = "GEMINI_API_KEY",
+) -> str:
     """Exact-match disk cache on the drive. DeepSeek is omitted without a key.
 
     ``auto`` and ``local`` both use llama-server. ``auto`` alone may fall back
     to ``paid`` (an alias of ``deepseek-flash``) after an error or a 60 s
     timeout; a plain ``local`` request never reaches a paid model.
     ``deepseek-v4-pro`` is listed for an explicit request; it is not a fallback.
+    ``groq-vision`` and ``gemini-flash`` are also explicit only, and only when
+    that provider's key is set. They are never fallbacks.
     """
     cache_dir = root / "cache" / "litellm"
     lines = ["model_list:"]
@@ -121,6 +188,15 @@ def render_config(root: Path, *, include_paid: bool, local_base: str, include_ki
     if include_kimi:
         lines.extend(_kimi_entry("kimi", "high"))
         lines.extend(_kimi_entry("kimi-low", "low"))
+    if include_groq:
+        lines.extend(_groq_vision_entry(_safe_model_id(groq_vision_model, DEFAULT_GROQ_VISION)))
+    if include_gemini:
+        lines.extend(
+            _gemini_vision_entry(
+                _safe_model_id(gemini_vision_model, DEFAULT_GEMINI_VISION),
+                gemini_key_env,
+            )
+        )
     lines.extend(
         [
             "",
@@ -165,11 +241,17 @@ def write_config(root: Path | None = None) -> Path:
     check_root(root)
     env = load_env_file(root / "secrets" / ".env")
     include_paid = key_is_set(env.get("DEEPSEEK_API_KEY"))
+    gemini_key_env = "GEMINI_API_KEY" if key_is_set(env.get("GEMINI_API_KEY")) else "GOOGLE_API_KEY"
     text = render_config(
         root,
         include_paid=include_paid,
         local_base=local_api_base(),
         include_kimi=key_is_set(env.get("KIMI_API_KEY")),
+        include_groq=key_is_set(env.get("GROQ_API_KEY")) or key_is_set(env.get("PREYAS_FREE_CLOUD_KEY")),
+        include_gemini=key_is_set(env.get("GEMINI_API_KEY")) or key_is_set(env.get("GOOGLE_API_KEY")),
+        groq_vision_model=_safe_model_id(env.get("GROQ_VISION_MODEL"), DEFAULT_GROQ_VISION),
+        gemini_vision_model=_safe_model_id(env.get("GEMINI_VISION_MODEL"), DEFAULT_GEMINI_VISION),
+        gemini_key_env=gemini_key_env,
     )
     path = config_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)

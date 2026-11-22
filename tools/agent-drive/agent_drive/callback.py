@@ -42,18 +42,33 @@ def _clip(text: str) -> str:
     return text[:_MAX_CHARS] + "…"
 
 
+def _is_image_part(item: dict) -> bool:
+    """A vision part. The history log keeps a marker, never the picture bytes."""
+    kind = str(item.get("type") or "")
+    if kind in {"image_url", "image", "input_image"}:
+        return True
+    return "image_url" in item and "text" not in item
+
+
 def _content_to_text(content: Any) -> str:
     if content is None:
         return ""
     if isinstance(content, str):
         return content
+    if isinstance(content, dict):
+        if _is_image_part(content):
+            return "[image]"
+        return str(content.get("text") or content.get("content") or "")
     if isinstance(content, list):
         parts: list[str] = []
         for item in content:
             if isinstance(item, str):
                 parts.append(item)
             elif isinstance(item, dict):
-                parts.append(str(item.get("text") or item.get("content") or ""))
+                if _is_image_part(item):
+                    parts.append("[image]")
+                else:
+                    parts.append(str(item.get("text") or item.get("content") or ""))
             else:
                 parts.append(str(item))
         return "\n".join(part for part in parts if part)
