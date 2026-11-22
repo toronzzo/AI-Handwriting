@@ -48,22 +48,27 @@ export function connectWithTimeout(url, timeoutMs = CONNECT_TIMEOUT_MS, netImpl 
       finish(false);
       return;
     }
-    const timer = setTimeout(() => {
+    let closing = false;
+    const giveUp = () => {
+      if (settled || closing) return;
+      closing = true;
+      clearTimeout(timer);
       try {
         socket.destroy();
       } catch {
         /* already closed */
       }
       finish(false);
-    }, timeoutMs);
-    const clear = () => clearTimeout(timer);
+    };
+    const timer = setTimeout(giveUp, timeoutMs);
     if (!socket || typeof socket.once !== "function") {
-      clear();
+      clearTimeout(timer);
       finish(false);
       return;
     }
     socket.once("connect", () => {
-      clear();
+      if (settled || closing) return;
+      clearTimeout(timer);
       try {
         socket.end();
       } catch {
@@ -71,14 +76,8 @@ export function connectWithTimeout(url, timeoutMs = CONNECT_TIMEOUT_MS, netImpl 
       }
       finish(true);
     });
-    socket.once("error", () => {
-      clear();
-      try {
-        socket.destroy();
-      } catch {
-        /* ignore */
-      }
-      finish(false);
-    });
+    // A destroy() from the timeout can emit "error" on the same turn.
+    // giveUp ignores that re-entry so the two cannot call each other forever.
+    socket.once("error", giveUp);
   });
 }

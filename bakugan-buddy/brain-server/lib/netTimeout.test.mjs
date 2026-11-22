@@ -31,7 +31,7 @@ test("a handshake that arrives in time counts as reachable", async () => {
 });
 
 test("a sleeping host is abandoned and the socket is destroyed", async () => {
-  let destroyed = false;
+  let destroyed = 0;
   const netImpl = {
     connect() {
       const handlers = {};
@@ -42,22 +42,21 @@ test("a sleeping host is abandoned and the socket is destroyed", async () => {
         },
         end() {},
         destroy() {
-          destroyed = true;
-          if (handlers.error) handlers.error();
+          destroyed += 1;
+          // A real socket emits error from destroy at most once. Doing it
+          // every time would re-enter the timeout path forever.
+          if (destroyed === 1 && handlers.error) handlers.error();
         },
       };
-      setTimeout(() => {
-        if (handlers.connect) handlers.connect();
-      }, 500);
       return socket;
     },
   };
   const started = Date.now();
-  const ok = await connectWithTimeout("http://192.168.31.88:8178", 40, netImpl);
+  const ok = await connectWithTimeout("http://192.168.31.88:8178", 30, netImpl);
   const elapsed = Date.now() - started;
   assert.equal(ok, false);
-  assert.equal(destroyed, true);
-  assert.ok(elapsed < 300, `connect waited ${elapsed}ms`);
+  assert.equal(destroyed, 1);
+  assert.ok(elapsed < 250, `connect waited ${elapsed}ms`);
 });
 
 test("a bad URL is simply unreachable", async () => {
