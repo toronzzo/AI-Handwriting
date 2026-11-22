@@ -368,12 +368,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
     controller.start()
-    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    let barItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     if let image = NSImage(systemSymbolName: "circle.circle.fill", accessibilityDescription: "Preyas") {
       image.isTemplate = true
-      item.button?.image = image
+      barItem.button?.image = image
     } else {
-      item.button?.title = "P"
+      barItem.button?.title = "P"
     }
     let menu = NSMenu()
     menu.delegate = self
@@ -385,8 +385,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu.addItem(.separator())
     menu.addItem(item("Hide or show the button    ⌃⌥P", action: #selector(toggleButton)))
     menu.addItem(item("Quit Preyas Helper", action: #selector(quit)))
-    item.menu = menu
-    statusItem = item
+    barItem.menu = menu
+    statusItem = barItem
     hotkey.onFire = { [weak self] in
       self?.controller.toggleVisible()
     }
