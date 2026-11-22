@@ -88,6 +88,7 @@ import { previewMode } from "../activity/previewMode";
 import { useActivity, type ActivitySink } from "../activity/useActivity";
 import { HarnessLauncher } from "../harness/HarnessLauncher";
 import { DailyLimit } from "../settings/DailyLimit.tsx";
+import { AppearanceSetting } from "../settings/Appearance";
 import { BitModeSetting } from "../settings/BitMode.tsx";
 import { SoundToggle } from "../settings/SoundToggle.tsx";
 import { PowerPanel } from "../settings/PowerPanel";
@@ -2622,6 +2623,7 @@ export function ChatScreen({
       {section === "settings" ? (
         <ScrollView style={styles.fill} contentContainerStyle={[styles.pad, page]}>
           <Text style={styles.skyTitle} accessibilityRole="header">Settings</Text>
+          <AppearanceSetting />
           <BackgroundPhotoCard />
           <PowerPanel brainUrl={bag.brainUrl} onTurnOff={() => setDialog({ kind: "powerOff" })} />
           <View style={styles.phoneCard}>
@@ -3160,7 +3162,7 @@ export function ChatScreen({
                           })}
                         </View>
                       ) : null}
-                      <Text style={styles.time}>{clock(message.t)}{mine ? (read ? "  ✓✓" : "  ✓") : ""}</Text>
+                      <Text style={[styles.time, mine && styles.timeMine]}>{clock(message.t)}{mine ? (read ? "  ✓✓" : "  ✓") : ""}</Text>
                     </View>
                   </View>
                   {!mine && message.runId ? (
@@ -3787,6 +3789,8 @@ const styles = StyleSheet.create({
   /** My bubble is accent-filled, so its text is onAccent. */
   bubbleTextMine: { color: theme.onAccent },
   time: { color: theme.faint, fontSize: theme.type.label, marginTop: theme.space.xs, textAlign: "right" },
+  /** On the accent bubble, faint text fails contrast. onAccent stays readable. */
+  timeMine: { color: theme.onAccent },
   typing: { color: theme.dim, fontSize: 13, marginTop: 4 },
   sources: { marginTop: 6, gap: 2 },
   briefingTop: { marginTop: theme.space.sm },

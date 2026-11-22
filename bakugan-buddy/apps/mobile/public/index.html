@@ -13,6 +13,60 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Preyas" />
     <meta name="theme-color" content="#3F78C0" />
+    <!--
+      First paint. Keep this in step with themePrefs.ts (key preyas.theme,
+      Auto, dark from 20:00 to 07:00) and with DAY.bg / NIGHT.bg / NIGHT.onSky.
+      It runs before the body exists so the wrong theme never flashes.
+    -->
+    <script>
+      (function () {
+        var KEY = "preyas.theme";
+        var choice = "auto";
+        var nightByClock = true;
+        var nightStart = "20:00";
+        var nightEnd = "07:00";
+        try {
+          var raw = localStorage.getItem(KEY);
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object") {
+              if (parsed.choice === "light" || parsed.choice === "dark" || parsed.choice === "auto") choice = parsed.choice;
+              if (typeof parsed.nightByClock === "boolean") nightByClock = parsed.nightByClock;
+              if (typeof parsed.nightStart === "string") nightStart = parsed.nightStart;
+              if (typeof parsed.nightEnd === "string") nightEnd = parsed.nightEnd;
+            }
+          }
+        } catch (e) {}
+        function minutes(value) {
+          var match = /^(\d{1,2}):(\d{2})$/.exec(value);
+          if (!match) return null;
+          var hour = Number(match[1]);
+          var minute = Number(match[2]);
+          if (hour > 23 || minute > 59) return null;
+          return hour * 60 + minute;
+        }
+        function inWindow(now) {
+          var start = minutes(nightStart);
+          var end = minutes(nightEnd);
+          if (start === null || end === null || start === end) return false;
+          var t = now.getHours() * 60 + now.getMinutes();
+          if (start < end) return t >= start && t < end;
+          return t >= start || t < end;
+        }
+        var systemDark = false;
+        try {
+          systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        } catch (e) {}
+        var dark = choice === "dark" || (choice === "auto" && ((nightByClock && inWindow(new Date())) || systemDark));
+        var root = document.documentElement;
+        root.setAttribute("data-pz", dark ? "night" : "day");
+        root.style.colorScheme = dark ? "dark" : "light";
+        root.style.backgroundColor = dark ? "#10192B" : "#3F78C0";
+        root.style.color = dark ? "#FFFFFF" : "#121212";
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", dark ? "#0C1424" : "#3F78C0");
+      })();
+    </script>
     <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/Inter-var.woff2" />
     <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/Oswald-var.woff2" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png" />
@@ -20,6 +74,9 @@
     <link rel="manifest" href="/manifest.webmanifest" />
 
     <style>
+      html {
+        color-scheme: light;
+      }
       html,
       body {
         margin: 0;
@@ -27,6 +84,14 @@
         background: #3F78C0;
         color: #121212;
         -webkit-text-size-adjust: 100%;
+      }
+      html[data-pz="night"] {
+        color-scheme: dark;
+      }
+      html[data-pz="night"],
+      html[data-pz="night"] body {
+        background: #10192B;
+        color: #FFFFFF;
       }
       /* The notch and the home bar are safe areas, not merely padding. */
       body {

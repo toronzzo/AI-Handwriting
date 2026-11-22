@@ -51,6 +51,13 @@ for (const [label, palette] of [
     const ratio = contrast(palette.onAccent, palette.accent);
     assert.ok(ratio >= 4.5, `expected >= 4.5, got ${ratio.toFixed(3)}`);
   });
+
+  for (const panel of PANELS) {
+    test(`${label}: accent on ${panel} meets non-text contrast`, () => {
+      const ratio = contrast(palette.accent, palette[panel]);
+      assert.ok(ratio >= 3, `expected >= 3, got ${ratio.toFixed(3)}`);
+    });
+  }
 }
 
 const SKY = ["bg", "skyTop", "skyMid", "skyBottom"] as const;

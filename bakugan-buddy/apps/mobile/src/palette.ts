@@ -1,9 +1,14 @@
 /**
- * The Pajero palette for the Retro RPG redesign, with automatic day/night
- * colours. Pure TypeScript with no React Native import and no enums, so it
- * runs under `node --experimental-strip-types`.
+ * The Pajero palette for the Retro RPG redesign. Pure TypeScript with no
+ * React Native import and no enums, so it runs under
+ * `node --experimental-strip-types`.
  *
- * Night is 19:00 to 05:59 local time; day is 06:00 to 18:59.
+ * DAY is the light theme (paper cards, dark text). NIGHT is the dark theme
+ * (navy surfaces, light text). Which one is on screen is the saved appearance
+ * choice in themePrefs.ts, not the clock by itself.
+ *
+ * `isNight` / `paletteFor` stay the plain clock helper: night is 19:00 to
+ * 05:59 local time. The settings window (20:00–07:00) is separate.
  */
 
 export type PaletteKey =
@@ -120,39 +125,39 @@ export const DAY: Palette = {
 };
 
 export const NIGHT: Palette = {
-  bg: "#233658",
-  skyTop: "#16223C",
-  skyMid: "#233658",
-  skyBottom: "#34507F",
-  card: "#D6D4CD",
-  cardSoft: "#CBC8C0",
-  text: "#121212",
-  dim: "#3F3F3F",
-  faint: "#4A4A4A",
+  bg: "#10192B",
+  skyTop: "#0C1424",
+  skyMid: "#16243C",
+  skyBottom: "#1E3558",
+  card: "#162033",
+  cardSoft: "#1E2C46",
+  text: "#F3F0E8",
+  dim: "#D0CBC1",
+  faint: "#B7B2A8",
   onSky: "#FFFFFF",
-  onSkyMuted: "#B9C7DC",
-  accent: "#1E64C8",
-  accentText: "#123F8C",
+  onSkyMuted: "#C9D4E6",
+  accent: "#2C78CC",
+  accentText: "#A9CEFF",
   onAccent: "#FFFFFF",
-  accentDim: "rgba(30,100,200,0.55)",
-  accentSoft: "rgba(30,100,200,0.14)",
-  accentLine: "rgba(18,18,18,0.18)",
-  lineStrong: "rgba(18,18,18,0.34)",
-  track: "#BFC6D2",
-  off: "#6E6E6E",
-  good: "#1E64C8",
-  danger: "#9B1B1F",
+  accentDim: "rgba(44,120,204,0.55)",
+  accentSoft: "rgba(169,206,255,0.16)",
+  accentLine: "rgba(243,240,232,0.16)",
+  lineStrong: "rgba(243,240,232,0.32)",
+  track: "#314564",
+  off: "#9AA3B5",
+  good: "#7EB6FF",
+  danger: "#FF9B9B",
   stripeYellow: "#F6C02C",
   stripeOrange: "#F07F1E",
   stripeRed: "#D8262B",
-  note: "#6A4D00",
-  shadow: "rgba(14,34,66,0.20)",
-  scrim: "rgba(10,24,50,0.45)",
-  stageTop: "#1B2B49",
-  stageBottom: "#2C4572",
-  slotPlaceholder: "#B9C4D3",
-  bgShadeTop: "rgba(22,34,60,0.80)",
-  bgShadeBottom: "rgba(35,54,88,0.85)",
+  note: "#F0C56B",
+  shadow: "rgba(0,0,0,0.45)",
+  scrim: "rgba(4,8,16,0.72)",
+  stageTop: "#1A3054",
+  stageBottom: "#0E1A30",
+  slotPlaceholder: "#2A3D5C",
+  bgShadeTop: "rgba(12,20,36,0.82)",
+  bgShadeBottom: "rgba(16,25,43,0.88)",
 };
 
 /**
