@@ -91,10 +91,13 @@ jobs:
           node --check bakugan-buddy/studio/lib/prompt.mjs
           node --check bakugan-buddy/evals/mock-llama.mjs
           node --check bakugan-buddy/brain-server/proxy.mjs
+          node --check bakugan-buddy/brain-server/lib/vision.mjs
           node --check bakugan-buddy/brain-server/lib/chatPipe.mjs
           node --check bakugan-buddy/brain-server/lib/select-model.mjs
           bash -n bakugan-buddy/brain-server/setup.sh
           bash -n bakugan-buddy/brain-server/start.sh
+          bash -n bakugan-buddy/apps/preyas-helper/build.sh
+          bash bakugan-buddy/apps/preyas-helper/build.sh
           bash -n bakugan-buddy/launcher/preyas-world.sh
           bash -n bakugan-buddy/brain-server/use-model.sh
           bash -n bakugan-buddy/brain-server/lib/ensure-drive.sh
@@ -123,7 +126,7 @@ jobs:
           bash -n bakugan-buddy/launcher/preyas-on.command
           bash -n bakugan-buddy/launcher/preyas-off.command
           bash -n bakugan-buddy/launcher/preyas-restart.command
-          node --experimental-strip-types --disable-warning=ExperimentalWarning --test bakugan-buddy/brain-server/lib/offlineSearch.test.mjs bakugan-buddy/brain-server/lib/providerHealth.test.mjs bakugan-buddy/brain-server/lib/memory.test.mjs bakugan-buddy/brain-server/lib/sampling.test.mjs bakugan-buddy/brain-server/lib/history.test.mjs bakugan-buddy/brain-server/lib/import-paths.test.mjs bakugan-buddy/brain-server/lib/modelSwitch.test.mjs bakugan-buddy/brain-server/lib/chatPipe.test.mjs bakugan-buddy/brain-server/lib/capabilities.test.mjs bakugan-buddy/brain-server/lib/selfKnowledge.test.mjs bakugan-buddy/brain-server/lib/changelog.test.mjs bakugan-buddy/brain-server/lib/power.test.mjs bakugan-buddy/brain-server/lib/coach/skills.test.mjs bakugan-buddy/brain-server/lib/coach/retrieve.test.mjs bakugan-buddy/brain-server/lib/coach/session.test.mjs bakugan-buddy/brain-server/lib/coach/lessons.test.mjs bakugan-buddy/brain-server/lib/coach/escalate.test.mjs bakugan-buddy/brain-server/lib/coach/safety.test.mjs bakugan-buddy/brain-server/lib/art.test.mjs bakugan-buddy/brain-server/lib/activity.test.mjs bakugan-buddy/brain-server/lib/harness/adapter.test.mjs bakugan-buddy/brain-server/lib/harness/estimate.test.mjs bakugan-buddy/brain-server/lib/harness/guard.test.mjs bakugan-buddy/brain-server/lib/harness/runner.test.mjs bakugan-buddy/brain-server/lib/harness/settings.test.mjs bakugan-buddy/brain-server/lib/speech.test.mjs
+          node --experimental-strip-types --disable-warning=ExperimentalWarning --test bakugan-buddy/brain-server/lib/offlineSearch.test.mjs bakugan-buddy/brain-server/lib/providerHealth.test.mjs bakugan-buddy/brain-server/lib/memory.test.mjs bakugan-buddy/brain-server/lib/sampling.test.mjs bakugan-buddy/brain-server/lib/history.test.mjs bakugan-buddy/brain-server/lib/import-paths.test.mjs bakugan-buddy/brain-server/lib/modelSwitch.test.mjs bakugan-buddy/brain-server/lib/chatPipe.test.mjs bakugan-buddy/brain-server/lib/capabilities.test.mjs bakugan-buddy/brain-server/lib/selfKnowledge.test.mjs bakugan-buddy/brain-server/lib/changelog.test.mjs bakugan-buddy/brain-server/lib/power.test.mjs bakugan-buddy/brain-server/lib/coach/skills.test.mjs bakugan-buddy/brain-server/lib/coach/retrieve.test.mjs bakugan-buddy/brain-server/lib/coach/session.test.mjs bakugan-buddy/brain-server/lib/coach/lessons.test.mjs bakugan-buddy/brain-server/lib/coach/escalate.test.mjs bakugan-buddy/brain-server/lib/coach/safety.test.mjs bakugan-buddy/brain-server/lib/art.test.mjs bakugan-buddy/brain-server/lib/activity.test.mjs bakugan-buddy/brain-server/lib/harness/adapter.test.mjs bakugan-buddy/brain-server/lib/harness/estimate.test.mjs bakugan-buddy/brain-server/lib/harness/guard.test.mjs bakugan-buddy/brain-server/lib/harness/runner.test.mjs bakugan-buddy/brain-server/lib/harness/settings.test.mjs bakugan-buddy/brain-server/lib/speech.test.mjs bakugan-buddy/brain-server/lib/vision.test.mjs
 
       - name: Power controller tests (mock processes)
         run: bash scripts/preyas.test.sh
