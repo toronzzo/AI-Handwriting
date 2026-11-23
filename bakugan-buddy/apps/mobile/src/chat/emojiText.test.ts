@@ -27,11 +27,22 @@ test("web emoji runs opt into an emoji font and cannot break inside a cluster", 
   }
   assert.match(text, /emoji, "Apple Color Emoji"/);
   assert.match(theme, /\[data-emoji\]/);
-  assert.match(theme, /input,textarea\{font-family:emoji/);
+  // Inputs keep a text face first. The emoji face's space is much wider, and
+  // this rule is !important, so it also covers the composer and the daily limit.
+  assert.match(theme, /input,textarea\{font-family:Inter,system-ui,-apple-system,sans-serif,emoji,"Apple Color Emoji"/);
+  assert.equal(/input,textarea\{font-family:emoji/.test(theme), false);
   assert.match(theme, /font-variant-emoji:emoji/);
   assert.match(theme, /white-space:nowrap/);
   assert.match(theme, /!important/);
   assert.match(text, /dataSet: \{ emoji: "1" \}/);
+});
+
+test("chat sentences use a text face before the emoji face", () => {
+  assert.match(
+    text,
+    /export const CHAT_FONT_FAMILY = `Inter, system-ui, -apple-system, sans-serif, \$\{EMOJI_FONT_FAMILY\}`/,
+  );
+  assert.match(text, /const EMOJI_FONT_FAMILY =\s*'emoji, "Apple Color Emoji"/);
 });
 
 test("curated emoji become stickers and every other cluster stays in the emoji font", () => {
