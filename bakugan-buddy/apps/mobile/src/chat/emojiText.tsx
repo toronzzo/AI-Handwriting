@@ -24,8 +24,13 @@ const STICKERS_PER_BUBBLE = 4;
 export const EMOJI_FONT_FAMILY =
   'emoji, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla"';
 
-/** Latin stays in Inter; emoji code points resolve in the emoji face before Arial. */
-export const CHAT_FONT_FAMILY = `${EMOJI_FONT_FAMILY}, Inter, system-ui, -apple-system, sans-serif`;
+/**
+ * Latin, digits, and spaces stay in a text face. The emoji face ships a very
+ * wide space, so a stack that starts with `emoji` spreads every word in a
+ * bubble and the composer ("Say  hello  in  one  short  sentence.").
+ * Emoji clusters are their own spans and still use EMOJI_FONT_FAMILY first.
+ */
+export const CHAT_FONT_FAMILY = `Inter, system-ui, -apple-system, sans-serif, ${EMOJI_FONT_FAMILY}`;
 
 const isWeb = typeof document !== "undefined";
 
