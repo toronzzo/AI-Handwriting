@@ -37,6 +37,7 @@ const FILES = [
   "src/face/PreyasFace.tsx",
   "src/face/StickerGlyph.tsx",
   "src/face/StickerGlyph.web.tsx",
+  "src/raw/RawChatScreen.tsx",
   "src/screens/ChatScreen.tsx",
   "src/screens/BenchmarkScreen.tsx",
   "src/screens/PreyasHero.tsx",

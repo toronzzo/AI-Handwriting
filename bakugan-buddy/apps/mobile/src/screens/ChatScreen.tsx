@@ -310,7 +310,7 @@ export function ChatScreen({
 }: {
   section: Section;
   onSection?: (section: Section) => void;
-  onNavigate?: (tab: "room" | "body" | "bench") => void;
+  onNavigate?: (tab: "room" | "body" | "bench" | "raw") => void;
 }) {
   const sinks = useRef<TalkSinks>(blankSinks());
   const bag = sinks.current;
@@ -2350,7 +2350,7 @@ export function ChatScreen({
     downReason: paid.reason,
   });
   const lastUser = [...messages].reverse().find((message) => message.who === "user");
-  const go = (tab: "room" | "body" | "bench") => {
+  const go = (tab: "room" | "body" | "bench" | "raw") => {
     onNavigate?.(tab);
   };
   async function openChat(id: string) {
@@ -2802,6 +2802,7 @@ export function ChatScreen({
               <Pressable onPress={() => go("room")}><Text style={styles.advLink}>Preyas' room</Text></Pressable>
               <Pressable onPress={() => go("body")}><Text style={styles.advLink}>Body</Text></Pressable>
               <Pressable onPress={() => go("bench")}><Text style={styles.advLink}>Benchmark</Text></Pressable>
+              <Pressable onPress={() => go("raw")}><Text style={styles.advLink}>Raw Qwen</Text></Pressable>
             </View>
           </View>
         </ScrollView>
