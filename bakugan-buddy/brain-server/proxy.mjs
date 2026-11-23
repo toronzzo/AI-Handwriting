@@ -113,6 +113,7 @@ import {
 import { handleOsRoute } from "./lib/os/routes.mjs";
 import { sharedBrain } from "./lib/os/neurons.mjs";
 import { CHAT_PROXY_TIMEOUT_MS, pipeChatCompletion } from "./lib/chatPipe.mjs";
+import { handleRawChat } from "./lib/rawChat.mjs";
 import { createLlamaRouter } from "./lib/llamaFallback.mjs";
 import { ART_WRITE_DIR, MAX_ART_BYTES, findArt, isSlot, saveArt } from "./lib/art.mjs";
 import { resolveSafePath } from "./lib/safeFs.mjs";
@@ -2057,6 +2058,13 @@ const server = http.createServer(async (req, res) => {
       const saved = await receiveArt(req, slot);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true, type: saved.type, size: saved.size }));
+      return;
+    }
+
+    // Raw Qwen: a plain llama passthrough for the Raw Qwen screen. It has the
+    // same pairing gate as every /v1 route and never touches Memory.
+    if (req.method === "POST" && url.pathname === "/v1/raw/chat") {
+      await handleRawChat(req, res, { llamaUrl, dataDir, pairing, webOrigins });
       return;
     }
 

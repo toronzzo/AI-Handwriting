@@ -14,6 +14,7 @@ import { StatusBar } from "expo-status-bar";
 import { BodyWebView, BodyWebViewAPI, type BodyMetrics } from "./src/body/BodyWebView";
 import { BenchmarkScreen } from "./src/screens/BenchmarkScreen";
 import { RoomScreen } from "./src/room/RoomScreen";
+import { RawChatScreen } from "./src/raw/RawChatScreen";
 import { ChatScreen } from "./src/screens/ChatScreen";
 import { TodayScreen } from "./src/today/TodayScreen";
 import { BrainScreen } from "./src/brain/BrainScreen";
@@ -30,7 +31,7 @@ import { usePalette } from "./src/usePalette";
 const isWeb = typeof document !== "undefined";
 
 /** Advanced/demo surfaces that live behind Settings, not the main tabs. */
-type Advanced = "room" | "body" | "bench";
+type Advanced = "room" | "body" | "bench" | "raw";
 
 /**
  * Marks a view for the browser shell rules (WEB_SHELL_CSS) without adding a
@@ -164,6 +165,10 @@ export default function App() {
           {advanced === "room" ? (
             <AdvancedWrap title="Preyas' room" onBack={() => setAdvanced(null)}>
               <RoomScreen />
+            </AdvancedWrap>
+          ) : advanced === "raw" ? (
+            <AdvancedWrap title="Raw Qwen" onBack={() => setAdvanced(null)}>
+              <RawChatScreen />
             </AdvancedWrap>
           ) : advanced === "body" || advanced === "bench" ? (
             <AdvancedWrap title={advanced === "body" ? "Body" : "Benchmark"} onBack={() => setAdvanced(null)}>
