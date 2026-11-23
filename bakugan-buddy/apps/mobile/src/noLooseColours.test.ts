@@ -30,6 +30,7 @@ const FILES = [
   "src/bits/PixelSprite.tsx",
   "src/body/BodySkia.tsx",
   "src/body/BodyWebView.tsx",
+  "src/body/BodyWebView.web.tsx",
   "src/brain/BrainScreen.tsx",
   "src/chat/emojiText.tsx",
   "src/face/FaceMode.tsx",
