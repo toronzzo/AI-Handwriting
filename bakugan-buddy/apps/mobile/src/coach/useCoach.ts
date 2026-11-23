@@ -24,6 +24,12 @@ export function useCoach(getUrl: () => string | null) {
   const [state, setState] = useState<CoachState | null>(null);
   const [skills, setSkills] = useState<CoachSkill[]>([]);
   const stateRef = useRef<CoachState | null>(null);
+  // Chat passes a fresh arrow every render. Depending on that function
+  // identity made refresh change every render, the effect fire again, and a
+  // successful response set state — which rendered again. That loop filled
+  // the network log with /v1/coach/state until the browser ran out of sockets.
+  const getUrlRef = useRef(getUrl);
+  getUrlRef.current = getUrl;
 
   const applyState = useCallback((next: CoachState) => {
     stateRef.current = next;
@@ -31,7 +37,7 @@ export function useCoach(getUrl: () => string | null) {
   }, []);
 
   const refresh = useCallback(async () => {
-    const brainUrl = getUrl();
+    const brainUrl = getUrlRef.current();
     if (!brainUrl) return;
     try {
       const res = await brainFetch(`${brainUrl}/v1/coach/state`);
@@ -44,7 +50,7 @@ export function useCoach(getUrl: () => string | null) {
     } catch {
       /* brain offline: chip just shows Coach */
     }
-  }, [getUrl, applyState]);
+  }, [applyState]);
 
   useEffect(() => {
     void refresh();
@@ -52,7 +58,7 @@ export function useCoach(getUrl: () => string | null) {
 
   const turn = useCallback(
     async (text: string) => {
-      const brainUrl = getUrl();
+      const brainUrl = getUrlRef.current();
       if (!brainUrl) return { handled: false, reply: "The brain is offline.", state: null };
       const res = await brainFetch(`${brainUrl}/v1/coach/turn`, {
         method: "POST",
@@ -63,7 +69,7 @@ export function useCoach(getUrl: () => string | null) {
       if (data && data.state) applyState(data.state);
       return data;
     },
-    [getUrl, applyState],
+    [applyState],
   );
 
   return { state, skills, stateRef, active: (state?.mode ?? "off") !== "off", refresh, applyState, turn };
