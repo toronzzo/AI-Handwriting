@@ -9,6 +9,7 @@ import path from "node:path";
 import { FACT_EXTRACT_PROMPT } from "../packages/alive/src/longMemory.ts";
 import { openMemory, parseExtractedFacts, relevantFacts, rememberFacts } from "./lib/memory.mjs";
 import { synthesizeFile, transcribeFile, voicePythonFor, whisperModelFor } from "./lib/speech.mjs";
+import { createTrackpad } from "./lib/trackpad.mjs";
 import { withSampling } from "./lib/sampling.mjs";
 import { mergeHistoryFiles, paidAvailability } from "./lib/history.mjs";
 import {
@@ -139,6 +140,12 @@ const gatewayRoot = process.env.AGENT_DRIVE_ROOT || "/Volumes/Agent/agent";
 const buddyRoot = "/Volumes/Agent/BakuganBuddy";
 /** The repo folder (AI-Handwriting), the second safe root for MCP file tools. */
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+
+/**
+ * Preyas' second voice: the same line through the trackpad's haptic motor, when
+ * nospeaker is installed (lib/trackpad.mjs). Quiet, optional, never an error.
+ */
+const trackpad = createTrackpad({ env: process.env, dataDir });
 
 /**
  * One llama-server at a time on :8790, three local tiers, an idle auto-return.
@@ -1011,6 +1018,30 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Preyas through the trackpad's haptic motor (lib/trackpad.mjs). The phone
+    // and the Mac share one switch, saved on the drive as memory/trackpad.json.
+    if (url.pathname === "/v1/trackpad") {
+      if (req.method === "GET") return sendJson(res, 200, trackpad.state());
+      if (req.method === "POST") {
+        const body = await readJson(req);
+        trackpad.setEnabled(Boolean(body && body.enabled));
+        return sendJson(res, 200, trackpad.state());
+      }
+      return sendJson(res, 405, { error: "method_not_allowed" });
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/trackpad/say") {
+      const body = await readJson(req);
+      if (!trackpad.state().available) return sendJson(res, 503, { error: "trackpad_unavailable" });
+      const spoke = trackpad.say(body && body.text);
+      return sendJson(res, 200, { ...trackpad.state(), spoke });
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/trackpad/stop") {
+      trackpad.stop();
+      return sendJson(res, 200, trackpad.state());
+    }
+
     if (req.method === "POST" && url.pathname === "/v1/stt") {
       const wav = await readBody(req, 4_000_000);
       if (clipTooShort(wav)) {
@@ -1054,6 +1085,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       brain.emit({ neuron: "voice", state: "done" });
+      // The same line also leaves through the trackpad when nospeaker is installed.
+      trackpad.say(payload && payload.text);
       res.writeHead(200, { "Content-Type": "audio/wav" });
       res.end(wav);
       return;

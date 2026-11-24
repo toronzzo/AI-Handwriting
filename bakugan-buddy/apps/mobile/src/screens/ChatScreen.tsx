@@ -92,6 +92,7 @@ import { DailyLimit } from "../settings/DailyLimit.tsx";
 import { AppearanceSetting } from "../settings/Appearance";
 import { BitModeSetting } from "../settings/BitMode.tsx";
 import { SoundToggle } from "../settings/SoundToggle.tsx";
+import { TrackpadVoice } from "../settings/TrackpadVoice.tsx";
 import { PowerPanel } from "../settings/PowerPanel";
 import { AboutPreyas } from "../settings/AboutPreyas";
 import { TURN_OFF_CONFIRM } from "../settings/power";
@@ -2708,6 +2709,7 @@ export function ChatScreen({
           <DailyLimit />
           <BitModeSetting />
           <SoundToggle />
+          <TrackpadVoice />
           {typeof __DEV__ !== "undefined" && __DEV__ ? <SoundLab /> : null}
           <View style={styles.phoneCard}>
             <Text style={styles.kicker}>VAULT</Text>
