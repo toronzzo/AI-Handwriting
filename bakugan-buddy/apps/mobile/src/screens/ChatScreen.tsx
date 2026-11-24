@@ -91,6 +91,8 @@ import { HarnessLauncher } from "../harness/HarnessLauncher";
 import { DailyLimit } from "../settings/DailyLimit.tsx";
 import { AppearanceSetting } from "../settings/Appearance";
 import { BitModeSetting } from "../settings/BitMode.tsx";
+import { CommandBoard } from "../chat/CommandBoard.tsx";
+import { parseChatCommand, parseWhen, type ChatCommand } from "../chat/commands.ts";
 import { CopyButton } from "../chat/CopyButton.tsx";
 import { Markdown } from "../chat/Markdown.tsx";
 import { SoundToggle } from "../settings/SoundToggle.tsx";
@@ -2254,10 +2256,89 @@ export function ChatScreen({
     }
   }
   sendRef.current = send;
+  /** A command's answer, saved like any other reply. */
+  function pushCommandLine(content: string) {
+    const entry = { t: Date.now(), role: "assistant", who: "preyas", model: "preyas", content } as Shown;
+    messagesRef.current = [...messagesRef.current, entry];
+    setMessages(messagesRef.current);
+    void remember(entry, activeIdRef.current || "");
+  }
+
+  /**
+   * The slash commands, wired to routes the brain already has. No model in the
+   * loop: /remember always saves, /remind always sets, /find always searches.
+   */
+  async function runChatCommand(command: ChatCommand) {
+    const base = bag.brainUrl;
+    if (!base) {
+      setNote("The brain is offline; nothing was saved.");
+      return;
+    }
+    try {
+      if (command.name === "remember") {
+        if (!command.args) {
+          setNote("Tell me what to remember: /remember the dentist is on Friday");
+          return;
+        }
+        const res = await brainFetch(base + "/v1/notes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: command.args }),
+        });
+        if (!res.ok) throw new Error("note failed");
+        pushCommandLine("Saved to memory: “" + command.args + "”.");
+        return;
+      }
+      if (command.name === "remind") {
+        if (!command.args) {
+          setNote("Tell me what to remind you about: /remind call mom at 18:00");
+          return;
+        }
+        const when = parseWhen(command.args);
+        const res = await brainFetch(base + "/v1/reminders", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            text: when.text || command.args,
+            dueAt: when.due.toISOString(),
+            repeat: "none",
+            chatId: activeIdRef.current || undefined,
+          }),
+        });
+        if (!res.ok) throw new Error("reminder failed");
+        pushCommandLine(
+          "Reminder set for " + clock(when.due.getTime()) + ": “" + (when.text || command.args) + "”.",
+        );
+        return;
+      }
+      if (command.name === "find") {
+        if (!command.args) {
+          setNote("Say what to look for: /find dentist");
+          return;
+        }
+        const res = await brainFetch(base + "/v1/notes?q=" + encodeURIComponent(command.args) + "&limit=5");
+        const body = (await res.json()) as { notes?: { text?: string }[] };
+        const notes = Array.isArray(body.notes) ? body.notes.filter((note) => note && note.text) : [];
+        pushCommandLine(
+          notes.length
+            ? "Found " + notes.length + " about “" + command.args + "”:\n\n" + notes.map((note) => "- " + note.text).join("\n")
+            : "Nothing saved about “" + command.args + "” yet. /remember it first?",
+        );
+      }
+    } catch {
+      setNote("The brain did not answer; nothing was saved.");
+    }
+  }
+
   const submitDraft = () => {
     const text = draft;
     if (!text.trim() || busy.current) return;
     setDraft("");
+    const command = parseChatCommand(text);
+    if (command) {
+      void runChatCommand(command);
+      return;
+    }
     void send(text, false);
   };
   draftRef.current = draft;
@@ -3298,6 +3379,7 @@ export function ChatScreen({
                 <Text style={styles.chipSavedText}>✓ {chip}</Text>
               </View>
             ) : null}
+            <CommandBoard draft={draft} onPick={(name) => setDraft("/" + name + " ")} />
             <View style={styles.composerBox}>
               <TextInput
                 value={draft}
