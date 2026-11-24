@@ -12,6 +12,7 @@ import { brainFetch } from "../room/brain/token";
 import { clipTooShort, isWhisperHallucination, synthesizeLine, transcribeClip } from "../../../../packages/alive/src/speech.ts";
 import { createEar, type Ear } from "../room/voice/ear";
 import { playWav } from "../room/voice/playWav";
+import { refreshTrackpadVoice } from "../voice/trackpadVoice";
 import { readVoicePrefs, writeVoicePrefs } from "./voicePrefs";
 import type { CoachState } from "./useCoach";
 
@@ -45,6 +46,8 @@ export function CoachVoice() {
     try {
       const bytes = await synthesizeLine(currentBrainUrl(), text, "neutral", lang);
       if (!bytes) return;
+      // When the trackpad switch is on, the Mac's glass is already speaking.
+      if (await refreshTrackpadVoice(currentBrainUrl())) return;
       audioRef.current = await playWav(bytes);
     } catch {
       /* voice is a nicety; typing always works */

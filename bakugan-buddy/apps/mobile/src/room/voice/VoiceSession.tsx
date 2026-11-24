@@ -22,6 +22,7 @@ import {
 } from "../../../../../packages/alive/src/speech.ts";
 import { createEar, type Ear } from "./ear";
 import { playWav } from "./playWav";
+import { refreshTrackpadVoice } from "../../voice/trackpadVoice";
 
 export type TalkSinks = {
   brainUrl: string;
@@ -58,6 +59,9 @@ export async function speakSentence(sinks: TalkSinks, sentence: string, mood: st
     return;
   }
   const gen = sinks.talkGen;
+  // The brain also starts this line on the Mac's haptic trackpad when that
+  // switch is on. Then the trackpad is the speaker and the WAV stays unplayed.
+  const trackpad = await refreshTrackpadVoice(sinks.brainUrl);
   const wav = await synthesizeLine(sinks.brainUrl, sentence, mood, sinks.hearLang || "en");
   if (!wav) {
     if (ttsResting()) sinks.onTtsQuiet?.();
@@ -73,6 +77,16 @@ export async function speakSentence(sinks: TalkSinks, sentence: string, mood: st
   // Mute while the clip should be playing, but not forever if ended never fires.
   sinks.playing = true;
   sinks.talkUntil = Date.now() + durationMs + 1500;
+  if (trackpad) {
+    // Nothing to play here: the glass is already speaking. Wait out the line so
+    // the next sentence is queued when this one ends, not in the middle of it.
+    await new Promise((resolve) => setTimeout(resolve, durationMs));
+    if (gen === sinks.talkGen) {
+      sinks.playing = false;
+      sinks.talkUntil = Date.now();
+    }
+    return;
+  }
   const handle = await playWav(wav, () => {
     if (gen !== sinks.talkGen) return;
     sinks.playing = false;
