@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { ActivityPanel } from "../activity/ActivityPanel";
 import { useActivity } from "../activity/useActivity";
+import { CopyButton } from "../chat/CopyButton.tsx";
 import { currentBrainUrl } from "../room/brain/brainLink";
 import { formatEstimate, todayLine } from "../settings/dailyLimit";
 import { Panel } from "../ui/Panel";
@@ -63,23 +64,23 @@ export function HarnessLauncher({
   return (
     <View style={styles.wrap}>
       <Pressable
-        style={[styles.ghost, (notConfigured || running) && styles.off]}
-        disabled={notConfigured || running}
+        style={[styles.ghost, running && styles.off]}
+        disabled={running}
         onPress={() => {
           setOpen((value) => !value);
           setShowAll(false);
         }}
         accessibilityRole="button"
         accessibilityLabel={
-          notConfigured ? "Generate is off: Harness is not connected yet" : "Generate"
+          notConfigured ? "Generate: draft a prompt, the run is off without an adapter" : "Generate"
         }
-        accessibilityState={{ disabled: notConfigured || running }}
+        accessibilityState={{ disabled: running }}
       >
         <Text style={styles.ghostText}>Generate</Text>
       </Pressable>
       {notConfigured ? (
-        <Text style={styles.adapterNote} numberOfLines={2}>
-          Harness is not connected yet
+        <Text style={styles.adapterNote} numberOfLines={3}>
+          Drafts are free. The run needs an adapter.
         </Text>
       ) : null}
 
@@ -105,7 +106,10 @@ export function HarnessLauncher({
               <>
                 {result ? (
                   <View style={styles.card}>
-                    <Text style={styles.label}>THE PROMPT</Text>
+                    <View style={styles.labelRow}>
+                      <Text style={styles.label}>THE PROMPT</Text>
+                      <CopyButton text={result.draft.prompt} />
+                    </View>
                     <View style={styles.promptBox}>
                       <Text style={styles.promptText}>{shownPrompt}</Text>
                     </View>
@@ -227,6 +231,13 @@ const styles = StyleSheet.create({
   stateText: { color: theme.text, fontSize: theme.type.body, fontWeight: "600", marginBottom: 4 },
   activity: { marginTop: 4 },
   label: { color: theme.dim, fontSize: theme.type.caption, marginBottom: 4 },
+  labelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.space.sm,
+    marginBottom: 4,
+  },
   input: {
     minHeight: 64,
     maxHeight: 96,
