@@ -91,6 +91,8 @@ import { HarnessLauncher } from "../harness/HarnessLauncher";
 import { DailyLimit } from "../settings/DailyLimit.tsx";
 import { AppearanceSetting } from "../settings/Appearance";
 import { BitModeSetting } from "../settings/BitMode.tsx";
+import { CopyButton } from "../chat/CopyButton.tsx";
+import { Markdown } from "../chat/Markdown.tsx";
 import { SoundToggle } from "../settings/SoundToggle.tsx";
 import { TrackpadVoice } from "../settings/TrackpadVoice.tsx";
 import { PowerPanel } from "../settings/PowerPanel";
@@ -3130,7 +3132,11 @@ export function ChatScreen({
                           {message.who === "paid" && message.costUsd != null ? ` · ~$${message.costUsd.toFixed(4)}` : ""}
                         </Text>
                       ) : null}
-                      <EmojiText style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{message.content}</EmojiText>
+                      {mine ? (
+                        <EmojiText style={[styles.bubbleText, styles.bubbleTextMine]}>{message.content}</EmojiText>
+                      ) : (
+                        <Markdown text={message.content} />
+                      )}
                       {!mine && message.thinking ? (
                         <Pressable onPress={() => setOpenThink((current) => ({ ...current, [index]: !current[index] }))}>
                           <Text style={styles.thinkToggle}>{openThink[index] ? "Hide thinking" : "Show thinking"}</Text>
@@ -3193,7 +3199,10 @@ export function ChatScreen({
                           })}
                         </View>
                       ) : null}
-                      <Text style={[styles.time, mine && styles.timeMine]}>{clock(message.t)}{mine ? (read ? "  ✓✓" : "  ✓") : ""}</Text>
+                      <View style={styles.timeRow}>
+                        <Text style={[styles.time, mine && styles.timeMine]}>{clock(message.t)}{mine ? (read ? "  ✓✓" : "  ✓") : ""}</Text>
+                        {!mine ? <CopyButton text={message.content} /> : null}
+                      </View>
                     </View>
                   </View>
                   {!mine && message.runId ? (
@@ -3207,7 +3216,7 @@ export function ChatScreen({
                   <View style={styles.miniBall} />
                   <View style={[styles.bubble, styles.bubbleHis]}>
                     <Text style={styles.bubbleWho}>{replySourceLabel(live.who, live.brain)}</Text>
-                    <EmojiText style={styles.bubbleText}>{live.text}</EmojiText>
+                    <Markdown text={live.text} />
                   </View>
                 </View>
               ) : null}
@@ -4017,6 +4026,7 @@ const styles = StyleSheet.create({
   profileHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   profileBody: { gap: theme.space.xs, paddingBottom: theme.space.sm },
   profileHero: { height: theme.space.xl * 5, alignItems: "center", justifyContent: "center" },
+  timeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space.sm },
   /** One heading per screen, in the same Oswald style as SectionTitle. */
   sectionTitle: { fontFamily: theme.font.display, color: theme.text, fontWeight: "700", fontSize: theme.type.display.section, textTransform: "uppercase", letterSpacing: 0.78 },
   /** Page titles and notes drawn on the sky (Learn, Memory, Settings). */

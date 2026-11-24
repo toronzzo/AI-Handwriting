@@ -15,8 +15,14 @@ const text = readFileSync(join(root, "src/chat/emojiText.tsx"), "utf8");
 
 test("chat bubbles and the composer use the emoji-safe text", () => {
   assert.match(chat, /import \{ CHAT_FONT_FAMILY, EmojiText \} from "\.\.\/chat\/emojiText"/);
-  assert.match(chat, /<EmojiText style=\{\[styles\.bubbleText, mine && styles\.bubbleTextMine\]\}>\{message\.content\}<\/EmojiText>/);
-  assert.match(chat, /<EmojiText style=\{styles\.bubbleText\}>\{live\.text\}<\/EmojiText>/);
+  assert.match(chat, /<EmojiText style=\{\[styles\.bubbleText, styles\.bubbleTextMine\]\}>\{message\.content\}<\/EmojiText>/);
+  // His replies are Markdown now, and Markdown draws every text run through
+  // EmojiText, so a ZWJ family in a reply still cannot fall apart.
+  assert.match(chat, /<Markdown text=\{message\.content\} \/>/);
+  assert.match(chat, /<Markdown text=\{live\.text\} \/>/);
+  const markdown = readFileSync(join(root, "src/chat/Markdown.tsx"), "utf8");
+  assert.match(markdown, /import \{ EmojiText \} from "\.\/emojiText\.tsx"/);
+  assert.match(markdown, /<EmojiText key=\{index\}>\{inline\.text\}<\/EmojiText>/);
   assert.match(chat, /fontFamily: isWeb \? CHAT_FONT_FAMILY : undefined/);
 });
 
