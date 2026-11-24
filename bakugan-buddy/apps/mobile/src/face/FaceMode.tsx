@@ -17,27 +17,30 @@ import {
   type FacePlayback,
   type FaceSignals,
 } from "./expression.ts";
-import { PreyasFace } from "./PreyasFace";
 import { PreyasHeroSwitch } from "../today/PreyasHeroSwitch";
 import { clipForExpression } from "./clip.ts";
 
+/**
+ * The header avatar: the same 3D ball as the panel, at 46–56 px. The flat face
+ * was the last place the drawing survived; the ball carries the motion now.
+ */
 export function FaceButton({
   signals,
-  playback,
   size,
   open,
-  paused,
   onToggle,
   onLongPress,
 }: {
   signals: FaceSignals;
-  playback: () => FacePlayback;
+  /** Kept for the call site: the 3D ball reads the same signals itself. */
+  playback?: () => FacePlayback;
   size: number;
   open: boolean;
-  paused: boolean;
+  paused?: boolean;
   onToggle: () => void;
   onLongPress: () => void;
 }) {
+  const live = liveExpression(signals, signals.speaking);
   return (
     <Pressable
       onPress={onToggle}
@@ -46,9 +49,9 @@ export function FaceButton({
       hitSlop={6}
       accessibilityRole="button"
       accessibilityLabel={open ? "Close Preyas face" : "Open Preyas face"}
-      accessibilityHint="Shows a large face. Long press opens the profile."
+      accessibilityHint="Shows the large Preyas. Long press opens the profile."
     >
-      <PreyasFace signals={signals} playback={playback} size={size} paused={paused} />
+      <PreyasHeroSwitch talking={live === "talking"} clip={clipForExpression(live)} size={size} />
     </Pressable>
   );
 }

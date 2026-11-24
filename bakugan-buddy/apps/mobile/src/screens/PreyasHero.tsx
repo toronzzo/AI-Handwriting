@@ -33,11 +33,14 @@ function Scene({
   reduce,
   active,
   clip,
+  small,
 }: {
   talking: boolean;
   reduce: boolean;
   active: boolean;
   clip?: PreyasClip;
+  /** A 46 px avatar has no room for the pedestal. */
+  small?: boolean;
 }) {
   const rig = useRef<Group>(null);
   const [gltf, setGltf] = useState<GLTF | null>(null);
@@ -127,14 +130,18 @@ function Scene({
       <ambientLight intensity={0.62} color="#d7f6ff" /> {/* 3d-colour */}
       <directionalLight position={[2.4, 3.6, 2.2]} intensity={1.7} color="#f7fcff" /> {/* 3d-colour */}
       <directionalLight position={[-2.2, 1.1, -1.2]} intensity={0.4} color="#43d9ad" /> {/* 3d-colour */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.78, 0]}>
-        <ringGeometry args={[0.72, 0.98, 40]} />
-        <meshBasicMaterial color="#43d9ad" transparent opacity={0.5} /> {/* 3d-colour */}
-      </mesh>
-      <mesh position={[0, -0.86, 0]}>
-        <cylinderGeometry args={[0.58, 0.78, 0.12, 28]} />
-        <meshStandardMaterial color="#101820" roughness={0.9} /> {/* 3d-colour */}
-      </mesh>
+      {small ? null : (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.78, 0]}>
+          <ringGeometry args={[0.72, 0.98, 40]} />
+          <meshBasicMaterial color="#43d9ad" transparent opacity={0.5} /> {/* 3d-colour */}
+        </mesh>
+      )}
+      {small ? null : (
+        <mesh position={[0, -0.86, 0]}>
+          <cylinderGeometry args={[0.58, 0.78, 0.12, 28]} />
+          <meshStandardMaterial color="#101820" roughness={0.9} /> {/* 3d-colour */}
+        </mesh>
+      )}
       <group ref={rig} scale={0.26} position={[0, 0.1, 0]}>
         {scene ? (
           <primitive object={scene} />
@@ -180,7 +187,7 @@ export function PreyasHero({
   return (
     <View style={[styles.frame, box, size ? undefined : fill ? styles.fill : short ? styles.short : styles.tall]}>
       <Canvas camera={{ position: [0.15, 1.7, 3.6], fov: 32 }} dpr={[1, 1.25]} frameloop={frameloop}>
-        <Scene talking={talking} reduce={reduce} active={visible} clip={clip} />
+        <Scene talking={talking} reduce={reduce} active={visible} clip={clip} small={Boolean(size && size < 90)} />
       </Canvas>
     </View>
   );
