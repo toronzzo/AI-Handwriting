@@ -12,11 +12,14 @@ import { StickerGlyph } from "./StickerGlyph";
 import {
   EXPRESSION_LABEL,
   FACE_EXPRESSIONS,
+  liveExpression,
   type FaceExpression,
   type FacePlayback,
   type FaceSignals,
 } from "./expression.ts";
 import { PreyasFace } from "./PreyasFace";
+import { PreyasHeroSwitch } from "../today/PreyasHeroSwitch";
+import { clipForExpression } from "./clip.ts";
 
 export function FaceButton({
   signals,
@@ -59,10 +62,14 @@ export function FaceMode({
   playback: () => FacePlayback;
   onClose: () => void;
 }) {
-  const { width, height } = useWindowDimensions();
+  const { height } = useWindowDimensions();
   const reduce = useReducedMotion();
   const [pin, setPin] = useState<FaceExpression | null>(null);
-  const size = Math.max(200, Math.min(width - theme.space.lg * 2, height * 0.46, 420));
+  /** The live expression the chat is driving, unless a chip pinned one. */
+  const live = liveExpression(signals, signals.speaking);
+  const expression = pin ?? live;
+  /** Small on purpose: the ball reads as a figurine, not as a poster. */
+  const ball = Math.max(170, Math.min(230, height * 0.24));
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -95,10 +102,16 @@ export function FaceMode({
               <Text style={styles.closeText}>Close</Text>
             </Pressable>
           </View>
-          <PreyasFace signals={signals} playback={playback} size={size} pin={pin} />
+          <PreyasHeroSwitch
+            talking={expression === "talking"}
+            clip={clipForExpression(expression)}
+            size={ball}
+          />
           <Text style={styles.caption}>{pin ? EXPRESSION_LABEL[pin] : "Live"}</Text>
           <Text style={styles.dim}>
-            {pin ? "A preview. Live follows the chat again." : "Follows the mic, the reply, and his voice."}
+            {pin
+              ? "A preview. Live follows the chat again."
+              : "The shell opens when he talks; it follows the mic, the reply, and his voice."}
           </Text>
           <View style={styles.chips}>
             <Chip label="Live" on={pin === null} onPress={() => setPin(null)} />

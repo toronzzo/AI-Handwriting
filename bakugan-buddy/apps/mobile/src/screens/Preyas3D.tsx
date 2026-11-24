@@ -17,8 +17,17 @@
 import { lazy, Suspense } from "react";
 import { StyleSheet, View } from "react-native";
 import { theme } from "../theme";
+import type { PreyasClip } from "./preyasClips";
 
-export type Preyas3DProps = { talking: boolean; short: boolean; fill?: boolean };
+export type Preyas3DProps = {
+  talking: boolean;
+  short?: boolean;
+  fill?: boolean;
+  /** A small square instead of the tall hero: the avatar in the face panel. */
+  size?: number;
+  /** One of the ball's own clips (idle, open, closed, happy). */
+  clip?: PreyasClip;
+};
 
 const HERO_MIN = theme.space.xl * 7;
 const SHORT = theme.space.xl * 5;
@@ -30,13 +39,15 @@ const LazyHero = lazy(async () => {
 });
 
 export function Preyas3D(props: Preyas3DProps) {
+  const box = props.size ? { width: props.size, height: props.size } : undefined;
   return (
     <Suspense
       fallback={
         <View
           style={[
             styles.placeholder,
-            props.fill ? styles.fill : props.short ? styles.short : styles.tall,
+            box,
+            props.size ? undefined : props.fill ? styles.fill : props.short ? styles.short : styles.tall,
           ]}
           accessibilityRole="image"
           accessibilityLabel="Preyas is loading"

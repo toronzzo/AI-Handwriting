@@ -16,6 +16,7 @@ import { PixelSprite } from "../bits/PixelSprite";
 import { PREYAS_SPRITE, moodFrames } from "../bits/preyasSprite";
 import { useBitMode } from "../bits/useBitMode";
 import { Preyas3D } from "../screens/Preyas3D";
+import type { PreyasClip } from "../screens/preyasClips";
 import { loadCompanionState, previewDecayedMood } from "../state/emotionStore";
 
 /** Preyas starts neutral and stays there until the store answers. */
@@ -43,8 +44,12 @@ export function usePreyasMood(enabled: boolean): string {
 
 type Props = {
   talking: boolean;
-  short: boolean;
+  short?: boolean;
   fill?: boolean;
+  /** A small square for the 3D ball (the face panel avatar). */
+  size?: number;
+  /** One of the ball's own clips; the pixel Preyas has no clips. */
+  clip?: PreyasClip;
   /** Size of one art pixel, in device pixels. */
   scale?: number;
   /**
@@ -57,10 +62,19 @@ type Props = {
 };
 
 /** Preyas: the 3D ball when the switch is OFF, the pixel sprite when it is ON. */
-export function PreyasHeroSwitch({ talking, short, fill, scale = 5, fitBox = false, accessibilityLabel }: Props) {
+export function PreyasHeroSwitch({
+  talking,
+  short,
+  fill,
+  size,
+  clip,
+  scale = 5,
+  fitBox = false,
+  accessibilityLabel,
+}: Props) {
   const [bit] = useBitMode();
   const mood = usePreyasMood(bit);
-  if (!bit) return <Preyas3D talking={talking} short={short} fill={fill} />;
+  if (!bit) return <Preyas3D talking={talking} short={short} fill={fill} size={size} clip={clip} />;
   const frames = moodFrames(mood);
   return (
     <PixelSprite
