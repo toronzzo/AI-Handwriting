@@ -13,12 +13,9 @@ function tempDir() {
 function dataDirWithSpentSpend() {
   const dir = tempDir();
   const now = new Date();
-  const history = path.join(dir, "history");
-  fs.mkdirSync(history, { recursive: true });
-  fs.writeFileSync(
-    path.join(history, "chat.jsonl"),
-    JSON.stringify({ t: now.getTime(), role: "assistant", content: "paid", who: "paid", costUsd: 0.6 }) + "\n",
-  );
+  const spend = path.join(dir, "spend");
+  fs.mkdirSync(spend, { recursive: true });
+  fs.writeFileSync(path.join(spend, "paid.jsonl"), JSON.stringify({ t: now.getTime(), usd: 0.6 }) + "\n");
   fs.mkdirSync(path.join(dir, "settings"), { recursive: true });
   fs.writeFileSync(path.join(dir, "settings", "spend.json"), JSON.stringify({ dailyCapUsd: 1.0 }));
   return dir;

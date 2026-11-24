@@ -156,6 +156,21 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
     const stats = usage
       ? { tps: tokensPerSec(usage, startedAt, Date.now()), costUsd: events.paid ? paidCostUsd(usage, Date.now()) : null }
       : {};
+    // The money is spent whether or not the reply reaches the phone, so this
+    // runs before the client-closed check below. A reply with no usage carries
+    // no exact figure; then the estimate the gate already allowed stands in,
+    // so the daily ledger never quietly loses a paid turn.
+    if (events.paid) {
+      const exact = Number(stats.costUsd) > 0;
+      const spentUsd = exact ? Number(stats.costUsd) : Number(events.paidEstimateUsd);
+      if (Number.isFinite(spentUsd) && spentUsd > 0 && typeof events.onPaidCost === "function") {
+        try {
+          events.onPaidCost(spentUsd, exact);
+        } catch {
+          /* recording a finished turn must never break the reply */
+        }
+      }
+    }
     const ramMb =
       events.local && events.ramPromise
         ? await Promise.race([events.ramPromise, new Promise((resolve) => setTimeout(() => resolve(null), 800))])

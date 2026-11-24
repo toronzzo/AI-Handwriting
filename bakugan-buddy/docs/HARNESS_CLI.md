@@ -161,13 +161,22 @@ Everything here is the user's to set once; Preyas can never change it.
    "Set HARNESS_USD_PER_MTOK_IN and _OUT in brain.env (check the DeepSeek price page)".
 
 2. **Daily limit.** The limit is **$1.00 a day by default**, shared with every paid
-   run (chat escalation and Harness). The user changes it in the app under
-   **Settings → Daily limit**, and it is stored in
+   run (paid chat, chat escalation, computer escalation, tasks and Harness). The
+   user changes it in the app under **Settings → Daily limit**, and it is stored in
    `<data root>/settings/spend.json` (`{"dailyCapUsd": …, "updatedAt": …}`).
    Lowering it below today's spend is allowed and simply blocks new runs until
    tomorrow; raising it applies immediately. Preyas has no tool that can change
    the limit (the only writer is the proxy's `POST /v1/settings/spend` route, which
    requires `confirm: "save"`).
+
+   The limit is checked on the Mac **before** any paid request leaves it, and the
+   brain writes every paid line itself into `<data root>/spend/paid.jsonl`
+   (`{t, usd, src}`) from the usage the provider reported; a cost the app puts on
+   its own message is only a label and never decides the cap. A paid chat turn
+   reserves its worst case while it runs, so two turns cannot both spend the same
+   last cents, and that room comes back on failure, timeout or a phone that walks
+   away. `GET /v1/paid` reports today's spend and cap, and turns the paid route off
+   with the numbers when the limit is reached.
 
 3. **Protect `main` on GitHub.** Turn on branch protection for `main` and require a
    pull request plus passing checks before merging. Then even a bad run cannot push

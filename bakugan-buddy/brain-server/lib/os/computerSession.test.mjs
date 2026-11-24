@@ -53,6 +53,8 @@ function makeSession(overrides = {}) {
     proposer: overrides.proposer ?? { propose: async () => ({ ...CLICK_E0 }) },
     escalateProposer: async ({ prompt }) => {
       escalateCalls.push(prompt);
+      if (overrides.escalateThrows) throw new Error("paid gateway unavailable");
+      if (overrides.escalateAnswer) return overrides.escalateAnswer;
       return overrides.escalateRaw ?? '{"action":"click","target":"e0","why":"the paid model says click"}';
     },
     review,
@@ -440,6 +442,54 @@ test("over the daily cap the escalation is refused and nothing is sent", async (
   assert.equal(escalateCalls.length, 0);
   const preview = await session.escalatePreview({});
   assert.equal(preview.allowed, false);
+});
+
+test("a confirmed paid escalation writes exactly one line to the shared paid ledger", async () => {
+  const usage = { prompt_tokens: 1500, completion_tokens: 120 };
+  const { session, dir } = await enabledSession({
+    escalateAnswer: { text: '{"action":"click","target":"e0","why":"the paid model says click"}', usage },
+  });
+  try {
+    await session.start({ goal: "open the composer" });
+    await session.step();
+    const yes = await session.escalateConfirm({ yes: true });
+    assert.equal(yes.ok, true);
+    assert.equal(yes.escalated, true, "the approved call still happens");
+
+    const spendFile = path.join(dir, "spend", "paid.jsonl");
+    const lines = fs
+      .readFileSync(spendFile, "utf8")
+      .split("\n")
+      .filter((line) => line.trim());
+    assert.equal(lines.length, 1, "one approved call, one ledger line, never two");
+    const entry = JSON.parse(lines[0]);
+    assert.equal(entry.src, "computer", "the line says where the money went");
+    assert.ok(entry.usd > 0 && entry.usd < 0.01, "settled from the usage the gateway reported");
+    // Settled once means the daily total moves by exactly that one amount.
+    const spentTodayUsd = (await import("../coach/spendGate.mjs")).spentTodayUsd;
+    assert.ok(Math.abs(spentTodayUsd(dir) - entry.usd) < 1e-9);
+    // And no reservation is left holding room after the call finished.
+    const inFlightCostUsd = (await import("../coach/spendGate.mjs")).inFlightCostUsd;
+    assert.equal(inFlightCostUsd(), 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a paid escalation that fails releases its reservation and writes no spend", async () => {
+  const { session, dir } = await enabledSession({ escalateThrows: true });
+  try {
+    await session.start({ goal: "open the composer" });
+    await session.step();
+    const yes = await session.escalateConfirm({ yes: true });
+    assert.equal(yes.ok, false);
+    assert.equal(yes.error, "escalate_failed");
+    assert.equal(fs.existsSync(path.join(dir, "spend", "paid.jsonl")), false, "nothing was charged, nothing written");
+    const inFlightCostUsd = (await import("../coach/spendGate.mjs")).inFlightCostUsd;
+    assert.equal(inFlightCostUsd(), 0, "the refused call hands its room back");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a paid answer that is not json becomes an ask", async () => {

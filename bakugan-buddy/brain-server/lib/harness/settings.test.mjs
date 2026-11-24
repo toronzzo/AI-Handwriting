@@ -202,6 +202,41 @@ function relBrain(file) {
   return path.relative(BRAIN_ROOT, file).split(path.sep).join("/");
 }
 
+test("the paid chat route checks the daily limit before it sends anything", () => {
+  // Wiring scan: the gate has its own tests, this one keeps the route honest.
+  // A paid turn must reserve room before pipeChatCompletion, settle from the
+  // brain's own ledger, and free that room on every exit path.
+  const proxy = fs.readFileSync(path.join(BRAIN_ROOT, "proxy.mjs"), "utf8");
+  const paidChat = proxy.slice(proxy.indexOf('url.pathname === "/v1/chat/completions"'));
+  const gateAt = paidChat.indexOf("beginPaidChat(");
+  const sendAt = paidChat.indexOf('"http://127.0.0.1:4000/v1/chat/completions"');
+  assert.ok(gateAt > 0, "the paid chat route consults the spend gate and reserves room");
+  assert.ok(sendAt > 0, "the paid chat route still forwards to the gateway");
+  assert.ok(gateAt < sendAt, "the gate runs before the gateway call");
+  assert.match(paidChat, /res, 402/, "a refused paid chat answers 402");
+  assert.match(paidChat, /appendPaidSpend/, "the app's number is never the ledger");
+  assert.match(paidChat, /paidTurn.release\(\)/, "every exit path frees the reservation");
+  assert.ok(
+    paidChat.indexOf("paidTurn.release()") > paidChat.indexOf("pipeChatCompletion("),
+    "the release runs after the call, in the finally block",
+  );
+
+  // The paid status the app renders must not offer a route the cap will refuse.
+  const paidStatus = proxy.slice(proxy.indexOf('url.pathname === "/v1/paid"'));
+  assert.match(paidStatus, /paidRoomStatus\(dataDir\)/, "the paid status reads the same cap");
+  assert.match(paidStatus, /status.available = false/, "over the cap the route is reported off");
+
+  const spendGate = fs.readFileSync(path.join(BRAIN_ROOT, "lib", "coach", "spendGate.mjs"), "utf8");
+  assert.ok(
+    spendGate.includes('path.join(dataDir, "spend", "paid.jsonl")'),
+    "today's paid spend is read from the brain's ledger",
+  );
+  assert.ok(
+    !spendGate.includes('path.join(dataDir, "history", "chat.jsonl")'),
+    "a cost the client reported may not decide the cap",
+  );
+});
+
 test("writeSpendSetting and settings/spend.json live only in settings.mjs, its test and proxy.mjs", () => {
   const allowed = new Set([
     "lib/harness/settings.mjs",
