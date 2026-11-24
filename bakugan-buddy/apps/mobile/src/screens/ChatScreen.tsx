@@ -3604,8 +3604,12 @@ export function ChatScreen({
             </View>
             <ScrollView contentContainerStyle={styles.profileBody}>
               <View style={styles.profileHero}>
-                {/* fitBox: the pixel Preyas is centred at an integer scale in this box (FIX-2). */}
-                <PreyasHeroSwitch talking={phase === "speaking"} short={false} fill fitBox />
+                {/* Small on purpose: the ball reads as a figurine on the card. */}
+                <PreyasHeroSwitch
+                  talking={phase === "speaking"}
+                  size={132}
+                  clip={phase === "speaking" ? "open" : "idle"}
+                />
               </View>
               <Text style={styles.kicker}>YOUR PARTNER</Text>
               <Text style={styles.bigName}>PREYAS</Text>
@@ -4012,7 +4016,7 @@ const styles = StyleSheet.create({
   },
   profileHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   profileBody: { gap: theme.space.xs, paddingBottom: theme.space.sm },
-  profileHero: { height: theme.space.xl * 8 },
+  profileHero: { height: theme.space.xl * 5, alignItems: "center", justifyContent: "center" },
   /** One heading per screen, in the same Oswald style as SectionTitle. */
   sectionTitle: { fontFamily: theme.font.display, color: theme.text, fontWeight: "700", fontSize: theme.type.display.section, textTransform: "uppercase", letterSpacing: 0.78 },
   /** Page titles and notes drawn on the sky (Learn, Memory, Settings). */
