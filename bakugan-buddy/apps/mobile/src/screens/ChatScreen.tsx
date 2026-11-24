@@ -105,6 +105,8 @@ import { theme } from "../theme";
 import { CHAT_FONT_FAMILY, EmojiText } from "../chat/emojiText";
 import { FaceButton, FaceMode } from "../face/FaceMode";
 import { EXPRESSION_LABEL, liveExpression, speechMood, type FacePlayback, type FaceSignals } from "../face/expression.ts";
+import { bodyStateFor } from "../face/bodyState.ts";
+import { clipForExpression } from "../face/clip.ts";
 
 /** Web lets the sky show through the shell; the iPhone paints the page colour. */
 const isWeb = typeof document !== "undefined";
@@ -3697,9 +3699,9 @@ export function ChatScreen({
               <View style={styles.profileHero}>
                 {/* Small on purpose: the ball reads as a figurine on the card. */}
                 <PreyasHeroSwitch
-                  talking={phase === "speaking"}
+                  state={bodyStateFor(faceNow)}
                   size={132}
-                  clip={phase === "speaking" ? "open" : "idle"}
+                  clip={clipForExpression(faceNow)}
                 />
               </View>
               <Text style={styles.kicker}>YOUR PARTNER</Text>

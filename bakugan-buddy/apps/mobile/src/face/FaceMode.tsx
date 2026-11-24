@@ -19,6 +19,7 @@ import {
 } from "./expression.ts";
 import { PreyasHeroSwitch } from "../today/PreyasHeroSwitch";
 import { clipForExpression } from "./clip.ts";
+import { bodyStateFor } from "./bodyState.ts";
 
 /**
  * The header avatar: the same 3D ball as the panel, at 46–56 px. The flat face
@@ -51,7 +52,7 @@ export function FaceButton({
       accessibilityLabel={open ? "Close Preyas face" : "Open Preyas face"}
       accessibilityHint="Shows the large Preyas. Long press opens the profile."
     >
-      <PreyasHeroSwitch talking={live === "talking"} clip={clipForExpression(live)} size={size} />
+      <PreyasHeroSwitch state={bodyStateFor(live)} clip={clipForExpression(live)} size={size} />
     </Pressable>
   );
 }
@@ -106,7 +107,7 @@ export function FaceMode({
             </Pressable>
           </View>
           <PreyasHeroSwitch
-            talking={expression === "talking"}
+            state={bodyStateFor(expression)}
             clip={clipForExpression(expression)}
             size={ball}
           />
@@ -114,7 +115,7 @@ export function FaceMode({
           <Text style={styles.dim}>
             {pin
               ? "A preview. Live follows the chat again."
-              : "The shell opens when he talks; it follows the mic, the reply, and his voice."}
+              : "Live: he leans in while the mic is open, tilts while he thinks, and the shell opens when he speaks."}
           </Text>
           <View style={styles.chips}>
             <Chip label="Live" on={pin === null} onPress={() => setPin(null)} />

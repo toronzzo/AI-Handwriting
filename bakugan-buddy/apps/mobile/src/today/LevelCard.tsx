@@ -124,7 +124,7 @@ export function LevelCard() {
           style={hasHero ? styles.heroCorner : styles.hero}
           pointerEvents={hasHero ? "auto" : "box-none"}
         >
-          <PreyasHeroSwitch talking={false} short={false} fill fitBox={!hasHero} />
+          <PreyasHeroSwitch state="resting" short={false} fill fitBox={!hasHero} />
         </View>
         {levelUp ? (
           <Animated.View

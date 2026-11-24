@@ -8,6 +8,7 @@ import {
   Vector3,
   type AnimationAction,
   type Group,
+  type Mesh,
 } from "three";
 import type { GLTF } from "three/addons/loaders/GLTFLoader.js";
 import { Canvas, useFrame, useThree } from "../room/fiber";
@@ -15,6 +16,7 @@ import { loadPreyasBall } from "../room/loadPreyas";
 import { theme } from "../theme";
 import { usePageVisible } from "../ui/usePageVisible";
 import { useReducedMotion } from "../ui/useReducedMotion";
+import { BODY_LABEL, haloFor, motionFor, type PreyasBodyState } from "../face/bodyState.ts";
 import type { PreyasClip } from "./preyasClips";
 
 /**
@@ -29,13 +31,13 @@ function holdsPose(clip: PreyasClip): boolean {
 }
 
 function Scene({
-  talking,
+  state,
   reduce,
   active,
   clip,
   small,
 }: {
-  talking: boolean;
+  state: PreyasBodyState;
   reduce: boolean;
   active: boolean;
   clip?: PreyasClip;
@@ -94,13 +96,37 @@ function Scene({
     playing.current = wanted ?? null;
   }, [clip, scene]);
 
+  // The state drives the body: spin speed, the speaking bob and the thinking
+  // wobble all come from the real signals the chat already has, never a timer.
+  const motion = motionFor(state, reduce);
+  const halo = haloFor(state, reduce);
+  const haloRef = useRef<Mesh>(null);
+  /** Seconds of visible time, so the breath is platform-neutral (no wall clock). */
+  const elapsed = useRef(0);
   useFrame((_, dt) => {
     if (reduce) return;
     mixer.current?.update(dt);
     const node = rig.current;
-    if (!node) return;
-    node.rotation.y += dt * (talking ? 0.85 : 0.28);
-    node.position.y = talking ? Math.sin(node.rotation.y * 3) * 0.05 : 0;
+    if (node) {
+      node.rotation.y += dt * motion.spin;
+      node.rotation.z = motion.wobble ? Math.sin(node.rotation.y * 2.2) * motion.wobble : 0;
+      node.position.y = motion.bob ? Math.sin(node.rotation.y * 3) * motion.bob : 0;
+      // Listening leans very slightly towards the person who just spoke.
+      node.rotation.x = state === "listening" ? -0.06 : 0;
+    }
+    const ring = haloRef.current;
+    if (ring) {
+      elapsed.current += dt;
+      const breathe =
+        halo.pulseSeconds > 0 ? Math.sin((elapsed.current / halo.pulseSeconds) * Math.PI * 2) : 0;
+      // Keep the state's own radius: the breath rides on top of it, it never
+      // replaces it.
+      ring.scale.setScalar(halo.radius * (1 + breathe * 0.035));
+      const material = ring.material as { opacity?: number };
+      if (material && "opacity" in material) {
+        material.opacity = Math.min(1, Math.max(0, halo.strength + breathe * 0.08));
+      }
+    }
   });
 
   const { camera } = useThree();
@@ -131,9 +157,9 @@ function Scene({
       <directionalLight position={[2.4, 3.6, 2.2]} intensity={1.7} color="#f7fcff" /> {/* 3d-colour */}
       <directionalLight position={[-2.2, 1.1, -1.2]} intensity={0.4} color="#43d9ad" /> {/* 3d-colour */}
       {small ? null : (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.78, 0]}>
+        <mesh ref={haloRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.78, 0]} scale={halo.radius}>
           <ringGeometry args={[0.72, 0.98, 40]} />
-          <meshBasicMaterial color="#43d9ad" transparent opacity={0.5} /> {/* 3d-colour */}
+          <meshBasicMaterial color={theme.accent} transparent opacity={halo.strength} />
         </mesh>
       )}
       {small ? null : (
@@ -157,7 +183,13 @@ function Scene({
 }
 
 /**
- * The ball on a pedestal. One slow spin, no room simulation.
+ * The ball on a pedestal. No room simulation: the body speaks in four states.
+ *
+ * `state` is what he is really doing (rest / listening / thinking / speaking),
+ * decided by face/bodyState.ts from the same signals the face already uses: the
+ * mic, a reply in flight, his voice. The halo changes size and brightness for
+ * every state and the loop adds spin, a lean, a wobble or the speaking bob, so
+ * you can read him at a glance without any invented activity.
  *
  * `size` renders a small square (the avatar in the face panel) instead of the
  * tall hero; `fill` lets the frame take whatever height its parent gives it (the
@@ -165,16 +197,17 @@ function Scene({
  *
  * Slice 11: the loop is "never" while the tab is hidden, "demand" with a
  * 33 ms invalidate() pulse (~30 fps cap) while visible, and reduced motion
- * gets a single static render with no spin at all.
+ * gets a single static render: the halo still changes size and brightness, so
+ * the state survives as information instead of movement.
  */
 export function PreyasHero({
-  talking,
+  state,
   short = false,
   size,
   clip,
   fill,
 }: {
-  talking: boolean;
+  state: PreyasBodyState;
   short?: boolean;
   size?: number;
   clip?: PreyasClip;
@@ -185,9 +218,13 @@ export function PreyasHero({
   const frameloop = visible && !reduce ? "demand" : "never";
   const box = size ? { width: size, height: size } : undefined;
   return (
-    <View style={[styles.frame, box, size ? undefined : fill ? styles.fill : short ? styles.short : styles.tall]}>
+    <View
+      style={[styles.frame, box, size ? undefined : fill ? styles.fill : short ? styles.short : styles.tall]}
+      accessibilityRole="image"
+      accessibilityLabel={BODY_LABEL[state]}
+    >
       <Canvas camera={{ position: [0.15, 1.7, 3.6], fov: 32 }} dpr={[1, 1.25]} frameloop={frameloop}>
-        <Scene talking={talking} reduce={reduce} active={visible} clip={clip} small={Boolean(size && size < 90)} />
+        <Scene state={state} reduce={reduce} active={visible} clip={clip} small={Boolean(size && size < 90)} />
       </Canvas>
     </View>
   );
