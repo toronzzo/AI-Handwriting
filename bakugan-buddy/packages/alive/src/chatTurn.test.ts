@@ -18,6 +18,7 @@ import {
   chatTarget,
   resolveChatBase,
   streamReply,
+  STOPPED_ERROR,
   trimHistory,
   type ChatMessage,
 } from "./chatTurn.ts";
@@ -195,4 +196,60 @@ test("streamReply marks a backup-brain reply from the response header", async ()
   assert.equal(replySourceLabel("preyas", ""), "Preyas");
   assert.equal(replySourceLabel("paid"), "deepseek-flash");
   assert.equal(replySourceLabel("user"), "You");
+});
+
+test("a pre-stopped reply never sends a request", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let requests = 0;
+  const result = await streamReply({
+    base: "http://unused.test", model: "preyas", messages: [], signal: controller.signal,
+    fetchImpl: async () => { requests++; throw new Error("unexpected request"); },
+  });
+  assert.equal(requests, 0);
+  assert.equal(result.error, STOPPED_ERROR);
+  assert.equal(result.ok, false);
+});
+
+test("stop aborts the transport and discards a partial reply and buffered deltas", async () => {
+  const controller = new AbortController();
+  const seen: string[] = [];
+  let transportAborted = false;
+  const result = await streamReply({
+    base: "http://unused.test", model: "preyas", messages: [], signal: controller.signal,
+    fetchImpl: async (_url, init) => {
+      init?.signal?.addEventListener("abort", () => { transportAborted = true; });
+      const line = (content: string) => "data: " + JSON.stringify({ choices: [{ delta: { content } }] }) + "\n\n";
+      return new Response(line("First") + line(" second"));
+    },
+    onDelta: ({ answer }) => { seen.push(answer); controller.abort(); },
+  });
+  assert.deepEqual(seen, ["First"]);
+  assert.equal(transportAborted, true);
+  assert.equal(result.error, STOPPED_ERROR);
+  assert.equal(result.text, "");
+  assert.equal(result.ok, false);
+});
+
+test("stop while waiting for headers aborts the pending request", async () => {
+  const controller = new AbortController();
+  const pending = streamReply({
+    base: "http://unused.test", model: "preyas", messages: [], signal: controller.signal,
+    fetchImpl: (_url, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new Error("connection closed")));
+    }),
+  });
+  controller.abort();
+  assert.equal((await pending).error, STOPPED_ERROR);
+});
+
+test("an ordinary timeout is still a failure, not a user stop", async () => {
+  const result = await streamReply({
+    base: "http://unused.test", model: "preyas", messages: [], timeoutMs: 5,
+    fetchImpl: (_url, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new Error("timed out")));
+    }),
+  });
+  assert.equal(result.error, "timed out");
+  assert.equal(result.ok, false);
 });

@@ -128,10 +128,12 @@ test("200 headers then a stalled stream that times out never resets the idle win
   }
 });
 
-test("200 headers then a client that leaves never resets the idle window", async () => {
+test("disconnect stops local streaming and never resets the idle window", async () => {
+  let upstreamClosed = false;
   const server = await startUpstream((req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.write(CONTENT_CHUNK); // content arrived, then the client walked away
+    res.once("close", () => { upstreamClosed = true; });
   });
   try {
     let answered = 0;
@@ -139,6 +141,8 @@ test("200 headers then a client that leaves never resets the idle window", async
     await waitFor(() => res.chunks.length > 0, 2000);
     res.emit("close");
     await running;
+    await waitFor(() => upstreamClosed, 2000);
+    assert.ok(brainRecords.some((record) => record.state === "off"), "the local brain no longer shows active work");
     assert.equal(answered, 0, "a disconnected stream is not an answer");
     assert.ok(!brainRecords.some((record) => record.state === "done"), "the brain never saw a completed reply");
   } finally {

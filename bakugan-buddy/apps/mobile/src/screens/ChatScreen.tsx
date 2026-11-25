@@ -324,6 +324,8 @@ export function ChatScreen({
   const messagesRef = useRef<Shown[]>([]);
   const summaryRef = useRef("");
   const busy = useRef(false);
+  const replyAbort = useRef<AbortController | null>(null);
+  const [replyCanStop, setReplyCanStop] = useState(false);
   const sendEpoch = useRef(0);
   const sendRef = useRef<(text: string, askPaid: boolean) => Promise<void>>(async () => {});
   const [messages, setMessages] = useState<Shown[]>([]);
@@ -1926,9 +1928,9 @@ export function ChatScreen({
       /* the line is still on screen */
     }
   }
-  async function speakPreyas(text: string, final: boolean, fresh = false) {
+  async function speakPreyas(text: string, final: boolean, fresh = false, signal?: AbortSignal) {
     if (fresh) resetSpeech(bag);
-    queueSpokenLine(bag, text, speechMood(text), final);
+    queueSpokenLine(bag, text, speechMood(text), final, signal);
   }
   async function ask(
     route: "local" | "paid",
@@ -1939,6 +1941,7 @@ export function ChatScreen({
     searchQuery = "",
     think = false,
     runId = "",
+    signal?: AbortSignal,
   ) {
     // Local and paid both talk to the brain. The gateway forwards without the
     // pairing token, so a direct :4000 call comes back 401.
@@ -1956,6 +1959,7 @@ export function ChatScreen({
       model,
       messages: toModelMessages(prior, summaryRef.current, withSources(userText, searchQuery, sources)),
       think,
+      signal,
       timeoutMs:
         route === "paid"
           ? 45_000
@@ -1989,7 +1993,7 @@ export function ChatScreen({
         if (!isCurrent()) return;
         setLive(shown ? { who: route === "paid" ? "paid" : "preyas", text: shown, brain: sawBackup ? "backup" : undefined } : null);
         if (route === "local" && shown) {
-          void speakPreyas(shown, false, !spoke);
+          void speakPreyas(shown, false, !spoke, signal);
           spoke = true;
         }
       },
@@ -1997,7 +2001,7 @@ export function ChatScreen({
     if (thinkStarted && thinkStep) runsRef.current.get(runId)?.markDone(thinkStep);
     if (isCurrent()) setLive(null);
     const parsed = splitPaidHint(result.text || last);
-    if (isCurrent() && route === "local" && parsed.text) void speakPreyas(parsed.text, true, !spoke);
+    if (!signal?.aborted && isCurrent() && route === "local" && parsed.text) void speakPreyas(parsed.text, true, !spoke, signal);
     const { brain: headerBrain, ...rest } = result;
     const brain: "backup" | undefined = headerBrain === "backup" || sawBackup ? "backup" : undefined;
     return {
@@ -2010,6 +2014,15 @@ export function ChatScreen({
       endpoint: { base, via: "proxy" as const },
     };
   }
+  function stopReply() {
+    const controller = replyAbort.current;
+    if (!controller || controller.signal.aborted) return;
+    controller.abort();
+    interruptTalk(bag);
+    setLive(null);
+    setReplyCanStop(false);
+  }
+
   async function send(text: string, askPaid: boolean) {
     const trimmed = text.trim();
     if (!trimmed || busy.current || !bag.brainUrl) return;
@@ -2091,6 +2104,14 @@ export function ChatScreen({
       void remember(userMsg, chatId);
     }
     if (isCurrent()) setNote("");
+    // One controller for the reply and any follow-up model call. Search runs
+    // before the Stop control appears.
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const startReply = () => {
+      replyAbort.current = controller;
+      setReplyCanStop(true);
+    };
     try {
       let route = chooseRoute({
         askPaid,
@@ -2117,9 +2138,11 @@ export function ChatScreen({
         if (!sources.length && isCurrent() && (shouldOfflineSearch(trimmed) || shouldWebSearch(trimmed))) setChip("No library or web results");
         const think = thinkForced || wantsThinking(trimmed);
         if (think && isCurrent()) setThinking(true);
-        const local = await ask("local", history, trimmed, isCurrent, sources, searchQuery, think, runId).finally(() => {
+        startReply();
+        const local = await ask("local", history, trimmed, isCurrent, sources, searchQuery, think, runId, signal).finally(() => {
           if (isCurrent()) setThinking(false);
         });
+        if (signal.aborted) return;
         const cleaned = splitPaidHint(local.text);
         if (isCurrent() && cleaned.suggestPaid) setHintPaid(true);
         if (local.ok) {
@@ -2195,7 +2218,13 @@ export function ChatScreen({
         }
       }
       if (route.route !== "paid") return;
+      if (signal.aborted) return;
+      // Paid requests need provider-usage accounting even when interrupted.
+      // This control only stops local model replies.
+      replyAbort.current = null;
+      setReplyCanStop(false);
       const paidReply = await ask("paid", history, trimmed, isCurrent, [], "", false, runId);
+      if (signal.aborted) return;
       if (!paidReply.ok) {
         const missed = paidReply.error || "The paid model didn't answer.";
         publishFlight({ chatId, reply: null, error: missed });
@@ -2221,6 +2250,7 @@ export function ChatScreen({
       }
       scheduleNotesCheck();
       const reactionHistory: ChatMessage[] = [...history, userMsg, paidMsg];
+      startReply();
       const reaction = await ask(
         "local",
         reactionHistory,
@@ -2230,7 +2260,9 @@ export function ChatScreen({
         "",
         false,
         runId,
+        signal,
       );
+      if (signal.aborted) return;
       if (reaction.ok) {
         const line = splitPaidHint(reaction.text).text;
         const reply: Shown = {
@@ -2251,6 +2283,13 @@ export function ChatScreen({
         scheduleNotesCheck();
       }
     } finally {
+      replyAbort.current = null;
+      setReplyCanStop(false);
+      if (signal.aborted) {
+        const stopped = "Reply stopped.";
+        if (isCurrent()) setNote(stopped);
+        else publishFlight({ chatId, reply: null, error: stopped });
+      }
       bag.thinking = false;
       busy.current = false;
       isRunActive.current = false;
@@ -3331,7 +3370,7 @@ export function ChatScreen({
                 <Text style={styles.typing}>Preyas is thinking…</Text>
               ) : null}
               {searchNote && !searching ? <Text style={styles.note}>{searchNote}</Text> : null}
-              {note ? <Text style={styles.note}>{note}</Text> : null}
+              {note ? <Text accessibilityLiveRegion="polite" style={styles.note}>{note}</Text> : null}
               {task ? (
                 <View style={styles.taskCard}>
                   <Text style={styles.taskStatus}>{taskStatusLine(task)}</Text>
@@ -3453,11 +3492,11 @@ export function ChatScreen({
               </Pressable>
               <Pressable
                 style={styles.send}
-                onPress={submitDraft}
+                onPress={replyCanStop ? stopReply : submitDraft}
                 accessibilityRole="button"
-                accessibilityLabel="Send"
+                accessibilityLabel={replyCanStop ? "Stop reply" : "Send"}
               >
-                <Text style={styles.sendText}>➤</Text>
+                <Text style={styles.sendText}>{replyCanStop ? "Stop" : "➤"}</Text>
               </Pressable>
               {wide ? (
                 <HarnessLauncher chatId={activeChatId} onOpenSettings={() => onSection?.("settings")} />

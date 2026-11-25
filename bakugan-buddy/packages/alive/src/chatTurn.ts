@@ -364,6 +364,9 @@ export function replySourceLabel(who: string | undefined, brain?: string): strin
   return brain === "backup" ? "Preyas · backup brain" : "Preyas";
 }
 
+/** What a reply reports when the person pressed stop. The UI shows this text. */
+export const STOPPED_ERROR = "stopped";
+
 export async function streamReply(options: {
   base: string;
   model: string;
@@ -375,11 +378,28 @@ export async function streamReply(options: {
   onDelta?: (update: { answer: string; thinking: string; inThink: boolean }) => void;
   /** Fires once, when the response headers arrive. "backup" or "". */
   onBrain?: (brain: "backup" | "") => void;
+  /**
+   * The caller's own stop button. Aborting it ends the request the same way the
+   * timeout does; the reply is reported as "stopped" rather than as a failure,
+   * so the UI can say what really happened.
+   */
+  signal?: AbortSignal;
 }): Promise<{ text: string; thinking: string; usage: TokenUsage | null; ok: boolean; error: string; brain: "backup" | "" }> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? LOCAL_TIMEOUT_MS);
+  /** True only when the person pressed stop, never when we timed out. */
+  let stopped = false;
+  const onStop = () => {
+    stopped = true;
+    controller.abort();
+  };
+  if (options.signal) {
+    if (options.signal.aborted) onStop();
+    else options.signal.addEventListener("abort", onStop);
+  }
   try {
+    if (stopped) throw new Error(STOPPED_ERROR);
     const res = await fetchImpl(`${options.base.replace(/\/$/, "")}/v1/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -398,6 +418,7 @@ export async function streamReply(options: {
       }),
       signal: controller.signal,
     });
+    if (stopped) throw new Error(STOPPED_ERROR);
     const brain = res.headers.get("x-preyas-brain") === "backup" ? "backup" : "";
     options.onBrain?.(brain);
     if (!res.ok || !res.body) {
@@ -412,6 +433,7 @@ export async function streamReply(options: {
           /* keep the status text */
         }
       }
+      if (stopped) throw new Error(STOPPED_ERROR);
       return { text: "", thinking: "", usage: null, ok: false, error, brain };
     }
     const reader = res.body.getReader();
@@ -422,11 +444,13 @@ export async function streamReply(options: {
     let usage: TokenUsage | null = null;
     for (;;) {
       const step = await reader.read();
+      if (stopped) throw new Error(STOPPED_ERROR);
       if (step.done) break;
       buf += decoder.decode(step.value, { stream: true });
       const parts = buf.split("\n");
       buf = parts.pop() ?? "";
       for (let i = 0; i < parts.length; i++) {
+        if (stopped) throw new Error(STOPPED_ERROR);
         const piece = parseSseBlock(parts[i]!);
         text += piece.text;
         reasoning += piece.reasoning;
@@ -442,6 +466,7 @@ export async function streamReply(options: {
       const shown = visibleReply(text, reasoning);
       if (shown.answer || shown.thinking) options.onDelta?.(shown);
     }
+    if (stopped) throw new Error(STOPPED_ERROR);
     const shown = visibleReply(text, reasoning);
     return {
       text: shown.answer,
@@ -452,10 +477,13 @@ export async function streamReply(options: {
       brain,
     };
   } catch (error) {
+    // A stop is not a failure: the person asked for it, and the UI says so.
+    if (stopped) return { text: "", thinking: "", usage: null, ok: false, error: STOPPED_ERROR, brain: "" };
     const message = error instanceof Error ? error.message : String(error);
     return { text: "", thinking: "", usage: null, ok: false, error: message, brain: "" };
   } finally {
     clearTimeout(timer);
+    options.signal?.removeEventListener("abort", onStop);
   }
 }
 

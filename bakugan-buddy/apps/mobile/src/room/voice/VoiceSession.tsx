@@ -52,8 +52,8 @@ export function interruptTalk(sinks: TalkSinks): void {
   stop?.();
 }
 
-export async function speakSentence(sinks: TalkSinks, sentence: string, mood: string): Promise<void> {
-  if (!sinks.brainUrl || !sentence.trim()) return;
+export async function speakSentence(sinks: TalkSinks, sentence: string, mood: string, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted || !sinks.brainUrl || !sentence.trim()) return;
   if (ttsResting()) {
     sinks.onTtsQuiet?.();
     return;
@@ -62,6 +62,7 @@ export async function speakSentence(sinks: TalkSinks, sentence: string, mood: st
   // The brain also starts this line on the Mac's haptic trackpad when that
   // switch is on. Then the trackpad is the speaker and the WAV stays unplayed.
   const trackpad = await refreshTrackpadVoice(sinks.brainUrl);
+  if (signal?.aborted) return;
   const wav = await synthesizeLine(sinks.brainUrl, sentence, mood, sinks.hearLang || "en");
   if (!wav) {
     if (ttsResting()) sinks.onTtsQuiet?.();
@@ -108,7 +109,7 @@ export async function speakSentence(sinks: TalkSinks, sentence: string, mood: st
 const speakChain = new WeakMap<object, Promise<void>>();
 
 /** Speak finished sentences once. A second final of the same line does not replay them. */
-export function queueSpokenLine(sinks: TalkSinks, line: string, mood: string, final: boolean): void {
+export function queueSpokenLine(sinks: TalkSinks, line: string, mood: string, final: boolean, signal?: AbortSignal): void {
   const answer = stripThinking(line).answer;
   if (!answer) return;
   const fresh = takeNewSentences(sinks, answer, final);
@@ -116,7 +117,7 @@ export function queueSpokenLine(sinks: TalkSinks, line: string, mood: string, fi
   let chain = speakChain.get(sinks) ?? Promise.resolve();
   for (let i = 0; i < fresh.length; i++) {
     const sentence = fresh[i]!;
-    chain = chain.then(() => speakSentence(sinks, sentence, mood)).catch(() => {});
+    chain = chain.then(() => speakSentence(sinks, sentence, mood, signal)).catch(() => {});
   }
   speakChain.set(sinks, chain);
 }
