@@ -333,7 +333,7 @@ function makeSinks(): Sinks {
   };
 }
 
-const World = memo(function World({ sinks }: { sinks: Sinks }) {
+const World = memo(function World({ sinks, focusPreyas }: { sinks: Sinks; focusPreyas: boolean }) {
   const [gltf, setGltf] = useState<GLTF | null>(null);
   const mixer = useRef<AnimationMixer | null>(null);
   const actions = useRef<Partial<Record<PlayClip, AnimationAction>>>({});
@@ -546,10 +546,10 @@ const World = memo(function World({ sinks }: { sinks: Sinks }) {
     }
     if (eye.current) eye.current.intensity = 0.12 + frame.eye * 1.5;
 
-    const lookX = who.x * 0.42 + frame.x * 0.58;
-    const lookZ = who.z * 0.42 + frame.z * 0.58;
-    camera.position.set(lookX + 0.15, 2.35, lookZ + 3.6);
-    LOOK_AT.set(lookX, 0.42, lookZ);
+    const lookX = focusPreyas ? 0.85 : who.x * 0.42 + frame.x * 0.58;
+    const lookZ = focusPreyas ? 0.35 : who.z * 0.42 + frame.z * 0.58;
+    camera.position.set(lookX + 0.15, focusPreyas ? 1.65 : 2.35, lookZ + (focusPreyas ? 2.35 : 3.6));
+    LOOK_AT.set(lookX, focusPreyas ? 0.58 : 0.42, lookZ);
     camera.lookAt(LOOK_AT);
 
     const hud = sinks.readout;
@@ -616,6 +616,7 @@ export function RoomScreen() {
   // Off for everyone. A local Expo server runs in dev mode, so that flag
   // cannot be the gate for these controls.
   const [devControls, setDevControls] = useState(false);
+  const [focusPreyas, setFocusPreyas] = useState(false);
   const [bark, setBark] = useState<string | null>(null);
   const [hud, setHud] = useState<ReadoutState>({
     skill: "idle-roll",
@@ -873,7 +874,7 @@ export function RoomScreen() {
     <View style={styles.root}>
       <View style={styles.stage}>
         <Canvas style={styles.canvas} dpr={[1, 1.5]} camera={CAMERA} gl={GL_PROPS}>
-          <World sinks={bag} />
+          <World sinks={bag} focusPreyas={focusPreyas} />
         </Canvas>
         <VoiceSession sinks={bag} handsFreeOn={readVoiceSettings().handsFree} />
         {devControls && (
@@ -899,6 +900,14 @@ export function RoomScreen() {
             ))}
           </View>
         )}
+        <Pressable
+          style={[styles.focusButton, focusPreyas && styles.focusButtonOn]}
+          onPress={() => setFocusPreyas((value) => !value)}
+          accessibilityRole="button"
+          accessibilityLabel={focusPreyas ? "Release Preyas focus" : "Focus on Preyas"}
+        >
+          <Text style={styles.focusButtonText}>{focusPreyas ? "free camera" : "focus Preyas"}</Text>
+        </Pressable>
         {bark && (
           <View pointerEvents="none" style={styles.bubble}>
             <Text style={styles.bubbleText}>{bark}</Text>
@@ -1123,6 +1132,18 @@ const styles = StyleSheet.create({
     backgroundColor: theme.track,
   },
   noticeFill: { height: 4, backgroundColor: theme.accent },
+  focusButton: {
+    position: "absolute",
+    right: 14,
+    top: 14,
+    backgroundColor: theme.scrim,
+    borderColor: theme.accentLine,
+    borderWidth: 1,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+  },
+  focusButtonOn: { backgroundColor: theme.accent },
+  focusButtonText: { color: theme.text, fontSize: 12, fontWeight: "700" },
   bubble: {
     position: "absolute",
     left: 16,
