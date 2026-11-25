@@ -914,6 +914,25 @@ export function RoomScreen() {
           </View>
         )}
       </View>
+      <View style={styles.homeRow}>
+        <View style={styles.homeCopy}>
+          <Text style={styles.homeTitle}>Preyas&apos; room</Text>
+          <Text style={styles.homeHint}>He is here, listening when you call.</Text>
+        </View>
+        <Pressable
+          style={styles.wakeButton}
+          onPress={() => {
+            player.auto = false;
+            player.summonUntil = Date.now() + 1400;
+            player.hidden = false;
+            refresh();
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Wake Preyas"
+        >
+          <Text style={styles.wakeText}>Wake Preyas</Text>
+        </Pressable>
+      </View>
       {devControls ? (
         <View style={styles.brainRow}>
           <TextInput
@@ -1079,6 +1098,29 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.bg },
   stage: { flex: 1 },
   canvas: { flex: 1 },
+  homeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: theme.card,
+    borderTopWidth: 1,
+    borderTopColor: theme.accentLine,
+  },
+  homeCopy: { flex: 1, gap: 2 },
+  homeTitle: { color: theme.text, fontSize: 15, fontWeight: "800" },
+  homeHint: { color: theme.dim, fontSize: 12 },
+  wakeButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: theme.accentSoft,
+    borderWidth: 1,
+    borderColor: theme.accentLine,
+    borderRadius: theme.radius.sm,
+  },
+  wakeText: { color: theme.text, fontSize: 12, fontWeight: "700" },
   devRow: {
     flexDirection: "row",
     alignItems: "center",
