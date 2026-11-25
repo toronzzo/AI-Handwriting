@@ -12,6 +12,8 @@ import {
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { BodyWebView, BodyWebViewAPI, type BodyMetrics } from "./src/body/BodyWebView";
+import { PreyasHeroSwitch } from "./src/today/PreyasHeroSwitch";
+import { bodyStateFromSignals } from "./src/state/activityStore";
 import { BenchmarkScreen } from "./src/screens/BenchmarkScreen";
 import { RoomScreen } from "./src/room/RoomScreen";
 import { RawChatScreen } from "./src/raw/RawChatScreen";
@@ -47,6 +49,7 @@ export default function App() {
   const [section, setSection] = useState<Section>("today");
   const [advanced, setAdvanced] = useState<Advanced | null>(null);
   const [metrics, setMetrics] = useState<BodyMetrics | null>(null);
+  const bodyPreviewState = bodyStateFromSignals({ recording: false, speaking: false, working: false, thinking: false });
   const wide = isWide(useWindowDimensions().width);
   const palette = usePalette();
   const bgArt = useArt("bg");
@@ -172,6 +175,11 @@ export default function App() {
             </AdvancedWrap>
           ) : advanced === "body" || advanced === "bench" ? (
             <AdvancedWrap title={advanced === "body" ? "Body" : "Benchmark"} onBack={() => setAdvanced(null)}>
+              {advanced === "body" ? (
+                <View style={styles.bodyPreview}>
+                  <PreyasHeroSwitch state={bodyPreviewState} fill accessibilityLabel="Preyas 3D body" />
+                </View>
+              ) : null}
               {/* Keep WebView mounted while benchmarking so it can drive the body */}
               <View style={[styles.fill, advanced !== "body" && styles.hidden]}>
                 <BodyWebView onMetrics={setMetrics} />
@@ -251,6 +259,7 @@ const styles = StyleSheet.create({
   // Memory list scrolls inside it rather than growing the page.
   stage: { flex: 1, minHeight: 0, overflow: "hidden", backgroundColor: isWeb ? "transparent" : theme.bg },
   fill: { flex: 1 },
+  bodyPreview: { height: 260, marginBottom: 10, borderRadius: 12, overflow: "hidden" },
   hidden: { height: 0, overflow: "hidden", flex: 0 },
   /** Chat stays mounted here so a reply can finish while another tab is open. */
   parked: { display: "none" },
