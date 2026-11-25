@@ -2397,7 +2397,7 @@ export function ChatScreen({
       void brainFetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(chatId)}/messages`, {
         method: "DELETE",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ count: kept.length }),
+        body: JSON.stringify({ messageT: assistant.t }),
       });
     }
     void sendRef.current(user.content, false, true);

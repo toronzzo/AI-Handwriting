@@ -236,6 +236,19 @@ export function readChat(root, id, limit = 40) {
   return { chat, summary, messages: shown.slice(start), partner };
 }
 
+/** Remove one exact saved message and everything after it. */
+export function removeMessageAndAfter(root, id, messageT) {
+  const chat = findChat(root, id);
+  if (!chat || !Number.isFinite(Number(messageT))) return null;
+  const file = chatFile(root, id);
+  const rows = readRows(file);
+  const index = rows.findIndex((row) => Number(row?.t) === Number(messageT));
+  if (index < 0) return null;
+  const kept = rows.slice(0, index);
+  writeTextAtomic(file, kept.map((row) => `${JSON.stringify(row)}\n`).join(""));
+  return { chat, removed: rows.length - kept.length };
+}
+
 /** Append one turn, retitle a fresh chat from the first user line, touch `updated`. */
 export function appendMessage(root, id, entry) {
   const chat = findChat(root, id);
