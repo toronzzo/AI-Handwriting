@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Image,
   Pressable,
@@ -26,6 +26,9 @@ import { Stripe } from "./src/ui/Stripe";
 import { useArt } from "./src/art/slots.ts";
 import { SHADE_BANDS, mixColour } from "./src/skyCss.ts";
 import { usePalette } from "./src/usePalette";
+import { PreyasHeroSwitch } from "./src/today/PreyasHeroSwitch";
+import { peekActivity, subscribeActivity } from "./src/state/activityStore";
+import type { PreyasBodyState } from "./src/face/bodyState.ts";
 
 /** Web lets the sky show through; the iPhone paints the page colour. */
 const isWeb = typeof document !== "undefined";
@@ -47,6 +50,8 @@ export default function App() {
   const [section, setSection] = useState<Section>("today");
   const [advanced, setAdvanced] = useState<Advanced | null>(null);
   const [metrics, setMetrics] = useState<BodyMetrics | null>(null);
+  const [bodyState, setBodyState] = useState<PreyasBodyState>(() => peekActivity());
+  useEffect(() => subscribeActivity(setBodyState), []);
   const wide = isWide(useWindowDimensions().width);
   const palette = usePalette();
   const bgArt = useArt("bg");
@@ -172,30 +177,18 @@ export default function App() {
             </AdvancedWrap>
           ) : advanced === "body" || advanced === "bench" ? (
             <AdvancedWrap title={advanced === "body" ? "Body" : "Benchmark"} onBack={() => setAdvanced(null)}>
-              {/* Keep WebView mounted while benchmarking so it can drive the body */}
-              <View style={[styles.fill, advanced !== "body" && styles.hidden]}>
-                <BodyWebView onMetrics={setMetrics} />
-              </View>
-              {advanced === "bench" ? <BenchmarkScreen latest={metrics} /> : null}
               {advanced === "body" ? (
-                <View style={styles.quick}>
-                  {(
-                    [
-                      ["happy", "happy"],
-                      ["excited", "excited"],
-                      ["angry", "angry"],
-                      ["sad", "sad"],
-                      ["thinking", "think"],
-                      ["battle", "battle"],
-                    ] as const
-                  ).map(([mood, label]) => (
-                    <Pressable key={mood} style={styles.qbtn} onPress={() => BodyWebViewAPI.setEmotion(mood)}>
-                      <Text style={styles.qbtnT}>{label}</Text>
-                    </Pressable>
-                  ))}
-                  <Pressable style={styles.qbtn} onPress={() => BodyWebViewAPI.react("[excited] Whoop — claws out!")}>
-                    <Text style={styles.qbtnT}>react[]</Text>
-                  </Pressable>
+                <View style={styles.fill}>
+                  <PreyasHeroSwitch state={bodyState} fill bare accessibilityLabel="Preyas is alive" />
+                  <View style={styles.bodyStateLine}>
+                    <Text style={styles.bodyStateLabel}>Preyas is {bodyState}</Text>
+                  </View>
+                </View>
+              ) : null}
+              {advanced === "bench" ? (
+                <View style={styles.fill}>
+                  <BodyWebView onMetrics={setMetrics} />
+                  <BenchmarkScreen latest={metrics} />
                 </View>
               ) : null}
             </AdvancedWrap>
@@ -347,6 +340,14 @@ const styles = StyleSheet.create({
   advBack: { color: theme.accent, fontSize: theme.type.body, fontWeight: "700" },
   advTitle: { color: theme.text, fontSize: theme.type.body, fontWeight: "800" },
 
+  bodyStateLine: {
+    paddingVertical: 8,
+    alignItems: "center",
+    backgroundColor: theme.cardSoft,
+    borderTopWidth: 1,
+    borderTopColor: theme.accentLine,
+  },
+  bodyStateLabel: { color: theme.dim, fontSize: theme.type.caption, fontWeight: "600" },
   quick: {
     flexDirection: "row",
     flexWrap: "wrap",

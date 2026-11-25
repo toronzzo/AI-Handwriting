@@ -5,7 +5,9 @@ import {
   Box3,
   LoopOnce,
   LoopRepeat,
+  Sphere,
   Vector3,
+  PerspectiveCamera,
   type AnimationAction,
   type Group,
   type Mesh,
@@ -36,6 +38,7 @@ function Scene({
   active,
   clip,
   small,
+  bare,
 }: {
   state: PreyasBodyState;
   reduce: boolean;
@@ -43,6 +46,8 @@ function Scene({
   clip?: PreyasClip;
   /** A 46 px avatar has no room for the pedestal. */
   small?: boolean;
+  /** Full-screen stage: no pedestal, and the camera fits any viewport. */
+  bare?: boolean;
 }) {
   const rig = useRef<Group>(null);
   const [gltf, setGltf] = useState<GLTF | null>(null);
@@ -129,17 +134,26 @@ function Scene({
     }
   });
 
-  const { camera } = useThree();
+  const { camera, size: viewport } = useThree();
   const invalidate = useThree((state) => state.invalidate);
+  // Fit the whole ball to whatever box it is given: the narrower of the
+  // viewport's two field-of-view angles decides the distance, so a phone in
+  // portrait and a wide Mac both see all of him and neither crops him.
   useEffect(() => {
     if (!scene) return;
     const box = new Box3().setFromObject(scene);
-    const center = box.getCenter(new Vector3());
-    const size = box.getSize(new Vector3());
-    const dist = Math.max(size.x, size.y, size.z) * 1.35;
-    camera.position.set(center.x + dist * 0.15, center.y + dist * 0.28, center.z + dist);
-    camera.lookAt(center);
-  }, [scene, camera]);
+    const sphere = box.getBoundingSphere(new Sphere());
+    const radius = Math.max(0.001, sphere.radius);
+    const fovDeg = (camera as PerspectiveCamera).fov ?? 32;
+    const aspect = Math.max(0.2, (viewport.width || 1) / (viewport.height || 1));
+    const halfV = ((fovDeg * Math.PI) / 180) / 2;
+    const halfH = Math.atan(Math.tan(halfV) * aspect);
+    const half = Math.min(halfV, halfH);
+    const dist = (radius / Math.sin(half)) * 1.08;
+    const away = new Vector3(0.14, 0.2, 1).normalize();
+    camera.position.copy(sphere.center).addScaledVector(away, dist);
+    camera.lookAt(sphere.center);
+  }, [scene, camera, viewport.width, viewport.height]);
   useEffect(() => {
     if (!active) return;
     if (reduce) {
@@ -162,7 +176,7 @@ function Scene({
           <meshBasicMaterial color={theme.accent} transparent opacity={halo.strength} />
         </mesh>
       )}
-      {small ? null : (
+      {small || bare ? null : (
         <mesh position={[0, -0.86, 0]}>
           <cylinderGeometry args={[0.58, 0.78, 0.12, 28]} />
           <meshStandardMaterial color="#101820" roughness={0.9} /> {/* 3d-colour */}
@@ -206,12 +220,14 @@ export function PreyasHero({
   size,
   clip,
   fill,
+  bare,
 }: {
   state: PreyasBodyState;
   short?: boolean;
   size?: number;
   clip?: PreyasClip;
   fill?: boolean;
+  bare?: boolean;
 }) {
   const visible = usePageVisible();
   const reduce = useReducedMotion();
@@ -224,7 +240,7 @@ export function PreyasHero({
       accessibilityLabel={BODY_LABEL[state]}
     >
       <Canvas camera={{ position: [0.15, 1.7, 3.6], fov: 32 }} dpr={[1, 1.25]} frameloop={frameloop}>
-        <Scene state={state} reduce={reduce} active={visible} clip={clip} small={Boolean(size && size < 90)} />
+        <Scene state={state} reduce={reduce} active={visible} clip={clip} small={Boolean(size && size < 90)} bare={bare} />
       </Canvas>
     </View>
   );
