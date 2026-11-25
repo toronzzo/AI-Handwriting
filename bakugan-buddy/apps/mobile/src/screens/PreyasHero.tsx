@@ -18,7 +18,8 @@ import { loadPreyasBall } from "../room/loadPreyas";
 import { theme } from "../theme";
 import { usePageVisible } from "../ui/usePageVisible";
 import { useReducedMotion } from "../ui/useReducedMotion";
-import { BODY_LABEL, haloFor, motionFor, type PreyasBodyState } from "../face/bodyState.ts";
+import { BODY_LABEL, haloFor, type PreyasBodyState } from "../face/bodyState.ts";
+import { livingMotion } from "../face/living.ts";
 import type { PreyasClip } from "./preyasClips";
 
 /**
@@ -39,6 +40,7 @@ function Scene({
   clip,
   small,
   bare,
+  mood,
 }: {
   state: PreyasBodyState;
   reduce: boolean;
@@ -48,6 +50,8 @@ function Scene({
   small?: boolean;
   /** Full-screen stage: no pedestal, and the camera fits any viewport. */
   bare?: boolean;
+  /** What he feels, on top of what he is doing. */
+  mood?: string | null;
 }) {
   const rig = useRef<Group>(null);
   const [gltf, setGltf] = useState<GLTF | null>(null);
@@ -103,7 +107,7 @@ function Scene({
 
   // The state drives the body: spin speed, the speaking bob and the thinking
   // wobble all come from the real signals the chat already has, never a timer.
-  const motion = motionFor(state, reduce);
+  const pose = livingMotion(state, mood, reduce);
   const halo = haloFor(state, reduce);
   const haloRef = useRef<Mesh>(null);
   /** Seconds of visible time, so the breath is platform-neutral (no wall clock). */
@@ -113,11 +117,15 @@ function Scene({
     mixer.current?.update(dt);
     const node = rig.current;
     if (node) {
-      node.rotation.y += dt * motion.spin;
-      node.rotation.z = motion.wobble ? Math.sin(node.rotation.y * 2.2) * motion.wobble : 0;
-      node.position.y = motion.bob ? Math.sin(node.rotation.y * 3) * motion.bob : 0;
+      node.rotation.y += dt * pose.spin;
+      node.rotation.z = pose.wobble ? Math.sin(node.rotation.y * 2.2) * pose.wobble : 0;
+      // The speaking bob and the feeling's hop ride on different rhythms, so a
+      // happy answer reads as one movement rather than two clicks.
+      node.position.y =
+        (pose.bob ? Math.sin(node.rotation.y * 3) * pose.bob : 0) +
+        (pose.hop ? Math.sin(node.rotation.y * 5.5) * pose.hop : 0);
       // Listening leans very slightly towards the person who just spoke.
-      node.rotation.x = state === "listening" ? -0.06 : 0;
+      node.rotation.x = pose.tiltX + (state === "listening" ? -0.06 : 0);
     }
     const ring = haloRef.current;
     if (ring) {
@@ -221,6 +229,7 @@ export function PreyasHero({
   clip,
   fill,
   bare,
+  mood,
 }: {
   state: PreyasBodyState;
   short?: boolean;
@@ -228,6 +237,7 @@ export function PreyasHero({
   clip?: PreyasClip;
   fill?: boolean;
   bare?: boolean;
+  mood?: string | null;
 }) {
   const visible = usePageVisible();
   const reduce = useReducedMotion();
@@ -240,7 +250,7 @@ export function PreyasHero({
       accessibilityLabel={BODY_LABEL[state]}
     >
       <Canvas camera={{ position: [0.15, 1.7, 3.6], fov: 32 }} dpr={[1, 1.25]} frameloop={frameloop}>
-        <Scene state={state} reduce={reduce} active={visible} clip={clip} small={Boolean(size && size < 90)} bare={bare} />
+        <Scene state={state} reduce={reduce} active={visible} clip={clip} small={Boolean(size && size < 90)} bare={bare} mood={mood} />
       </Canvas>
     </View>
   );

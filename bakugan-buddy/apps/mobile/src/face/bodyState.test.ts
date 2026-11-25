@@ -139,9 +139,10 @@ test("the body components take a state, not a mood, so motion can follow it", ()
     assert.match(source, /PreyasBodyState/, `${file} imports the body state type`);
     assert.match(source, /state[?:]/, `${file} takes a state prop`);
   }
-  // The 3D scene reads the shared tables instead of its own guesses.
+  // The 3D scene reads the shared tables instead of its own guesses. Motion now
+  // comes from the living model, which is the one place state and feeling meet.
   const hero = readFileSync(join(ROOT, "src/screens/PreyasHero.tsx"), "utf8");
-  assert.match(hero, /motionFor\(state/, "the scene asks the table for motion");
+  assert.match(hero, /livingMotion\(state, mood/, "the scene asks the shared living table for motion");
   assert.match(hero, /haloFor\(state/, "the scene asks the table for the halo");
   assert.match(hero, /BODY_LABEL\[state\]/, "the frame is labelled with the state");
 });

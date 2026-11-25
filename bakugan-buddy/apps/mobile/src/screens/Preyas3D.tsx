@@ -31,6 +31,8 @@ export type Preyas3DProps = {
   clip?: PreyasClip;
   /** Full-screen stage: no pedestal, camera fitted to the whole viewport. */
   bare?: boolean;
+  /** What he feels, on top of what he is doing. */
+  mood?: string | null;
 };
 
 const HERO_MIN = theme.space.xl * 7;
