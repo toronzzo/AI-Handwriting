@@ -100,7 +100,7 @@ import { listTasks, loadTask, newTask, pauseInterrupted, saveTask } from "./lib/
 import { launchTaskRun, taskRunActive } from "./lib/taskRunner.mjs";
 import { createMcpHub, loadMcpConfig } from "./lib/os/mcp.mjs";
 import { createCoach } from "./lib/coach/engine.mjs";
-import { capUsd, spentTodayUsd } from "./lib/coach/spendGate.mjs";
+import { appendPaidSpend, beginPaidChat, capUsd, paidRoomStatus, spentTodayUsd } from "./lib/coach/spendGate.mjs";
 import { createHarnessRunner } from "./lib/harness/runner.mjs";
 import { pickAdapter } from "./lib/harness/adapter.mjs";
 import {
@@ -301,6 +301,22 @@ function harnessRefusalStatus(code) {
   if (code === "RUN_ACTIVE") return 409;
   if (code === "OVER_CAP" || code === "NO_PRICE") return 402;
   return 400;
+}
+
+/**
+ * The honest refusal for a paid chat the daily limit will not cover. It names
+ * today's numbers and where the limit lives, so "didn't answer" never hides a
+ * spent-limit stop.
+ */
+function paidLimitMessage(gate) {
+  const usd = (value) => {
+    const number = Number(value);
+    return `$${(Number.isFinite(number) && number > 0 ? number : 0).toFixed(2)}`;
+  };
+  if (gate && gate.reason === "no_ledger") {
+    return "The Agent drive is missing, so the daily limit cannot be counted. That paid request was not sent.";
+  }
+  return `Daily limit reached: today ${usd(gate && gate.spentTodayUsd)} of ${usd(gate && gate.capUsd)}. That paid request was not sent. Raise the limit in Settings, in Daily limit.`;
 }
 
 /** GET and POST /v1/settings/spend share one body. */
@@ -2002,7 +2018,16 @@ const server = http.createServer(async (req, res) => {
       } catch {
         gateway = false;
       }
-      if (status.available && !gateway) {
+      // Money first: the app must not offer a paid route the daily limit will
+      // refuse one tap later. The numbers travel with the reason so the chip
+      // and the Settings row cannot disagree.
+      const room = paidRoomStatus(dataDir);
+      status.spentTodayUsd = room.spentTodayUsd;
+      status.capUsd = room.capUsd;
+      if (status.available && !room.allowed) {
+        status.available = false;
+        status.reason = `Daily limit reached: today $${Number(room.spentTodayUsd).toFixed(2)} of $${Number(room.capUsd).toFixed(2)}`;
+      } else if (status.available && !gateway) {
         status.available = false;
         status.reason = "DeepSeek key is set, but the gateway on port 4000 is not running";
       }
@@ -2117,6 +2142,24 @@ const server = http.createServer(async (req, res) => {
       const body = model === "paid" ? sampled : withDriveMap(withNotes(sampled));
       const bodyWithEmoji = withEmoji(body, { mood: lastMood, dataDir });
       const bodyWithKnowledge = await withSelfKnowledge(bodyWithEmoji, selfKnowledge);
+      // Every paid chat turn passes the same daily limit as the Harness, task
+      // and Coach routes (docs/HARNESS_CLI.md: one cap for all paid work), and
+      // it passes it BEFORE the request leaves this Mac. The decision reads the
+      // brain's own ledger (spend/paidChat.jsonl), never the cost the app
+      // reports about itself, so a client that under-reports cannot spend.
+      const paid = model === "paid";
+      // beginPaidChat both decides and RESERVES the worst case, so two paid
+      // turns running at once cannot each spend the same last few cents.
+      const paidTurn = paid ? beginPaidChat(dataDir, bodyWithKnowledge.length, new Date()) : null;
+      if (paidTurn && !paidTurn.ok) {
+        brain.emit({ neuron: "hands", state: "error", detail: "daily limit reached" });
+        return sendJson(res, 402, {
+          error: paidLimitMessage(paidTurn.gate),
+          code: "OVER_CAP",
+          spentTodayUsd: paidTurn.gate.spentTodayUsd,
+          capUsd: paidTurn.gate.capUsd,
+        });
+      }
       let news = "";
       try {
         const asked = JSON.parse(bodyWithKnowledge.toString("utf8"));
@@ -2132,7 +2175,6 @@ const server = http.createServer(async (req, res) => {
       // auto-return window — paid replies and unanswered calls never do.
       // The brain sees the chat neuron that serves this call: the live tier
       // for local routes, hands (the paid gateway) for paid ones.
-      const paid = model === "paid";
       const neuron = paid ? "hands" : `chat-${modelSwitch.state().current || "small"}`;
       brain.emit({
         neuron,
@@ -2154,6 +2196,14 @@ const server = http.createServer(async (req, res) => {
       };
       try {
         if (paid) {
+          // What the gateway really charged is written by the brain, not by
+          // the app (see lib/chatPipe.mjs), so today's spend survives a phone
+          // that never reports back.
+          // "chat-est" marks a settlement that had to fall back to the reserved
+          // estimate (no usage in the reply), so an over- or under-count is
+          // visible in the ledger instead of silent.
+          chatEvents.onPaidCost = (usd, exact) => appendPaidSpend(dataDir, usd, exact ? "chat" : "chat-est", new Date());
+          chatEvents.paidEstimateUsd = paidTurn ? paidTurn.gate.estimateUsd : 0;
           await pipeChatCompletion(
             brain,
             req,
@@ -2203,6 +2253,9 @@ const server = http.createServer(async (req, res) => {
           }
         }
       } finally {
+        // Every exit path frees the room: a gateway failure, a timeout, or a
+        // phone that closed the stream mid-reply.
+        if (paidTurn) paidTurn.release();
         if (news && !newsDelivered) selfKnowledge.cancelNews();
       }
       return;

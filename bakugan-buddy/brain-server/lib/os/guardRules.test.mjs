@@ -64,13 +64,10 @@ test("R3: destructive blocks without intent, asks with intent, never allows", ()
 test("R4: paid goes through the spend gate", () => {
   const dir = tempDir();
   try {
-    const historyDir = path.join(dir, "history");
-    fs.mkdirSync(historyDir, { recursive: true });
+    const spendDir = path.join(dir, "spend");
+    fs.mkdirSync(spendDir, { recursive: true });
     const now = new Date("2026-11-19T10:00:00.000Z");
-    fs.writeFileSync(
-      path.join(historyDir, "chat.jsonl"),
-      JSON.stringify({ t: now.getTime(), role: "assistant", content: "paid", who: "paid", model: "paid", costUsd: 0.99 }) + "\n",
-    );
+    fs.writeFileSync(path.join(spendDir, "paid.jsonl"), JSON.stringify({ t: now.getTime(), usd: 0.99 }) + "\n");
     const deps = { dataDir: dir, allowPaid, now: () => now };
     const over = decide(reviewRules(action({ kind: "paid_call", args: { estimateUsd: 0.05 }, userRequest: "ask deepseek" }), deps));
     assert.equal(over.verdict, "block", "0.99 + 0.05 > 1.00 cap");

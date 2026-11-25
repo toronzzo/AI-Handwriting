@@ -269,6 +269,109 @@ test("deferError keeps a failed local reply off the wire", async () => {
   }
 });
 
+test("a paid reply reports what it really cost, so the brain can write the ledger", async () => {
+  const server = await startUpstream((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({
+        choices: [{ message: { content: "Hello" } }],
+        usage: { prompt_tokens: 1000, completion_tokens: 200 },
+      }),
+    );
+  });
+  try {
+    const reported = [];
+    const brain = { emit: () => {} };
+    const res = new FakeResponse();
+    const result = await pipeChatCompletion(brain, {}, res, upstreamUrl(server), JSON.stringify({ stream: false }), "paid gateway is down", 3000, {
+      neuron: "hands",
+      paid: true,
+      local: false,
+      paidEstimateUsd: 0.002,
+      onPaidCost: (usd, exact) => reported.push({ usd, exact }),
+    });
+    assert.equal(result.ok, true);
+    assert.equal(reported.length, 1, "one ledger line per paid turn");
+    assert.ok(reported[0].usd > 0, "usage turns into a real cost");
+    assert.ok(reported[0].usd < 0.01, "one short turn is cents at most");
+    assert.equal(reported[0].exact, true, "the provider reported the usage, so the line is measured");
+  } finally {
+    server.close();
+  }
+});
+
+test("a paid reply with no usage still charges the estimate the gate allowed", async () => {
+  const server = await startUpstream((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ choices: [{ message: { content: "Hello" } }] }));
+  });
+  try {
+    const reported = [];
+    const brain = { emit: () => {} };
+    const res = new FakeResponse();
+    await pipeChatCompletion(brain, {}, res, upstreamUrl(server), JSON.stringify({ stream: false }), "paid gateway is down", 3000, {
+      neuron: "hands",
+      paid: true,
+      local: false,
+      paidEstimateUsd: 0.002,
+      onPaidCost: (usd, exact) => reported.push({ usd, exact }),
+    });
+    assert.deepEqual(reported, [{ usd: 0.002, exact: false }], "no usage -> the reserved estimate stands, and says so");
+  } finally {
+    server.close();
+  }
+});
+
+test("a local reply is never charged to the paid ledger", async () => {
+  const server = await startUpstream((req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(CONTENT_CHUNK);
+    res.write('data: {"usage":{"prompt_tokens":900,"completion_tokens":100}}\n\n');
+    res.write("data: [DONE]\n\n");
+    res.end();
+  });
+  try {
+    const reported = [];
+    const brain = { emit: () => {} };
+    const res = new FakeResponse();
+    await pipeChatCompletion(brain, {}, res, upstreamUrl(server), JSON.stringify({ stream: true }), "llama is down", 3000, {
+      neuron: "chat-small",
+      paid: false,
+      local: true,
+      paidEstimateUsd: 0.002,
+      onPaidCost: (usd) => reported.push(usd),
+    });
+    assert.deepEqual(reported, [], "the local model is free, so nothing is written");
+    // The settled cost comes from the gateway's usage, never from the number
+    // the app puts on its own message.
+  } finally {
+    server.close();
+  }
+});
+
+test("a failed paid request settles nothing: no usage means no ledger line", async () => {
+  const server = await startUpstream((req, res) => {
+    res.writeHead(500, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "upstream exploded" }));
+  });
+  try {
+    const reported = [];
+    const brain = { emit: () => {} };
+    const res = new FakeResponse();
+    const result = await pipeChatCompletion(brain, {}, res, upstreamUrl(server), JSON.stringify({ stream: false }), "paid gateway is down", 3000, {
+      neuron: "hands",
+      paid: true,
+      local: false,
+      paidEstimateUsd: 0.002,
+      onPaidCost: (usd) => reported.push(usd),
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(reported, [], "a refused or failed call charges nothing");
+  } finally {
+    server.close();
+  }
+});
+
 test("a backup reply is labeled for the app and the brain log", async () => {
   const server = await startUpstream((req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream" });

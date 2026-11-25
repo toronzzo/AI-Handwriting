@@ -141,17 +141,26 @@ test("the escalation preview is redacted and carries no screenshot data", () => 
   assert.ok(preview.length <= PROPOSER_CONTEXT_MAX);
 });
 
-test("createPaidProposer sends the same prompt to the paid gateway and returns the raw text", async () => {
+test("createPaidProposer sends the same prompt to the paid gateway and returns the text with its usage", async () => {
   const calls = [];
   const paid = createPaidProposer({
     paidUrl: "http://gateway.test:4000",
     fetchImpl: async (url, init) => {
       calls.push({ url, body: JSON.parse(init.body) });
-      return { ok: true, json: async () => ({ choices: [{ message: { content: '{"action":"ask","why":"need info"}' } }] }) };
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: '{"action":"ask","why":"need info"}' } }],
+          usage: { prompt_tokens: 1200, completion_tokens: 90 },
+        }),
+      };
     },
   });
-  const raw = await paid({ prompt: "the exact prompt" });
-  assert.equal(raw, '{"action":"ask","why":"need info"}');
+  const answer = await paid({ prompt: "the exact prompt" });
+  assert.equal(answer.text, '{"action":"ask","why":"need info"}');
+  // The usage is what the shared ledger settles with; without it the caller
+  // would have to guess the cost of a call the provider already charged.
+  assert.deepEqual(answer.usage, { prompt_tokens: 1200, completion_tokens: 90 });
   assert.equal(calls[0].url, "http://gateway.test:4000/v1/chat/completions");
   assert.equal(calls[0].body.model, "paid");
   assert.equal(calls[0].body.messages[1].content, "the exact prompt");

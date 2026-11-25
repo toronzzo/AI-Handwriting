@@ -23,6 +23,8 @@ import { appendComputerLog, purgeOldShots, shotFilePath } from "./computerLog.mj
 import { buildEscalationPrompt, parseProposal } from "./computerPropose.mjs";
 import { createApprovals } from "./guard.mjs";
 import { estimatePaidCostUsd } from "../../../packages/alive/src/confirm.ts";
+import { appendPaidSpend, setInFlightCost } from "../coach/spendGate.mjs";
+import { paidCostUsd } from "./brainUsage.mjs";
 
 export const DECISION_TTL_MS = 60_000;
 export const MIN_ACTION_GAP_MS = 1_000;
@@ -540,11 +542,24 @@ export function createComputerSession(deps = {}) {
           capUsd: gateResult.capUsd,
         };
       }
-      let raw;
+      let raw = "";
       try {
-        raw = await escalateProposer({ prompt });
+        // Reserve the worst case for the duration of the call, then settle the
+        // shared paid ledger ONCE with what the gateway reported. The Yes/No
+        // card and the gate above are unchanged: this only makes the money
+        // that was already approved count against the same daily cap as every
+        // other paid route.
+        setInFlightCost("computer:" + (sessionId || "session"), estimateUsd);
+        const answer = await escalateProposer({ prompt });
+        const text = typeof answer === "string" ? answer : String((answer && answer.text) || "");
+        const usage = answer && typeof answer === "object" ? answer.usage : null;
+        const settledUsd = Number(paidCostUsd(usage, now()));
+        appendPaidSpend(dataDir, Number.isFinite(settledUsd) && settledUsd > 0 ? settledUsd : estimateUsd, "computer");
+        raw = text;
       } catch {
         return { ok: false, error: "escalate_failed", why: "the paid gateway did not answer" };
+      } finally {
+        setInFlightCost("computer:" + (sessionId || "session"), 0);
       }
       const parsed = parseProposal(raw, lastSnapshot);
       if (!parsed.ok) {

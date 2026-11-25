@@ -186,7 +186,13 @@ export function createPaidProposer({ paidUrl, fetchImpl = fetch, model = "paid" 
     });
     if (!res.ok) throw new Error("paid gateway unavailable");
     const json = await res.json();
-    return String(json?.choices?.[0]?.message?.content || "");
+    // The usage the gateway reported travels with the text so the session can
+    // settle the shared daily ledger once, from what the provider measured
+    // rather than from an estimate the caller made up.
+    return {
+      text: String(json?.choices?.[0]?.message?.content || ""),
+      usage: json && typeof json.usage === "object" ? json.usage : null,
+    };
   };
 }
 
