@@ -29,6 +29,7 @@ import { usePalette } from "./src/usePalette";
 import { PreyasHeroSwitch } from "./src/today/PreyasHeroSwitch";
 import { peekActivity, subscribeActivity } from "./src/state/activityStore";
 import type { PreyasBodyState } from "./src/face/bodyState.ts";
+import { usePresenceCues } from "./src/media/sounds/usePresenceCues.ts";
 
 /** Web lets the sky show through; the iPhone paints the page colour. */
 const isWeb = typeof document !== "undefined";
@@ -47,6 +48,7 @@ export default function App() {
   // Browser only: the page must never be taller than the window, or the rail's
   // pinned Settings slides below the fold. Runs before the first paint.
   useState(installWebShellCss);
+  usePresenceCues();
   const [section, setSection] = useState<Section>("today");
   const [advanced, setAdvanced] = useState<Advanced | null>(null);
   const [metrics, setMetrics] = useState<BodyMetrics | null>(null);
