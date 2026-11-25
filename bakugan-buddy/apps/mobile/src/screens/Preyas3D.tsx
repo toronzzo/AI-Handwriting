@@ -29,6 +29,8 @@ export type Preyas3DProps = {
   size?: number;
   /** One of the ball's own clips (idle, open, closed, happy). */
   clip?: PreyasClip;
+  /** Full-screen stage: no pedestal, camera fitted to the whole viewport. */
+  bare?: boolean;
 };
 
 const HERO_MIN = theme.space.xl * 7;

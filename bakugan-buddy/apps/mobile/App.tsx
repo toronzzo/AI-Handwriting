@@ -178,9 +178,11 @@ export default function App() {
           ) : advanced === "body" || advanced === "bench" ? (
             <AdvancedWrap title={advanced === "body" ? "Body" : "Benchmark"} onBack={() => setAdvanced(null)}>
               {advanced === "body" ? (
-                <View style={styles.bodyPreview}>
-                  <PreyasHeroSwitch state={bodyState} fill accessibilityLabel="Preyas is alive" />
-                  <Text style={styles.bodyStateLabel}>{bodyState}</Text>
+                <View style={styles.fill}>
+                  <PreyasHeroSwitch state={bodyState} fill bare accessibilityLabel="Preyas is alive" />
+                  <View style={styles.bodyStateLine}>
+                    <Text style={styles.bodyStateLabel}>Preyas is {bodyState}</Text>
+                  </View>
                 </View>
               ) : null}
               {advanced === "bench" ? (
@@ -338,8 +340,14 @@ const styles = StyleSheet.create({
   advBack: { color: theme.accent, fontSize: theme.type.body, fontWeight: "700" },
   advTitle: { color: theme.text, fontSize: theme.type.body, fontWeight: "800" },
 
-  bodyPreview: { height: 280, margin: 10, borderRadius: theme.radius.md, overflow: "hidden", backgroundColor: theme.card },
-  bodyStateLabel: { width: "100%", color: theme.dim, fontSize: theme.type.caption, textAlign: "center" },
+  bodyStateLine: {
+    paddingVertical: 8,
+    alignItems: "center",
+    backgroundColor: theme.cardSoft,
+    borderTopWidth: 1,
+    borderTopColor: theme.accentLine,
+  },
+  bodyStateLabel: { color: theme.dim, fontSize: theme.type.caption, fontWeight: "600" },
   quick: {
     flexDirection: "row",
     flexWrap: "wrap",

@@ -60,6 +60,8 @@ type Props = {
    * its box, so this changes nothing for it.
    */
   fitBox?: boolean;
+  /** Full-screen stage: no pedestal, camera fitted to the whole viewport. */
+  bare?: boolean;
   accessibilityLabel?: string;
 };
 
@@ -72,11 +74,12 @@ export function PreyasHeroSwitch({
   clip,
   scale = 5,
   fitBox = false,
+  bare = false,
   accessibilityLabel,
 }: Props) {
   const [bit] = useBitMode();
   const mood = usePreyasMood(bit);
-  if (!bit) return <Preyas3D state={state} short={short} fill={fill} size={size} clip={clip} />;
+  if (!bit) return <Preyas3D state={state} short={short} fill={fill} size={size} clip={clip} bare={bare} />;
   const frames = moodFrames(mood);
   return (
     <PixelSprite
