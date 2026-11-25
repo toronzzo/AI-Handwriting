@@ -105,8 +105,8 @@ import { theme } from "../theme";
 import { CHAT_FONT_FAMILY, EmojiText } from "../chat/emojiText";
 import { FaceButton, FaceMode } from "../face/FaceMode";
 import { EXPRESSION_LABEL, liveExpression, speechMood, type FacePlayback, type FaceSignals } from "../face/expression.ts";
-import { bodyStateFor } from "../face/bodyState.ts";
 import { clipForExpression } from "../face/clip.ts";
+import { bodyStateFromSignals, clearActivity, publishActivity } from "../state/activityStore.ts";
 
 /** Web lets the sky show through the shell; the iPhone paints the page colour. */
 const isWeb = typeof document !== "undefined";
@@ -2732,6 +2732,21 @@ export function ChatScreen({
     playing: Boolean(bag.playing),
   });
   const faceNow = liveExpression(faceSignals, Boolean(bag.playing));
+  // The one honest activity answer for the whole app. Only this screen knows
+  // the mic, the reply, a search or a document read and his voice, so only this
+  // screen publishes it; Today and any other surface subscribes.
+  const bodyNow = bodyStateFromSignals({
+    recording: faceSignals.recording,
+    speaking: faceSignals.speaking || Boolean(bag.playing),
+    working: searching || Boolean(docBusy),
+    thinking: thinking || phase === "thinking" || Boolean(live),
+  });
+  // Publish while this screen is alive, and go back to resting when it is gone:
+  // a state kept forever would be a claim about activity that is no longer true.
+  useEffect(() => {
+    publishActivity(bodyNow);
+  }, [bodyNow]);
+  useEffect(() => () => clearActivity(), []);
   return (
     <View style={styles.root}>
       <VoiceSession sinks={bag} handsFreeOn={voice.handsFree} />
@@ -3084,6 +3099,7 @@ export function ChatScreen({
               </Pressable>
               <FaceButton
                 signals={faceSignals}
+                body={bodyNow}
                 playback={facePlayback}
                 size={wide ? 56 : 46}
                 open={faceOpen}
@@ -3698,11 +3714,7 @@ export function ChatScreen({
             <ScrollView contentContainerStyle={styles.profileBody}>
               <View style={styles.profileHero}>
                 {/* Small on purpose: the ball reads as a figurine on the card. */}
-                <PreyasHeroSwitch
-                  state={bodyStateFor(faceNow)}
-                  size={132}
-                  clip={clipForExpression(faceNow)}
-                />
+                <PreyasHeroSwitch state={bodyNow} size={132} clip={clipForExpression(faceNow)} />
               </View>
               <Text style={styles.kicker}>YOUR PARTNER</Text>
               <Text style={styles.bigName}>PREYAS</Text>
@@ -3733,7 +3745,12 @@ export function ChatScreen({
         </View>
       ) : null}
       {faceOpen ? (
-        <FaceMode signals={faceSignals} playback={facePlayback} onClose={() => setFaceOpen(false)} />
+        <FaceMode
+          signals={faceSignals}
+          playback={facePlayback}
+          body={bodyNow}
+          onClose={() => setFaceOpen(false)}
+        />
       ) : null}
     </View>
   );

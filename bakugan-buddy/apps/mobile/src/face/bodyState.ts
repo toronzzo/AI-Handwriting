@@ -7,18 +7,19 @@
  * into the body's own vocabulary, so every place the ball appears moves and
  * glows the same way — and never in a way that invents activity.
  *
- * Four states, because the kit has four honest things to say:
- *   resting  - nothing is happening right now
+ * Five states, because he has five honest things to say:
+ *   resting   - nothing is happening right now
  *   listening - the mic is open and he is taking in what you say
- *   thinking - a reply, a search or a document read is in flight
- *   speaking - his voice is playing
+ *   thinking  - the model is writing
+ *   working   - a search, a document read or a tool step is running
+ *   speaking  - his voice is playing
  *
  * Pure data and pure functions: no React, no react-native, no three, so it
  * runs under node --test and the lazy-3D guard keeps the scene behind it.
  */
 import type { FaceExpression } from "./expression.ts";
 
-export const BODY_STATES = ["resting", "listening", "thinking", "speaking"] as const;
+export const BODY_STATES = ["resting", "listening", "thinking", "working", "speaking"] as const;
 
 export type PreyasBodyState = (typeof BODY_STATES)[number];
 
@@ -27,6 +28,7 @@ export const BODY_LABEL: Record<PreyasBodyState, string> = {
   resting: "Preyas is here, resting",
   listening: "Preyas is listening",
   thinking: "Preyas is thinking",
+  working: "Preyas is working",
   speaking: "Preyas is speaking",
 };
 
@@ -57,6 +59,8 @@ const HALO: Record<PreyasBodyState, BodyHalo> = {
   resting: { strength: 0.34, radius: 0.9, pulseSeconds: 0 },
   listening: { strength: 0.58, radius: 1.02, pulseSeconds: 1.6 },
   thinking: { strength: 0.72, radius: 0.96, pulseSeconds: 0.9 },
+  // Working is its own size and brightness, so it never reads as thinking.
+  working: { strength: 0.8, radius: 1.06, pulseSeconds: 0.62 },
   speaking: { strength: 0.92, radius: 1.1, pulseSeconds: 0.45 },
 };
 
@@ -64,6 +68,9 @@ const MOTION: Record<PreyasBodyState, BodyMotion> = {
   resting: { spin: 0.28, bob: 0, wobble: 0 },
   listening: { spin: 0.16, bob: 0, wobble: 0 },
   thinking: { spin: 0.34, bob: 0, wobble: 0.05 },
+  // Working turns a little quicker than thinking and keeps a small steady tilt:
+  // busy, but not excited.
+  working: { spin: 0.46, bob: 0, wobble: 0.03 },
   speaking: { spin: 0.85, bob: 0.05, wobble: 0 },
 };
 

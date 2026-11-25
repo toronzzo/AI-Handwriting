@@ -51,10 +51,20 @@ test("every face expression maps to one of the four body states", () => {
   }
 });
 
-test("only listening, thinking and speaking count as doing something", () => {
+test("only the four real activities count as doing something", () => {
   const active = BODY_STATES.filter(bodyIsActive);
-  assert.deepEqual(active, ["listening", "thinking", "speaking"]);
+  assert.deepEqual(active, ["listening", "thinking", "working", "speaking"]);
   assert.equal(bodyIsActive("resting"), false);
+});
+
+test("working is its own body state, not a shade of thinking", () => {
+  const still = haloFor("working", true);
+  const thinking = haloFor("thinking", true);
+  assert.notDeepEqual(still, thinking, "the still halo separates work from thought");
+  assert.equal(BODY_LABEL.working, "Preyas is working");
+  const motion = motionFor("working", false);
+  assert.ok(motion.spin > motionFor("thinking", false).spin, "work turns a little quicker than thought");
+  assert.equal(motion.bob, 0, "busy is not excited");
 });
 
 test("the label says what he is really doing, and never claims more", () => {
