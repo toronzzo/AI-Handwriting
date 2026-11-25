@@ -327,7 +327,7 @@ export function ChatScreen({
   const replyAbort = useRef<AbortController | null>(null);
   const [replyCanStop, setReplyCanStop] = useState(false);
   const sendEpoch = useRef(0);
-  const sendRef = useRef<(text: string, askPaid: boolean) => Promise<void>>(async () => {});
+  const sendRef = useRef<(text: string, askPaid: boolean, replayExistingUser?: boolean) => Promise<void>>(async () => {});
   const [messages, setMessages] = useState<Shown[]>([]);
   const [draft, setDraft] = useState("");
   const [phase, setPhase] = useState<MicPhase>("listening");
@@ -2023,7 +2023,7 @@ export function ChatScreen({
     setReplyCanStop(false);
   }
 
-  async function send(text: string, askPaid: boolean) {
+  async function send(text: string, askPaid: boolean, replayExistingUser = false) {
     const trimmed = text.trim();
     if (!trimmed || busy.current || !bag.brainUrl) return;
     // A chat is saved before its first message, so history never goes to a stray file.
@@ -2096,7 +2096,7 @@ export function ChatScreen({
     bag.thinking = true;
     const userMsg: Shown = { t: Date.now(), role: "user", content: trimmed, who: "user" };
     const existing = messagesRef.current;
-    const duplicate = askPaid && existing[existing.length - 1]?.who === "user" && existing[existing.length - 1]?.content === trimmed;
+    const duplicate = replayExistingUser || (askPaid && existing[existing.length - 1]?.who === "user" && existing[existing.length - 1]?.content === trimmed);
     const history = duplicate ? existing.slice(0, -1) : existing;
     if (!duplicate) {
       messagesRef.current = [...existing, userMsg];
@@ -2370,6 +2370,28 @@ export function ChatScreen({
       setNote("The brain did not answer; nothing was saved.");
     }
   }
+
+  const regenerateLastReply = () => {
+    if (busy.current) return;
+    const rows = messagesRef.current;
+    const assistantIndex = rows.length - 1;
+    const assistant = rows[assistantIndex];
+    const user = rows[assistantIndex - 1];
+    if (!assistant || assistant.role !== "assistant" || !user || user.who !== "user" || !user.content.trim()) return;
+    const kept = rows.slice(0, assistantIndex);
+    messagesRef.current = kept;
+    setMessages(kept);
+    setNote("");
+    const chatId = activeIdRef.current;
+    if (bag.brainUrl && chatId) {
+      void brainFetch(`${bag.brainUrl}/v1/chats/${encodeURIComponent(chatId)}/messages`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ count: kept.length }),
+      });
+    }
+    void sendRef.current(user.content, false, true);
+  };
 
   const submitDraft = () => {
     const text = draft;
@@ -3339,8 +3361,17 @@ export function ChatScreen({
                       ) : null}
                       <View style={styles.timeRow}>
                         <Text style={[styles.time, mine && styles.timeMine]}>{clock(message.t)}{mine ? (read ? "  ✓✓" : "  ✓") : ""}</Text>
-                        {!mine ? <CopyButton text={message.content} /> : null}
-                      </View>
+                        {!mine ? (
+                           <>
+                             <CopyButton text={message.content} />
+                             {index === messages.length - 1 && message.role === "assistant" ? (
+                               <Pressable onPress={regenerateLastReply} accessibilityRole="button" accessibilityLabel="Regenerate">
+                                 <Text style={styles.time}>Regenerate</Text>
+                               </Pressable>
+                             ) : null}
+                           </>
+                         ) : null}
+</View>
                     </View>
                   </View>
                   {!mine && message.runId ? (
