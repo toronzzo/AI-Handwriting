@@ -9,6 +9,7 @@ import {
   FIRST_CHAT_TITLE,
   NEW_CHAT_TITLE,
   appendMessage,
+  removeMessageAndAfter,
   chatFile,
   collapseBriefingChat,
   collapseBriefingsEverywhere,
@@ -31,6 +32,22 @@ function drive() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "preyas-chats-"));
   return { root, done: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
+
+test("removeMessageAndAfter removes the exact reply and later turns", () => {
+  const { root, done } = drive();
+  try {
+    const chat = createChat(root);
+    appendMessage(root, chat.id, { t: 1, role: "user", who: "user", content: "hello" });
+    appendMessage(root, chat.id, { t: 2, role: "assistant", who: "preyas", content: "old" });
+    appendMessage(root, chat.id, { t: 3, role: "user", who: "user", content: "later" });
+    const result = removeMessageAndAfter(root, chat.id, 2);
+    assert.equal(result.removed, 2);
+    assert.deepEqual(readChat(root, chat.id).messages.map((row) => row.content), ["hello"]);
+    assert.equal(removeMessageAndAfter(root, chat.id, 999), null);
+  } finally {
+    done();
+  }
+});
 
 test("a chat gets its title from the first user message", () => {
   const { root, done } = drive();

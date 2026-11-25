@@ -14,6 +14,7 @@ import { withSampling } from "./lib/sampling.mjs";
 import { mergeHistoryFiles, paidAvailability } from "./lib/history.mjs";
 import {
   appendMessage,
+  removeMessageAndAfter,
   collapseBriefingsEverywhere,
   createChat,
   deleteChat,
@@ -1918,6 +1919,13 @@ const server = http.createServer(async (req, res) => {
       const id = decodeURIComponent(chatRoute[1]);
       const onMessages = Boolean(chatRoute[2]);
       try {
+        if (onMessages && req.method === "DELETE") {
+          const body = await readJson(req);
+          const saved = removeMessageAndAfter(dataDir, id, body?.messageT);
+          res.writeHead(saved ? 200 : 404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: Boolean(saved), removed: saved?.removed || 0 }));
+          return;
+        }
         if (onMessages && req.method === "POST") {
           const body = await readJson(req);
           const saved = appendMessage(dataDir, id, body);
