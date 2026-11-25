@@ -9,6 +9,7 @@ import { Panel } from "../ui/Panel";
 import { useReducedMotion } from "../ui/useReducedMotion";
 import type { AreaId } from "../rpg/types.ts";
 import { AREAS } from "../rpg/types.ts";
+import { usePreyasActivity } from "../state/usePreyasActivity";
 import { useRpg } from "./useRpg";
 
 /** One floating "+N Area" chip that rises and fades over 1.8 s. */
@@ -51,6 +52,9 @@ export function LevelCard() {
   const reduce = useReducedMotion();
   const hero = useArt("hero");
   const hasHero = hero.status === "ready" && Boolean(hero.url);
+  // The same body state the chat publishes, so Today never claims he is resting
+  // while a reply or a search is really running.
+  const body = usePreyasActivity();
 
   const prevLevel = useRef(snapshot.level);
   const prevAreaXp = useRef<Record<AreaId, number>>({ ...snapshot.areaXp });
@@ -124,7 +128,7 @@ export function LevelCard() {
           style={hasHero ? styles.heroCorner : styles.hero}
           pointerEvents={hasHero ? "auto" : "box-none"}
         >
-          <PreyasHeroSwitch state="resting" short={false} fill fitBox={!hasHero} />
+          <PreyasHeroSwitch state={body} short={false} fill fitBox={!hasHero} />
         </View>
         {levelUp ? (
           <Animated.View

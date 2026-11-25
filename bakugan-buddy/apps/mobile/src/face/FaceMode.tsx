@@ -19,7 +19,7 @@ import {
 } from "./expression.ts";
 import { PreyasHeroSwitch } from "../today/PreyasHeroSwitch";
 import { clipForExpression } from "./clip.ts";
-import { bodyStateFor } from "./bodyState.ts";
+import { bodyStateFor, type PreyasBodyState } from "./bodyState.ts";
 
 /**
  * The header avatar: the same 3D ball as the panel, at 46–56 px. The flat face
@@ -27,12 +27,15 @@ import { bodyStateFor } from "./bodyState.ts";
  */
 export function FaceButton({
   signals,
+  body,
   size,
   open,
   onToggle,
   onLongPress,
 }: {
   signals: FaceSignals;
+  /** The chat's measured body state (mic, work, voice), when it has one. */
+  body?: PreyasBodyState;
   /** Kept for the call site: the 3D ball reads the same signals itself. */
   playback?: () => FacePlayback;
   size: number;
@@ -52,7 +55,7 @@ export function FaceButton({
       accessibilityLabel={open ? "Close Preyas face" : "Open Preyas face"}
       accessibilityHint="Shows the large Preyas. Long press opens the profile."
     >
-      <PreyasHeroSwitch state={bodyStateFor(live)} clip={clipForExpression(live)} size={size} />
+      <PreyasHeroSwitch state={body ?? bodyStateFor(live)} clip={clipForExpression(live)} size={size} />
     </Pressable>
   );
 }
@@ -60,10 +63,13 @@ export function FaceButton({
 export function FaceMode({
   signals,
   playback,
+  body,
   onClose,
 }: {
   signals: FaceSignals;
   playback: () => FacePlayback;
+  /** The chat's measured body state; a pinned preview overrides it. */
+  body?: PreyasBodyState;
   onClose: () => void;
 }) {
   const { height } = useWindowDimensions();
@@ -107,7 +113,7 @@ export function FaceMode({
             </Pressable>
           </View>
           <PreyasHeroSwitch
-            state={bodyStateFor(expression)}
+            state={pin ? bodyStateFor(expression) : (body ?? bodyStateFor(live))}
             clip={clipForExpression(expression)}
             size={ball}
           />
