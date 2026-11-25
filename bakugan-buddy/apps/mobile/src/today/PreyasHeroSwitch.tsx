@@ -62,6 +62,8 @@ type Props = {
   fitBox?: boolean;
   /** Full-screen stage: no pedestal, camera fitted to the whole viewport. */
   bare?: boolean;
+  /** Override the stored feeling; the store answers when this is left out. */
+  mood?: string | null;
   accessibilityLabel?: string;
 };
 
@@ -75,19 +77,27 @@ export function PreyasHeroSwitch({
   scale = 5,
   fitBox = false,
   bare = false,
+  mood,
   accessibilityLabel,
 }: Props) {
   const [bit] = useBitMode();
-  const mood = usePreyasMood(bit);
-  if (!bit) return <Preyas3D state={state} short={short} fill={fill} size={size} clip={clip} bare={bare} />;
-  const frames = moodFrames(mood);
+  // The feeling is read whatever is drawn: the 3D ball emotes with it too,
+  // which is what made every resting ball look identical before.
+  const stored = usePreyasMood(true);
+  const feeling = mood ?? stored;
+  if (!bit) {
+    return (
+      <Preyas3D state={state} short={short} fill={fill} size={size} clip={clip} bare={bare} mood={feeling} />
+    );
+  }
+  const frames = moodFrames(feeling);
   return (
     <PixelSprite
       sprite={PREYAS_SPRITE}
       frames={frames}
       scale={scale}
       fit={fitBox}
-      accessibilityLabel={accessibilityLabel ?? `Preyas, ${mood}`}
+      accessibilityLabel={accessibilityLabel ?? `Preyas, ${feeling}`}
     />
   );
 }
