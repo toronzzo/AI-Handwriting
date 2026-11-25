@@ -214,7 +214,10 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
         signal: controller.signal,
       });
     } catch {
-      if (clientClosed) return pipeResult({ clientClosed: true, timedOut });
+      if (clientClosed) {
+        if (events?.local) brainOut({ state: "off", detail: "stopped: the client left" });
+        return pipeResult({ clientClosed: true, timedOut });
+      }
       // The caller can retry a backup brain only when the client has seen nothing.
       if (events && events.deferError) return pipeResult({ timedOut });
       const failDetail = timedOut ? "model timed out" : downError;
@@ -280,6 +283,7 @@ export async function pipeChatCompletion(brain, req, res, target, body, downErro
     res.end();
     return pipeResult({ ok: upstream.ok, wrote: true, timedOut });
   } catch {
+    if (clientClosed && events?.local) brainOut({ state: "off", detail: "stopped: the client left" });
     if (!clientClosed && !res.writableEnded) {
       if (!res.headersSent) {
         if (events && events.deferError) return pipeResult({ timedOut });
