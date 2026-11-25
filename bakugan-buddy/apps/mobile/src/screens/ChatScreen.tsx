@@ -237,7 +237,17 @@ function clock(t: number): string {
     return "";
   }
 }
-type PaidInfo = { available: boolean; offPeakOnly: boolean; reason: string };
+type PaidInfo = {
+  available: boolean;
+  offPeakOnly: boolean;
+  reason: string;
+  spentTodayUsd?: number;
+  capUsd?: number;
+};
+function paidSpendLabel(paid: PaidInfo): string {
+  if (!Number.isFinite(paid.spentTodayUsd) || !Number.isFinite(paid.capUsd)) return "";
+  return ` · $${Number(paid.spentTodayUsd).toFixed(2)} of $${Number(paid.capUsd).toFixed(2)} today`;
+}
 function blankSinks(): TalkSinks {
   return {
     brainUrl: "",
@@ -3556,7 +3566,9 @@ export function ChatScreen({
                   if (lastUser) setDialog({ kind: "paid", text: lastUser.content });
                 }}
               >
-                <Text style={styles.chipText}>{button.enabled ? "Ask a paid model" : button.reason}</Text>
+                <Text style={styles.chipText}>
+                  {button.enabled ? `Ask a paid model${paidSpendLabel(paid)}` : `${button.reason}${paidSpendLabel(paid)}`}
+                </Text>
               </Pressable>
             </View>
             </View>
