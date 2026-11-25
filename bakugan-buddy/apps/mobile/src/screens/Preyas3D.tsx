@@ -17,10 +17,12 @@
 import { lazy, Suspense } from "react";
 import { StyleSheet, View } from "react-native";
 import { theme } from "../theme";
+import { BODY_LABEL, type PreyasBodyState } from "../face/bodyState.ts";
 import type { PreyasClip } from "./preyasClips";
 
 export type Preyas3DProps = {
-  talking: boolean;
+  /** What he is really doing: rest, listening, thinking or speaking. */
+  state: PreyasBodyState;
   short?: boolean;
   fill?: boolean;
   /** A small square instead of the tall hero: the avatar in the face panel. */
@@ -50,7 +52,7 @@ export function Preyas3D(props: Preyas3DProps) {
             props.size ? undefined : props.fill ? styles.fill : props.short ? styles.short : styles.tall,
           ]}
           accessibilityRole="image"
-          accessibilityLabel="Preyas is loading"
+          accessibilityLabel={`Loading: ${BODY_LABEL[props.state]}`}
         />
       }
     >
