@@ -123,7 +123,7 @@ export function LevelCard() {
           </View>
         )}
         <HalftoneDisc size={218} style={styles.disc} />
-        <View style={styles.levelBlock} pointerEvents="none">
+        <View style={[styles.levelBlock, hasHero ? styles.levelBlockOnPhoto : null]} pointerEvents="none">
           <Text style={styles.lvLabel}>LV</Text>
           <Text style={styles.levelNumber}>{snapshot.level}</Text>
         </View>
@@ -216,6 +216,20 @@ const styles = StyleSheet.create({
   disc: { position: "absolute", right: -34, bottom: -38, zIndex: 1 },
   /** The big printed level number, overlapped by Preyas from the right. */
   levelBlock: { position: "absolute", left: 16, bottom: 12, zIndex: 1 },
+  /**
+   * Over a picture the numeral is printed on its own paper label. Ink on an
+   * arbitrary photo is not readable - a dark hero picture swallowed the level
+   * number completely - so with a picture the block becomes a pasted label:
+   * paper fill, ink rule. Without a picture it stays bare ink on the plate.
+   */
+  levelBlockOnPhoto: {
+    backgroundColor: theme.card,
+    borderWidth: 1,
+    borderColor: theme.lineStrong,
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 6,
+  },
   lvLabel: {
     fontFamily: theme.font.display,
     fontWeight: "700",
