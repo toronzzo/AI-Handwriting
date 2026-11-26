@@ -1,0 +1,66 @@
+{"id": "model-main", "kind": "decision", "question": "Which model do I use as my main one?", "must": ["Qwen3 8B Q4"], "mustNot": ["Qwen3 14B is my main model"], "source": "Use Qwen3 8B Q4 as main model."}
+{"id": "model-photo", "kind": "decision", "question": "Which model do I switch to for photo questions?", "must": ["Qwen2.5-VL-3B"], "source": "Switch to Qwen2.5-VL-3B for photo-related questions."}
+{"id": "model-hard", "kind": "decision", "question": "Which model do I use for hard questions?", "must": ["Qwen3 14B"], "source": "Use Qwen3 14B for hard questions."}
+{"id": "model-quick", "kind": "decision", "question": "Which model do I use for quick answers?", "must": ["Qwen3.5 0.8B"], "source": "Use Qwen3.5 0.8B for quick answers."}
+{"id": "emoji-main", "kind": "decision", "question": "Which emoji do you use as your main one?", "must": ["😎"], "source": "Use 😎 as the main emoji for responses"}
+{"id": "emoji-one", "kind": "decision", "question": "How many emojis do you use per reply?", "any": [["one emoji", "single emoji", "one per"]], "source": "Use only one emoji per time to answer."}
+{"id": "hyphen", "kind": "decision", "question": "Do I want hyphens or long dashes?", "must": ["hyphens"], "mustNot": ["long dashes are fine"], "source": "Use hyphens instead of long dashes."}
+{"id": "story-format", "kind": "decision", "question": "What structure do you use when you write me a story?", "must": ["Plan", "Story"], "source": "Use the structure: [Plan] 3-step scene outline. [Story] 2-paragraph story"}
+{"id": "practical", "kind": "decision", "question": "Do I want practical help or extra flair?", "must": ["practical"], "any": [["flair"]], "source": "Partner wants to focus on practical help without extra flair."}
+{"id": "movie-emoji", "kind": "decision", "question": "How do I want movie summaries formatted?", "must": ["emojis"], "any": [["no text", "zero text", "only emojis"]], "source": "Partner wants movie summaries in emojis with strict constraints."}
+{"id": "kimi-updates", "kind": "decision", "question": "What handles updating and training you?", "must": ["Kimi K3"], "source": "Let Kimi K3 handle updates, training, and modifications."}
+{"id": "sensory", "kind": "decision", "question": "What should your stories include besides a logical plot?", "must": ["sensory"], "source": "Include rich sensory details in the story."}
+{"id": "age", "kind": "fact", "question": "How old am I?", "must": ["22"], "mustNot": ["23 years old"], "source": "Partner is 22 years old and studying data engineering."}
+{"id": "study", "kind": "fact", "question": "What am I studying?", "must": ["data engineering"], "source": "Partner is 22 years old and studying data engineering."}
+{"id": "job", "kind": "fact", "question": "What is my work situation?", "any": [["jobless", "unemployed", "no job", "looking for work"]], "source": "Partner is jobless and needs to earn something."}
+{"id": "colours", "kind": "fact", "question": "Which colours does Preyas prefer?", "any": [["blue and purple", "purple and blue", "blue, purple"]], "source": "Preyas prefers blue and purple colors"}
+{"id": "style", "kind": "fact", "question": "How do I like to be spoken to?", "any": [["straightforward", "direct", "plainly", "no fluff"]], "source": "Partner prefers straightforward communication."}
+{"id": "sleep", "kind": "fact", "question": "How many hours of sleep do I need?", "must": ["7"], "any": [["9", "nine"]], "allow": ["7-9 hours"], "source": "Partner needs 7-9 hours of sleep depending on age and activity level."}
+{"id": "peak", "kind": "fact", "question": "When does my brain work best?", "must": ["9", "11"], "allow": ["9:00 AM and 11:00 AM"], "source": "Peak brain function between 9:00 AM and 11:00 AM"}
+{"id": "aquos", "kind": "fact", "question": "What kind of Bakugan is Preyas?", "must": ["Aquos"], "any": [["ball form", "ball"]], "source": "Preyas is an Aquos Bakugan in ball form."}
+{"id": "ability", "kind": "fact", "question": "What is Preyas's best ability?", "any": [["calm focus", "calm", "focus"]], "source": "Preyas's best ability is guiding with calm focus."}
+{"id": "creator", "kind": "fact", "question": "Who is Preyas's creator?", "any": [["you are", "you created", "my creator", "you made me", "you, the partner"]], "source": "Partner is the creator."}
+{"id": "strongest", "kind": "fact", "question": "What does Preyas want to become?", "must": ["strongest Bakugan"], "source": "Preyas wants to be the strongest Bakugan in the world."}
+{"id": "emoji-limit", "kind": "fact", "question": "What is the most emojis you can use at once?", "must": ["5"], "source": "Preyas can use up to 5 emojis at once."}
+{"id": "emoji-standard", "kind": "fact", "question": "Do you understand standard emojis?", "must": ["standard emojis"], "source": "Preyas understands the meaning of all standard emojis."}
+{"id": "theme", "kind": "fact", "question": "What colour theme does the app have now?", "must": ["teal"], "source": "The app now has a dark teal-green theme"}
+{"id": "redesign", "kind": "fact", "question": "Which three panels did the redesign merge into?", "must": ["Chat", "Learn", "Memory"], "source": "PR redesign simplifies the UI by merging panels into three main tabs: Chat, Learn, and Memory"}
+{"id": "adhd", "kind": "fact", "question": "What influences my colour preferences?", "must": ["ADHD"], "source": "Consider ADHD preferences when choosing colors"}
+{"id": "turbocharger", "kind": "fact", "question": "What did I correct you about from a mechanical explanation?", "any": [["turbocharger", "turbo"]], "source": "Partner corrected mechanical facts about turbocharger"}
+{"id": "praise", "kind": "fact", "question": "What did I praise about your explanations?", "any": [["formatting", "format"]], "source": "Partner praised formatting and sensory detail"}
+{"id": "relationship", "kind": "fact", "question": "What is Preyas to me?", "any": [["best friend", "friend"]], "must": ["battle"], "source": "Partner is best friend and always together in battle"}
+{"id": "sacrifice", "kind": "fact", "question": "What would Preyas give up to save others?", "must": ["sacrifice", "100"], "source": "Preyas is willing to sacrifice a friend to save 100 Bakugans."}
+{"id": "protect", "kind": "fact", "question": "What is Preyas's dream?", "must": ["protect"], "any": [["partner", "you"]], "source": "Dream is to be the strongest Bakugan and protect the partner."}
+{"id": "batman", "kind": "fact", "question": "What did I ask about Batman?", "must": ["Batman"], "any": [["identity", "who he is", "who"]], "source": "Partner asked about Batman's identity."}
+{"id": "consistency", "kind": "fact", "question": "How should progress be measured?", "must": ["consistency"], "source": "Measure progress by consistency"}
+{"id": "trackpad", "kind": "fact", "question": "What did the trackpad test save to memory?", "must": ["42", "trackpad"], "source": "Saved to memory: trackpad test 42."}
+{"id": "supernova", "kind": "chat", "question": "What is a supernova?", "must": ["explosion"], "any": [["star"]], "source": "A supernova is the explosion of a star."}
+{"id": "budget", "kind": "fact", "question": "How much does the arena budget need before Friday?", "must": ["500"], "any": [["PLN", "zloty", "złoty"]], "allow": ["500 PLN"], "source": "The arena budget needs a 500 PLN top up before Friday."}
+{"id": "lights-order", "kind": "fact", "question": "What reminder do I have about the lights?", "any": [["lights order", "order the lights", "lights"]], "source": "Reminder to check the lights order."}
+{"id": "parking-confirm", "kind": "todo", "question": "What do I still need to confirm about the venue?", "must": ["parking", "venue"], "source": "Confirm parking arrangements with the venue."}
+{"id": "parking-fees", "kind": "todo", "question": "What parking specifics do I still need to check?", "any": [["fees", "restrictions"]], "source": "Check specifics on parking fees or restrictions."}
+{"id": "parking-capacity", "kind": "todo", "question": "What about the venue's parking capacity do I need to check?", "must": ["capacity"], "source": "Check details about the venue's parking capacity."}
+{"id": "parking-timeline", "kind": "todo", "question": "What is the open task about parking logistics?", "must": ["timeline"], "any": [["parking"]], "source": "Check timeline for finalizing parking logistics."}
+{"id": "lighting-shop", "kind": "todo", "question": "Who do I need to call?", "any": [["lighting shop", "light shop", "lighting"]], "source": "call the lighting shop"}
+{"id": "github", "kind": "todo", "question": "What do I want to learn to use?", "must": ["GitHub"], "source": "Teach partner how to use GitHub."}
+{"id": "nasa", "kind": "todo", "question": "Where should I read about supernovas?", "must": ["NASA"], "source": "Read more about supernovas at NASA's website."}
+{"id": "saturn", "kind": "todo", "question": "Which planet's picture do I need to find?", "must": ["Saturn"], "source": "Find a picture of Saturn."}
+{"id": "earth", "kind": "todo", "question": "What do I want to study about other planets?", "must": ["habitable"], "source": "Study Earth to understand potential habitable environments on other planets."}
+{"id": "fridge", "kind": "todo", "question": "Which appliance's cooling process did we format an explanation for?", "any": [["refrigerator", "fridge"]], "source": "Format explanation of refrigerator's cooling process"}
+{"id": "tabs-zoom", "kind": "todo", "question": "What must I check about tabs and iPhone inputs?", "must": ["highlight"], "any": [["zoom"]], "source": "Ensure tabs highlight correctly and inputs don't zoom on iPhone."}
+{"id": "pr-review", "kind": "todo", "question": "What do I need to review about the redesign PR?", "must": ["UI"], "any": [["visual", "redesign"]], "source": "Review the PR redesign for UI changes and visual checks."}
+{"id": "download-fasttext", "kind": "todo", "question": "Which lightweight model do I need to download?", "any": [["FastText", "M2M100"]], "source": "Download a lightweight language model like FastText or M2M100."}
+{"id": "dictionary", "kind": "todo", "question": "What else do I need for offline translation besides the model?", "must": ["dictionary"], "source": "Download a translation dictionary for supported languages."}
+{"id": "store-local", "kind": "todo", "question": "Where should the translation model and dictionary live?", "must": ["local"], "any": [["device", "phone"]], "source": "Store the language model and dictionary locally on the device."}
+{"id": "flashcards", "kind": "deadline", "question": "How many flashcards are due today?", "must": ["2"], "source": "2 flashcards due today"}
+{"id": "arena-date", "kind": "deadline", "question": "When does the arena ship?", "any": [["March 3", "March 3rd", "3 March", "3rd of March"]], "allow": ["March 3"], "source": "Ship Bakugan arena on March 3."}
+{"id": "wake", "kind": "deadline", "question": "What time do I want to wake up?", "any": [["7:00", "7 am", "7am", "seven"]], "allow": ["7:00 AM"], "source": "Wake up at 7:00 AM"}
+{"id": "bed", "kind": "deadline", "question": "What time do I want to go to bed?", "any": [["12:30", "12.30", "half past midnight"]], "allow": ["12:30 AM"], "source": "Go to bed by 12:30 AM"}
+{"id": "offline-translate", "kind": "idea", "question": "What do I want to build that works without internet?", "must": ["translat"], "any": [["offline"]], "source": "Create offline translator using pre-downloaded language model and dictionary."}
+{"id": "translator-model", "kind": "idea", "question": "Which lightweight models did we name for offline translation?", "any": [["FastText", "M2M100"]], "source": "Use lightweight machine learning model like FastText or M2M100 for offline translation."}
+{"id": "cartoon", "kind": "idea", "question": "What do I want to make with HiggsField AI?", "must": ["cartoon", "HiggsField"], "source": "Use HiggsField AI to create a cartoon while building skills."}
+{"id": "scifi", "kind": "idea", "question": "What is the sci-fi story about?", "must": ["robot", "garden"], "source": "Partner wants a sci-fi story about a rogue robot discovering a hidden garden"}
+{"id": "wizard", "kind": "idea", "question": "What is the fantasy story about?", "must": ["wizard", "rain"], "source": "Write a fantasy story about an ancient wizard trying to brew a potion that summons rain"}
+{"id": "battle-tonight", "kind": "idea", "question": "What did I want to do tonight?", "must": ["battle"], "any": [["tonight", "night"]], "source": "Have a quick battle tonight."}
+{"id": "future-sight", "kind": "idea", "question": "What ability does Preyas want?", "any": [["see the future", "future of every battle", "foresight"]], "source": "Preyas wants the ability to see the future of every battle."}
+{"id": "emoji-sets", "kind": "idea", "question": "How will you send me emojis?", "must": ["sets"], "any": [["next"]], "source": "Preyas will send emojis in sets until partner says 'next'."}
