@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
 import { theme } from "../theme.ts";
+import { ACTION_HIT_SLOP, actionStyles } from "./actionRow.ts";
 
 export function canCopy(): boolean {
   try {
@@ -38,19 +39,19 @@ export function CopyButton({ text }: { text: string }) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={done ? "Copied" : "Copy reply"}
-      hitSlop={6}
+      style={actionStyles.button}
+      hitSlop={ACTION_HIT_SLOP}
       onPress={() => {
         void copyText(text).then((ok) => {
           if (ok) setDone(true);
         });
       }}
     >
-      <Text style={[styles.label, done && styles.done]}>{done ? "Copied" : "Copy"}</Text>
+      <Text style={[actionStyles.label, done && styles.done]}>{done ? "Copied" : "Copy"}</Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  label: { color: theme.faint, fontSize: theme.type.label, fontWeight: "600" },
   done: { color: theme.good },
 });
