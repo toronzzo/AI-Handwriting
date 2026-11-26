@@ -84,6 +84,7 @@ import { chatColumn, isPhone, isWide, pageColumn, pageGridColumns, SETTINGS_PROB
 import { useArt } from "../art/slots.ts";
 import { usePhotoSwitcher } from "../ui/ArtSlot";
 import { ActivityPanel } from "../activity/ActivityPanel";
+import { LiveActivity } from "../activity/LiveActivity";
 import { PreviewCard } from "../activity/PreviewCard";
 import { previewMode } from "../activity/previewMode";
 import { useActivity, type ActivitySink } from "../activity/useActivity";
@@ -93,6 +94,7 @@ import { AppearanceSetting } from "../settings/Appearance";
 import { BitModeSetting } from "../settings/BitMode.tsx";
 import { CommandBoard } from "../chat/CommandBoard.tsx";
 import { parseChatCommand, parseWhen, type ChatCommand } from "../chat/commands.ts";
+import { ACTION_HIT_SLOP, actionStyles } from "../chat/actionRow.ts";
 import { CopyButton } from "../chat/CopyButton.tsx";
 import { Markdown } from "../chat/Markdown.tsx";
 import { SoundToggle } from "../settings/SoundToggle.tsx";
@@ -3372,16 +3374,22 @@ export function ChatScreen({
                       <View style={styles.timeRow}>
                         <Text style={[styles.time, mine && styles.timeMine]}>{clock(message.t)}{mine ? (read ? "  ✓✓" : "  ✓") : ""}</Text>
                         {!mine ? (
-                           <>
-                             <CopyButton text={message.content} />
-                             {index === messages.length - 1 && message.role === "assistant" ? (
-                               <Pressable onPress={regenerateLastReply} accessibilityRole="button" accessibilityLabel="Regenerate">
-                                 <Text style={styles.time}>Regenerate</Text>
-                               </Pressable>
-                             ) : null}
-                           </>
-                         ) : null}
-</View>
+                          <View style={styles.actions}>
+                            <CopyButton text={message.content} />
+                            {index === messages.length - 1 && message.role === "assistant" ? (
+                              <Pressable
+                                style={actionStyles.button}
+                                hitSlop={ACTION_HIT_SLOP}
+                                onPress={regenerateLastReply}
+                                accessibilityRole="button"
+                                accessibilityLabel="Regenerate reply"
+                              >
+                                <Text style={actionStyles.label}>Regenerate</Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        ) : null}
+                      </View>
                     </View>
                   </View>
                   {!mine && message.runId ? (
@@ -3478,6 +3486,11 @@ export function ChatScreen({
               </View>
             ) : null}
             <CommandBoard draft={draft} onPick={(name) => setDraft("/" + name + " ")} />
+            <LiveActivity
+              state={activity.state}
+              runId={lastRunId}
+              active={lastRunActive && Boolean(lastRunId)}
+            />
             <View style={styles.composerBox}>
               <TextInput
                 value={draft}
@@ -3533,6 +3546,7 @@ export function ChatScreen({
               </Pressable>
               <Pressable
                 style={styles.send}
+                hitSlop={{ top: 4, bottom: 4 }}
                 onPress={replyCanStop ? stopReply : submitDraft}
                 accessibilityRole="button"
                 accessibilityLabel={replyCanStop ? "Stop reply" : "Send"}
@@ -4210,6 +4224,8 @@ const styles = StyleSheet.create({
   profileBody: { gap: theme.space.xs, paddingBottom: theme.space.sm },
   profileHero: { height: theme.space.xl * 5, alignItems: "center", justifyContent: "center" },
   timeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space.sm },
+  /** Copy and Regenerate sit together on the right; the clock stays left. */
+  actions: { flexDirection: "row", alignItems: "center", gap: theme.space.xs },
   /** One heading per screen, in the same Oswald style as SectionTitle. */
   sectionTitle: { fontFamily: theme.font.display, color: theme.text, fontWeight: "700", fontSize: theme.type.display.section, textTransform: "uppercase", letterSpacing: 0.78 },
   /** Page titles and notes drawn on the sky (Learn, Memory, Settings). */
