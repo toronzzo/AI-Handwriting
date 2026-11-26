@@ -3053,7 +3053,7 @@ export function ChatScreen({
                   <Text style={styles.skyNote}>{tabById("memory").example}</Text>
                 ) : null}
                 {notesList.map((noteRow) => (
-                  <View key={noteRow.id} style={[styles.noteRow, styles.solidCard]}>
+                  <View key={noteRow.id} style={[styles.noteRow, styles.memoryPlate]}>
                     {editing?.id === noteRow.id ? (
                       <View style={styles.noteEditing}>
                         <TextInput style={styles.modalInput} value={editing.text} onChangeText={(text) => setEditing({ ...editing, text })} multiline />
@@ -3096,7 +3096,7 @@ export function ChatScreen({
                   <Text style={styles.skyNote}>No reminders. Tell Preyas: "remind me to call mum at 6".</Text>
                 ) : null}
                 {reminders.filter((row) => row.status !== "done").map((row) => (
-                  <View key={row.id} style={[styles.noteRow, styles.solidCard]}>
+                  <View key={row.id} style={[styles.noteRow, styles.memoryPlate]}>
                     <View style={styles.noteMain}>
                       <Text style={styles.noteKind}>
                         {formatDue(new Date(row.dueAt))}
@@ -3130,7 +3130,7 @@ export function ChatScreen({
                   </Text>
                 ) : null}
                 {inbox.map((file) => (
-                  <View key={file.name} style={[styles.noteRow, styles.solidCard]}>
+                  <View key={file.name} style={[styles.noteRow, styles.memoryPlate]}>
                     <View style={styles.noteMain}>
                       <Text style={styles.noteKind}>{file.type} · {Math.max(1, Math.round(file.size / 1024))} KB</Text>
                       <Text style={styles.noteText} numberOfLines={2}>{file.name}</Text>
@@ -3912,7 +3912,7 @@ const styles = StyleSheet.create({
   emptyText: { color: theme.dim, fontSize: 13, lineHeight: 19, textAlign: "center" },
   chipSaved: { alignSelf: "center", ...paperSoft, borderRadius: theme.radius.md, paddingHorizontal: theme.space.sm + 2, paddingVertical: theme.space.xs, marginBottom: theme.space.xs },
   chipSavedText: { color: theme.accentText, fontSize: 12, fontWeight: "700" },
-  noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, borderRadius: 16, padding: 12 },
+  noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, borderRadius: theme.radius.square, padding: 12 },
   noteEditing: { flex: 1, gap: 6 },
   kindRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   kindChip: { borderWidth: 1, borderColor: theme.lineStrong, borderRadius: 10, minHeight: 36, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
@@ -3920,7 +3920,7 @@ const styles = StyleSheet.create({
   kindText: { color: theme.text, fontSize: theme.type.label },
   noteActions: { flexDirection: "row", justifyContent: "flex-end", gap: 14 },
   noteMain: { flex: 1, minWidth: 0 },
-  noteKind: { color: theme.accentText, fontSize: 10, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase" },
+  noteKind: { color: theme.accentText, fontFamily: theme.font.display, fontSize: 10, fontWeight: "700", letterSpacing: 1.2, textTransform: "uppercase" },
   noteText: { color: theme.text, fontSize: 13, lineHeight: 18, marginTop: 2 },
   taskCard: { borderWidth: 1, borderColor: theme.accentLine, borderRadius: 14, backgroundColor: theme.cardSoft, padding: 10, gap: 6, marginTop: 6 },
   taskStatus: { color: theme.accentText, fontSize: 12, fontWeight: "700" },
@@ -4154,9 +4154,9 @@ const styles = StyleSheet.create({
   chipText: { color: theme.text, fontSize: 12 },
   /** Memory filters sit on the sky, so they use a paper fill. Text on card, and onAccent on the selected accent fill, both pass WCAG AA. */
   filterChip: {
-    borderWidth: 1,
-    borderColor: theme.lineStrong,
-    borderRadius: theme.radius.md,
+    borderWidth: 1.5,
+    borderColor: theme.text,
+    borderRadius: theme.radius.square,
     minHeight: 36,
     alignItems: "center",
     justifyContent: "center",
@@ -4164,13 +4164,20 @@ const styles = StyleSheet.create({
     backgroundColor: theme.card,
   },
   filterChipOn: { backgroundColor: theme.accent, borderColor: theme.accent },
-  filterChipText: { color: theme.text, fontSize: 12, fontWeight: "600" },
+  filterChipText: {
+    color: theme.text,
+    fontFamily: theme.font.display,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
   filterChipTextOn: { color: theme.onAccent },
   /** Search field on the sky: paper fill so placeholder and typed text meet AA. */
   searchInput: {
-    borderWidth: 1,
-    borderColor: theme.lineStrong,
-    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: theme.text,
+    borderRadius: theme.radius.square,
     backgroundColor: theme.card,
     color: theme.text,
     paddingHorizontal: 10,
@@ -4188,6 +4195,17 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 8 },
     elevation: 3,
+  },
+  /**
+   * A riso plate for Memory rows: paper fill, 1.5px ink rule, square corners,
+   * no shadow. Memory has its own style rather than reusing solidCard, because
+   * solidCard is shared with the Learn deck cards and this pass is Memory only.
+   */
+  memoryPlate: {
+    backgroundColor: theme.card,
+    borderWidth: 1.5,
+    borderColor: theme.text,
+    borderRadius: theme.radius.square,
   },
   pageGrid: { gap: theme.space.sm },
   pageGridWide: { flexDirection: "row", flexWrap: "wrap" },
