@@ -29,6 +29,7 @@ import { isCanonicalMood } from "../packages/mood/src/index.ts";
 import { notesContext, queryForRetrieval } from "../packages/alive/src/notes.ts";
 import { driveMapPrompt, isDriveQuestion, isScanDriveCommand, whereIsQuery } from "../packages/alive/src/driveMap.ts";
 import { addNote, deleteNote, loadNotes, searchNotes, updateNote } from "./lib/notes.mjs";
+import { maybeConsolidate } from "./lib/consolidate.mjs";
 import { askForNotes, chatLines } from "./lib/notesExtract.mjs";
 import { fetchPageText, searchWeb } from "./lib/webSearch.mjs";
 import { proxyOfflineArticle, proxyOfflineImage, searchOffline } from "./lib/offlineSearch.mjs";
@@ -2356,6 +2357,11 @@ function startReminderLoop() {
         }
       }
       maybeBriefing();
+      try {
+        maybeConsolidate(dataDir);
+      } catch {
+        /* a bad night must not stop the reminder loop */
+      }
       syncVault();
       maybeScanDrive();
     } catch {
