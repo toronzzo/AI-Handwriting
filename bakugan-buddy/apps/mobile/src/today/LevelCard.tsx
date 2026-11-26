@@ -107,7 +107,7 @@ export function LevelCard() {
       <View style={styles.stage}>
         {hasHero ? (
           <View style={styles.heroImage}>
-            <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable />
+            <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable editorCorner="top" />
           </View>
         ) : (
           /**
@@ -119,7 +119,7 @@ export function LevelCard() {
            * than Preyas so it also shows on top of him.
            */
           <View style={styles.heroBack}>
-            <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable />
+            <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable editorCorner="top" />
           </View>
         )}
         <HalftoneDisc size={218} style={styles.disc} />
@@ -194,8 +194,9 @@ const styles = StyleSheet.create({
   },
   heroImage: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%" },
   /** The hero picture fills the stage; its "Change photo" button sits in the
-   *  bottom-left corner. It is a later sibling of the level-up pill and XP
-   *  chips, so the button is never covered by them. */
+   *  top-left corner, because the printed level number owns the bottom-left.
+   *  It is a later sibling of the level-up pill and XP chips, so the button is
+   *  never covered by them. */
   heroSlot: { flex: 1, height: "100%", borderWidth: 0 },
   /**
    * The empty placeholder sits UNDER Preyas. It has no zIndex, so the later
