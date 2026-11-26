@@ -212,7 +212,7 @@ export function ArtSlot({
          * (the pixel Preyas, or the 3D ball's transparent box) is drawn over
          * the picture, while the empty areas keep letting taps through.
          */
-        <View style={editorCorner === "top" ? styles.editorTop : styles.editor} pointerEvents="box-none">
+        <View style={[styles.editor, editorCorner === "top" ? styles.editorTop : styles.editorBottom]} pointerEvents="box-none">
           {error ? (
             <View style={styles.errorNote} pointerEvents="none">
               <Text style={styles.errorText}>Couldn't save the photo</Text>
@@ -258,22 +258,14 @@ const styles = StyleSheet.create({
   editor: {
     position: "absolute",
     left: 8,
-    bottom: 8,
     right: 8,
     alignItems: "flex-start",
     gap: 6,
     zIndex: 3,
   },
-  /** The same button layer, pinned to the top-left instead of the bottom. */
-  editorTop: {
-    position: "absolute",
-    left: 8,
-    top: 8,
-    right: 8,
-    alignItems: "flex-start",
-    gap: 6,
-    zIndex: 3,
-  },
+  /** Only the pinned edge differs between the two corners. */
+  editorBottom: { bottom: 8 },
+  editorTop: { top: 8 },
   button: {
     minHeight: 36,
     minWidth: 36,
