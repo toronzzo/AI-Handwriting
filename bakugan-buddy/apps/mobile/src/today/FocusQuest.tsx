@@ -89,7 +89,7 @@ export function FocusQuest() {
   const canStart = state.mode === "idle" || state.mode === "pause";
 
   return (
-    <Panel style={styles.panel}>
+    <Panel style={styles.panel} plate="PL. 05">
       <View style={styles.topStripe}>
         <Stripe height={3} gap={0} />
       </View>
@@ -262,7 +262,7 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     borderWidth: 1,
     borderColor: theme.lineStrong,
-    borderRadius: 8,
+    borderRadius: theme.radius.square,
     overflow: "hidden",
   },
   segItem: {
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
   },
   button: {
     minHeight: 36,
-    borderRadius: 10,
+    borderRadius: theme.radius.square,
     paddingVertical: 6,
     paddingHorizontal: 16,
     alignItems: "center",

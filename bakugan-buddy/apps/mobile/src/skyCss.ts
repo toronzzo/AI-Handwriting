@@ -1,75 +1,81 @@
 /**
- * Web-only sky: the page gradient and the static clouds. Live as CSS strings
- * so the day/night values never appear as literals in the UI .tsx files the
- * "no loose colours" test scans. A no-op outside the web.
+ * Web-only riso sky: flat paper, one drawn horizon rule, a halftone sun disc
+ * and a fine grain layer. Lives as CSS strings so the day/night values never
+ * appear as literals in the UI .tsx files the "no loose colours" test scans.
+ * A no-op outside the web.
  *
- * The eight cloud blobs share one <div id="pz-clouds"> pinned behind the app
- * (z-index -3). Text and paper panels never sit directly on the sky: the App
- * root and stage are transparent on the web so this gradient shows through,
- * while the iPhone uses theme.bg and never mounts the clouds.
+ * The paper, the horizon and the sun sit behind the app (#pz-sky at
+ * z-index -3); the grain floats above the whole page (z-index 9999,
+ * pointer-events none) so the print texture covers the paper and the panels
+ * alike. The App root and stage are transparent on the web so the paper
+ * shows through, while the iPhone draws the same sky with the Grain overlay
+ * in App.tsx and theme.bg as the page colour.
  */
 
-/** All eight cloud shapes, in order, with their white alpha. */
-const CLOUDS: ReadonlyArray<{ shape: string; alpha: string }> = [
-  { shape: "ellipse 340px 70px at 14% 16%", alpha: ".55" },
-  { shape: "ellipse 240px 56px at 24% 20%", alpha: ".42" },
-  { shape: "ellipse 420px 80px at 72% 10%", alpha: ".45" },
-  { shape: "ellipse 300px 64px at 86% 15%", alpha: ".40" },
-  { shape: "ellipse 520px 90px at 46% 52%", alpha: ".38" },
-  { shape: "ellipse 360px 70px at 8% 70%", alpha: ".40" },
-  { shape: "ellipse 460px 84px at 90% 80%", alpha: ".42" },
-  { shape: "ellipse 300px 60px at 55% 92%", alpha: ".35" },
-];
-
-/** The sky stylesheet: page gradient, transparent body/root, and the clouds. */
+/** The sky stylesheet: flat paper, the drawn horizon, the sun and the grain. */
 export function skyCss(): string {
-  const layers = CLOUDS.map(
-    ({ shape, alpha }) => `radial-gradient(${shape}, rgba(255,255,255,${alpha}), transparent 72%)`,
-  ).join(",");
-
   return [
-    "html{min-height:100%;background:linear-gradient(180deg,var(--pz-skyTop) 0%,var(--pz-skyMid) 45%,var(--pz-skyBottom) 100%) fixed}",
+    "html{min-height:100%;background:var(--pz-bg) fixed}",
     "body{background:transparent}",
     "#root{background:transparent}",
-    `#pz-clouds{position:fixed;inset:0;z-index:-3;pointer-events:none;background:${layers}}`,
-    'html[data-pz="night"] #pz-clouds{opacity:.16}',
+    "#pz-sky{position:fixed;inset:0;z-index:-3;pointer-events:none}",
+    '#pz-sky::before{content:"";position:absolute;left:0;right:0;top:44%;height:1.5px;background:var(--pz-lineStrong)}',
+    "#pz-sun{position:absolute;right:7%;top:calc(44% - 110px);width:220px;height:220px;border-radius:50%;background:var(--pz-ochre);border:1.5px solid var(--pz-lineStrong);overflow:hidden}",
+    '#pz-sun::after{content:"";position:absolute;inset:0;background-image:radial-gradient(circle,var(--pz-bg) 22%,transparent 25%);background-size:18px 18px}',
+    "#pz-grain{position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:.07;background-image:url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='200' height='200' filter='url(%23g)'/></svg>\")}",
+    'html[data-pz="night"] #pz-grain{opacity:.09}',
   ].join("\n");
 }
 
 /**
- * Append the static cloud div and inject the sky rules. Called once from
- * installTheme; safe to call again (it reuses the existing elements).
+ * Append the sky, sun and grain elements and inject the sky rules. Called
+ * once from installTheme; safe to call again (it reuses the existing
+ * elements). The old cloud div from the blue-sky theme is removed if a hot
+ * reload left one behind.
  */
 export function installSky(): void {
   if (typeof document === "undefined") return;
 
-  let clouds = document.getElementById("pz-clouds");
-  if (!clouds) {
-    clouds = document.createElement("div");
-    clouds.id = "pz-clouds";
-    document.body.appendChild(clouds);
+  const stale = document.getElementById("pz-clouds");
+  if (stale) stale.remove();
+
+  let sky = document.getElementById("pz-sky");
+  if (!sky) {
+    sky = document.createElement("div");
+    sky.id = "pz-sky";
+    const sun = document.createElement("div");
+    sun.id = "pz-sun";
+    sky.appendChild(sun);
+    document.body.appendChild(sky);
   }
 
-  let style = document.getElementById("pz-sky") as HTMLStyleElement | null;
+  let grain = document.getElementById("pz-grain");
+  if (!grain) {
+    grain = document.createElement("div");
+    grain.id = "pz-grain";
+    document.body.appendChild(grain);
+  }
+
+  let style = document.getElementById("pz-sky-style") as HTMLStyleElement | null;
   if (!style) {
     style = document.createElement("style");
-    style.id = "pz-sky";
+    style.id = "pz-sky-style";
     document.head.appendChild(style);
   }
   style.textContent = skyCss();
 }
 
 /**
- * The shade drawn over the user's own `bg` picture (slice 10). The app has no
+ * The shade drawn over the user's own bg picture (slice 10). The app has no
  * gradient package, so it is six stacked bands from the top colour to the
- * bottom one. Those values live in the palette (`bgShadeTop` /
- * `bgShadeBottom`); nothing is hard-coded here.
+ * bottom one. Those values live in the palette (bgShadeTop / bgShadeBottom);
+ * nothing is hard-coded here.
  */
 export const SHADE_BANDS = [0, 0.2, 0.4, 0.6, 0.8, 1] as const;
 
 /**
- * Mix two translucent colour strings channel by channel, `t` 0 = from and
- * `t` 1 = to. Accepts `rgb(r,g,b)` / `rgba(r,g,b,a)`. The result is used for a
+ * Mix two translucent colour strings channel by channel, t 0 = from and
+ * t 1 = to. Accepts rgb(r,g,b) / rgba(r,g,b,a). The result is used for a
  * single layer, so its alpha is the mixed alpha (0..1), not scaled.
  */
 export function mixColour(from: string, to: string, t: number): string {

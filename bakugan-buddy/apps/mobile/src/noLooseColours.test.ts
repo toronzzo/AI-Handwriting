@@ -43,6 +43,18 @@ const FILES = [
   "src/screens/PreyasHero.tsx",
   "src/settings/Appearance.tsx",
   "src/room/RoomScreen.tsx",
+  "src/ui/Panel.tsx",
+  "src/ui/SectionTitle.tsx",
+  "src/ui/NavMark.tsx",
+  "src/ui/Grain.tsx",
+  "src/today/LevelCard.tsx",
+  "src/today/TodayScreen.tsx",
+  "src/today/DailyXp.tsx",
+  "src/today/Radar.tsx",
+  "src/today/QuestList.tsx",
+  "src/today/FocusQuest.tsx",
+  "src/today/PathsRow.tsx",
+  "src/today/risoPrint.tsx",
   "App.tsx",
 ];
 

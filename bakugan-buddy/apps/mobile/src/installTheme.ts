@@ -41,7 +41,7 @@ function installTheme(): void {
   }
   el.textContent = css;
 
-  // The sky gradient and clouds live in their own style + a static div.
+  // The riso sky (paper, horizon rule, halftone sun, grain) lives in its own style + static divs.
   installSky();
 
   function apply(): void {

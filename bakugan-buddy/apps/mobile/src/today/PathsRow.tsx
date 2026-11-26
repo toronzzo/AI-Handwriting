@@ -100,10 +100,12 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
   },
   track: {
-    height: 6,
-    borderRadius: 99,
+    height: 8,
+    borderRadius: theme.radius.square,
+    borderWidth: 1.5,
+    borderColor: theme.text,
     backgroundColor: theme.track,
     overflow: "hidden",
   },
-  fill: { height: "100%", backgroundColor: theme.accent, borderRadius: 99 },
+  fill: { height: "100%", backgroundColor: theme.accent },
 });

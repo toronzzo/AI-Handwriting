@@ -1,38 +1,33 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { theme } from "../theme";
-import { Stripe } from "../ui/Stripe";
 import { Panel } from "../ui/Panel";
+import { PrintedBar } from "./risoPrint";
 import { useRpg } from "./useRpg";
 
 /**
- * Daily XP: the big number against the daily goal and a 10px bar with the
- * Preyas stripe under its fill. In the demo a ghost button adds +10 XP to
- * Mind so the level card can show the level-up animation.
+ * Daily XP: the big Oswald number against the daily goal and a printed bar
+ * with ink tick marks. In the demo a ghost button adds +10 XP to Mind so the
+ * level card can show the level-up animation.
  */
 export function DailyXp() {
   const { snapshot, source } = useRpg();
   const fill = Math.min(100, Math.round((snapshot.todayXp / snapshot.dailyGoal) * 100));
-  const fillWidth = `${fill}%` as const;
   const nowXp = Math.min(snapshot.todayXp, snapshot.dailyGoal);
 
   return (
-    <Panel>
+    <Panel plate="PL. 02">
       <Text style={styles.heading} accessibilityRole="header">DAILY XP</Text>
       <View style={styles.numberRow}>
         <Text style={styles.big}>{snapshot.todayXp}</Text>
         <Text style={styles.goal}>/ {snapshot.dailyGoal}</Text>
       </View>
-      <View
-        style={styles.bar}
-        accessibilityRole="progressbar"
-        accessibilityValue={{ min: 0, max: snapshot.dailyGoal, now: nowXp }}
-        accessibilityLabel={`${nowXp} of ${snapshot.dailyGoal} daily XP`}
-      >
-        <View style={[styles.fill, { width: fillWidth }]} />
-      </View>
-      <View style={styles.fillStripe}>
-        <Stripe height={2} width={fillWidth} />
-      </View>
+      <PrintedBar
+        pct={fill}
+        min={0}
+        max={snapshot.dailyGoal}
+        now={nowXp}
+        label={`${nowXp} of ${snapshot.dailyGoal} daily XP`}
+      />
       {snapshot.isDemo ? (
         <Pressable
           style={styles.demoButton}
@@ -56,32 +51,20 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   numberRow: { flexDirection: "row", alignItems: "baseline", gap: 6, marginTop: 6, marginBottom: 10 },
-  big: { color: theme.text, fontSize: 48, fontWeight: "800" },
+  big: {
+    fontFamily: theme.font.display,
+    fontWeight: "700",
+    fontSize: 56,
+    color: theme.text,
+  },
   goal: { color: theme.dim, fontSize: 20, fontWeight: "600" },
-  bar: {
-    height: 10,
-    borderRadius: 99,
-    backgroundColor: theme.track,
-    borderWidth: 1,
-    borderColor: theme.accentLine,
-    overflow: "hidden",
-  },
-  fill: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: theme.accent,
-    borderRadius: 99,
-  },
-  fillStripe: { marginTop: 5 },
   demoButton: {
     alignSelf: "flex-start",
     minHeight: 36,
     justifyContent: "center",
-    borderRadius: 10,
+    borderRadius: theme.radius.square,
     borderWidth: 1,
-    borderColor: theme.accentLine,
+    borderColor: theme.lineStrong,
     paddingHorizontal: 12,
     marginTop: 12,
   },

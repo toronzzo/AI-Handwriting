@@ -59,20 +59,23 @@ function coloursOf(palette: Palette): Colours {
   const lightCard = isLight(palette.card);
   const lightInk = isLight(palette.text);
   return {
+    // Risograph retune: the sky keys are flat paper now, so the face draws
+    // from the spot colours instead — a blue body, vermilion fins and lips,
+    // ink eyes, cream pupils on the dark print.
     disc: mixHex(palette.stageTop, palette.stageBottom, 0.42),
-    skin: palette.accent,
-    skinLight: mixHex(palette.accent, palette.skyBottom, 0.5),
-    skinDeep: mixHex(palette.accent, palette.skyTop, 0.58),
-    fin: mixHex(palette.skyMid, palette.skyBottom, 0.28),
+    skin: palette.blue,
+    skinLight: mixHex(palette.blue, palette.cream, 0.5),
+    skinDeep: mixHex(palette.blue, palette.ink, 0.45),
+    fin: mixHex(palette.vermilion, palette.ochre, 0.28),
     eye: lightCard ? palette.card : palette.onAccent,
-    iris: mixHex(palette.skyTop, palette.accent, 0.4),
-    pupil: lightInk ? palette.skyTop : palette.text,
+    iris: palette.blue,
+    pupil: lightInk ? palette.cream : palette.ink,
     catch: palette.onAccent,
-    lip: lightInk ? mixHex(palette.skyTop, palette.accent, 0.35) : mixHex(palette.text, palette.accent, 0.42),
-    mouth: lightInk ? palette.bg : mixHex(palette.skyTop, palette.text, 0.72),
-    tongue: mixHex(palette.accent, palette.skyBottom, 0.62),
+    lip: palette.vermilion,
+    mouth: palette.ink,
+    tongue: palette.vermilion,
     spot: withAlpha(palette.onAccent, lightCard ? 0.78 : 0.55),
-    brow: lightInk ? palette.skyTop : mixHex(palette.text, palette.accent, 0.28),
+    brow: lightInk ? palette.cream : palette.ink,
     shadow: withAlpha(lightInk ? palette.bg : palette.text, 0.16),
   };
 }
