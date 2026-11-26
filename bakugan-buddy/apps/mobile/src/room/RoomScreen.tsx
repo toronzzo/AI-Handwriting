@@ -923,6 +923,7 @@ export function RoomScreen() {
           style={styles.wakeButton}
           onPress={() => {
             player.auto = false;
+            player.sleep = false;
             player.summonUntil = Date.now() + 1400;
             player.hidden = false;
             refresh();
