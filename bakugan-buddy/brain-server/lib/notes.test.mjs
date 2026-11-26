@@ -13,6 +13,7 @@ import {
   searchNotes,
   updateNote,
 } from "./notes.mjs";
+import { isDuplicate } from "../../packages/alive/src/notes.ts";
 
 function drive() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "preyas-notes-"));
@@ -117,4 +118,9 @@ test("export can be regenerated from the JSONL alone", () => {
   assert.match(markdown, /## Deadlines/);
   assert.equal(fs.existsSync(notesMarkdownPath(root)), true);
   done();
+});
+
+test("a negated note is not the same note", () => {
+  assert.equal(isDuplicate("Preyas can use emojis in every answer", "Preyas cannot use emojis in every answer"), false);
+  assert.equal(isDuplicate("Partner likes long replies", "Partner does not like long replies"), false);
 });

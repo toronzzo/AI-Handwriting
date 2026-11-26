@@ -88,8 +88,15 @@ export function dedupeKey(text: string): string {
     .trim();
 }
 
+/**
+ * "I like X" and "I do not like X" share every word but the one that matters,
+ * so a negation difference disqualifies a duplicate before any overlap count.
+ */
+const NEGATION = /\b(?:not|no|never|without|cannot|can't|don't|doesn't|isn't|aren't|won't)\b/i;
+
 /** True when two notes say the same thing, not merely when they share a word. */
 export function isDuplicate(a: string, b: string): boolean {
+  if (NEGATION.test(String(a ?? "")) !== NEGATION.test(String(b ?? ""))) return false;
   const x = dedupeKey(a);
   const y = dedupeKey(b);
   if (!x || !y) return false;
@@ -104,6 +111,11 @@ export function isDuplicate(a: string, b: string): boolean {
   const shared = [...left].filter((word) => right.has(word)).length;
   const coverage = shared / Math.min(left.size, right.size);
   return shared >= 3 && coverage >= 0.8;
+}
+
+/** Content words only, so two notes can be compared without the noise words. */
+export function noteWords(text: string): string[] {
+  return tokenize(text);
 }
 
 function tokenize(text: string): string[] {
