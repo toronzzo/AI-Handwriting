@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Preyas brain-server runtime dependencies: MCP client and the filesystem, terminal and Playwright MCP servers.",
   "scripts": {
-    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test lib/*.test.mjs lib/os/*.test.mjs"
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test lib/*.test.mjs lib/atlas/*.test.mjs lib/os/*.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.24.0",
