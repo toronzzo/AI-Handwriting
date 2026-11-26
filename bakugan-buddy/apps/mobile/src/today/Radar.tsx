@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Animated, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, G, Line, Polygon, Text as SvgText } from "react-native-svg";
 import { AREAS, type AreaId } from "../rpg/types.ts";
+import { withAlpha } from "../palette.ts";
 import { theme } from "../theme";
 import { Panel } from "../ui/Panel";
 import { useReducedMotion } from "../ui/useReducedMotion";
@@ -17,17 +18,6 @@ const CY = VIEW / 2;
 const RADIUS = 128;
 /** How far the label block sits beyond the outer ring. */
 const LABEL_GAP = 34;
-
-/** Turn a palette hex into the same colour with a different alpha, for the
- *  SVG grid and polygon fills (CSS var() strings do not work in SVG). */
-function withAlpha(hex: string, alpha: number): string {
-  const value = hex.replace("#", "");
-  const n = parseInt(value, 16);
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  return `rgba(${r},${g},${b},${alpha})`;
-}
 
 /**
  * The ring pulse that shows on a dot whose area just gained XP: the stroke
@@ -120,13 +110,13 @@ export function Radar() {
       : target;
 
   const polygon = points.map((point) => `${point.x},${point.y}`).join(" ");
-  const gridStroke = withAlpha(palette.text, 0.18);
+  const gridStroke = withAlpha(palette.text, 0.22);
   const label = `Radar. ${AREAS.map(
     (area) => `${area.name} ${Math.floor(snapshot.areaValue[area.id])}`,
   ).join(", ")}`;
 
   return (
-    <Panel>
+    <Panel plate="PL. 03">
       <View style={styles.header}>
         <Text style={styles.heading} accessibilityRole="header">RADAR</Text>
       </View>

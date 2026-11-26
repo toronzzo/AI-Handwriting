@@ -146,13 +146,20 @@ export function ArtSlot({
   radius = 12,
   style,
   editable = false,
+  editorCorner = "bottom",
 }: {
   slot: SlotId;
   aspectRatio?: number;
   radius?: number;
   style?: StyleProp<ViewStyle>;
-  /** Show the small "Change photo" button in the bottom-left corner. */
+  /** Show the small "Change photo" button in a corner of the picture. */
   editable?: boolean;
+  /**
+   * Which corner the button sits in. The hero plate moves it to the top: the
+   * printed level number owns the bottom-left, and the two used to collide so
+   * the level read as half hidden.
+   */
+  editorCorner?: "bottom" | "top";
 }) {
   const art = useArt(slot);
   const palette = usePalette();
@@ -205,7 +212,7 @@ export function ArtSlot({
          * (the pixel Preyas, or the 3D ball's transparent box) is drawn over
          * the picture, while the empty areas keep letting taps through.
          */
-        <View style={styles.editor} pointerEvents="box-none">
+        <View style={[styles.editor, editorCorner === "top" ? styles.editorTop : styles.editorBottom]} pointerEvents="box-none">
           {error ? (
             <View style={styles.errorNote} pointerEvents="none">
               <Text style={styles.errorText}>Couldn't save the photo</Text>
@@ -251,12 +258,14 @@ const styles = StyleSheet.create({
   editor: {
     position: "absolute",
     left: 8,
-    bottom: 8,
     right: 8,
     alignItems: "flex-start",
     gap: 6,
     zIndex: 3,
   },
+  /** Only the pinned edge differs between the two corners. */
+  editorBottom: { bottom: 8 },
+  editorTop: { top: 8 },
   button: {
     minHeight: 36,
     minWidth: 36,

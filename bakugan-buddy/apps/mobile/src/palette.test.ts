@@ -76,8 +76,36 @@ for (const [label, palette] of [
   }
 }
 
+/**
+ * The risograph pairs the Today redesign draws with: ink on the day papers,
+ * the spot colours on both papers, and the lifted spot colours on the night
+ * papers. Vermilion and ochre are decorative on the day paper (rules, discs,
+ * bars), so they are not asserted as body text there.
+ */
+const RISO_PAIRS = [
+  ["day", DAY, "ink", "paper"],
+  ["day", DAY, "ink", "paperDeep"],
+  ["day", DAY, "blue", "paper"],
+  ["day", DAY, "blue", "paperDeep"],
+  ["night", NIGHT, "cream", "ink"],
+  ["night", NIGHT, "cream", "raised"],
+  ["night", NIGHT, "blue", "ink"],
+  ["night", NIGHT, "blue", "raised"],
+  ["night", NIGHT, "vermilion", "ink"],
+  ["night", NIGHT, "vermilion", "raised"],
+  ["night", NIGHT, "ochre", "ink"],
+  ["night", NIGHT, "ochre", "raised"],
+] as const;
+
+for (const [label, palette, colour, ground] of RISO_PAIRS) {
+  test(`${label}: ${colour} on ${ground} meets WCAG AA`, () => {
+    const ratio = contrast(palette[colour], palette[ground]);
+    assert.ok(ratio >= 4.5, `expected >= 4.5, got ${ratio.toFixed(3)}`);
+  });
+}
+
 /** Every palette key that the contrast tests rely on is a hex colour. */
-const HEX_COLOURS = ["text", "dim", "faint", "accentText", "accent", "onAccent", "card", "cardSoft", "note", "onSky", "onSkyMuted", "bg", "skyTop", "skyMid", "skyBottom"] as const;
+const HEX_COLOURS = ["text", "dim", "faint", "accentText", "accent", "onAccent", "card", "cardSoft", "note", "onSky", "onSkyMuted", "bg", "skyTop", "skyMid", "skyBottom", "paper", "paperDeep", "ink", "raised", "cream", "blue", "vermilion", "ochre"] as const;
 
 test("contrast-checked colours are plain hex", () => {
   for (const palette of [DAY, NIGHT]) {

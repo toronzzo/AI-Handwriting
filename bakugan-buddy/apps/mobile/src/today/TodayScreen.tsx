@@ -19,10 +19,11 @@ function clockText(d: Date): string {
 }
 
 /**
- * The Today dashboard: header with the brand chip and the live clock, then
- * the level card and daily XP on the left, the radar in the centre and the
- * quests on the right, and the PATHS row across the bottom. Plain scroll
- * flow, nothing fixed.
+ * The Today field journal: header with the brand plate and the live clock,
+ * then an asymmetric print spread — the level card and daily XP on the
+ * narrow 38% journal column, the radar and quests on the wide content
+ * column — and the PATHS row across the bottom. Plain scroll flow, nothing
+ * fixed. The equal three-column card grid is gone with the riso redesign.
  */
 export function TodayScreen() {
   const { snapshot } = useRpg();
@@ -39,7 +40,7 @@ export function TodayScreen() {
 
   const cols = todayColumns(width);
   const left = (
-    <View style={[styles.leftCol, cols === 1 && styles.stacked]}>
+    <View style={styles.leftCol}>
       <LevelCard />
       <DailyXp />
     </View>
@@ -66,21 +67,10 @@ export function TodayScreen() {
         </View>
       </View>
 
-      {cols === 3 ? (
+      {cols === 2 ? (
         <View style={styles.row}>
-          <View style={styles.sideCol}>{left}</View>
-          <View style={styles.centerCol}>
-            <Radar />
-          </View>
-          <View style={styles.sideCol}>
-            <QuestList />
-            <FocusQuest />
-          </View>
-        </View>
-      ) : cols === 2 ? (
-        <View style={styles.row}>
-          <View style={styles.sideCol}>{left}</View>
-          <View style={[styles.centerCol, styles.stacked]}>
+          <View style={styles.journalCol}>{left}</View>
+          <View style={styles.contentCol}>
             <Radar />
             <QuestList />
             <FocusQuest />
@@ -114,8 +104,10 @@ const styles = StyleSheet.create({
   brandBlock: { alignItems: "flex-start" },
   brandChip: {
     backgroundColor: theme.card,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
+    borderWidth: 1.5,
+    borderBottomWidth: 0,
+    borderColor: theme.text,
+    borderRadius: theme.radius.square,
     paddingVertical: 6,
     paddingHorizontal: 14,
   },
@@ -129,7 +121,7 @@ const styles = StyleSheet.create({
   },
   demoTag: {
     backgroundColor: theme.accent,
-    borderRadius: 5,
+    borderRadius: theme.radius.square,
     paddingVertical: 2,
     paddingHorizontal: 8,
     marginTop: 14,
@@ -143,7 +135,9 @@ const styles = StyleSheet.create({
   },
   clockChip: {
     backgroundColor: theme.card,
-    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: theme.text,
+    borderRadius: theme.radius.square,
     paddingVertical: 8,
     paddingHorizontal: 14,
   },
@@ -154,9 +148,10 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
     color: theme.text,
   },
-  row: { flexDirection: "row", alignItems: "flex-start", gap: 20 },
-  sideCol: { width: "26%", minWidth: 280, gap: 20 },
-  centerCol: { flex: 1, minWidth: 280 },
+  /** The asymmetric riso spread: a 38% journal column beside the content. */
+  row: { flexDirection: "row", alignItems: "flex-start", gap: 24 },
+  journalCol: { width: "38%", minWidth: 240, gap: 20 },
+  contentCol: { flex: 1, minWidth: 0, gap: 20 },
   leftCol: { gap: 20 },
   stacked: { gap: 20 },
 });

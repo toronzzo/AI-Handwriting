@@ -12,10 +12,16 @@ test("every tab has a label, an icon and a friendly empty state", () => {
   for (const tab of MAIN_TABS) {
     assert.ok(tab.label.length > 0, `${tab.id} label`);
     assert.ok(tab.icon.length > 0, `${tab.id} icon`);
+    assert.ok(tab.glyph.length > 0, `${tab.id} glyph`);
     assert.ok(tab.empty.length > 10, `${tab.id} empty sentence`);
     assert.ok(tab.example.startsWith("Try"), `${tab.id} example`);
   }
   assert.ok(SETTINGS_ENTRY.icon.length > 0);
+});
+
+test("every tab has a drawn NavMark glyph, and settings a gear", () => {
+  assert.deepEqual(MAIN_TABS.map((t) => t.glyph), ["house", "speech", "book", "ledger", "brain"]);
+  assert.equal(SETTINGS_ENTRY.glyph, "gear");
 });
 
 test("today stays the first tab so the app opens on the dashboard", () => {

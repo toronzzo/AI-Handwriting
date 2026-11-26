@@ -4,9 +4,9 @@ import { useArt } from "../art/slots.ts";
 import { PreyasHeroSwitch } from "./PreyasHeroSwitch";
 import { theme } from "../theme";
 import { ArtSlot } from "../ui/ArtSlot";
-import { Stripe } from "../ui/Stripe";
 import { Panel } from "../ui/Panel";
 import { useReducedMotion } from "../ui/useReducedMotion";
+import { HalftoneDisc, PrintedBar } from "./risoPrint";
 import type { AreaId } from "../rpg/types.ts";
 import { AREAS } from "../rpg/types.ts";
 import { usePreyasActivity } from "../state/usePreyasActivity";
@@ -37,15 +37,15 @@ function XpChip({ area, xp, reduce }: { area: AreaId; xp: number; reduce: boolea
 }
 
 /**
- * The level card: Preyas on his sky stage, the level badge, the XP bar and
- * the rank line. A level-up pops the LEVEL UP pill for 2 s; XP gains float
- * as "+N Area" chips for 1.8 s. Both animations are skipped when the user
- * prefers reduced motion.
+ * The riso level card: a 96 px Oswald level number with Preyas overlapping
+ * it, a halftone disc behind him, the XP as a printed bar with tick marks
+ * and the rank line under it. A level-up pops the LEVEL UP pill for 2 s; XP
+ * gains float as "+N Area" chips for 1.8 s. Both animations are skipped when
+ * the user prefers reduced motion.
  *
  * When the user has a `hero` picture in his own art folder it fills the stage
- * and the ball moves to the bottom-right at half the width, with a soft drop
- * shadow so it stays readable over the picture. Without the picture nothing
- * changes.
+ * and the ball moves to the bottom-right at half the width. Without the
+ * picture the halftone disc and the level number stay visible behind him.
  */
 export function LevelCard() {
   const { snapshot, message } = useRpg();
@@ -100,30 +100,33 @@ export function LevelCard() {
   }, [levelUp, reduce, pillScale]);
 
   const fill = Math.min(100, Math.round((snapshot.levelInto / snapshot.levelNeed) * 100));
-  const fillWidth = `${fill}%` as const;
   const nowXp = Math.min(snapshot.levelInto, snapshot.levelNeed);
 
   return (
-    <Panel style={styles.card} padding={0}>
+    <Panel style={styles.card} padding={0} plate="PL. 01">
       <View style={styles.stage}>
         {hasHero ? (
           <View style={styles.heroImage}>
-            <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable />
+            <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable editorCorner="top" />
           </View>
         ) : (
           /**
-           * FIX-2: without a picture the empty placeholder is the BACKGROUND
-           * (drawn first, lowest layer) and Preyas is drawn on top of it. It
-           * used to be an absoluteFill with zIndex 1, which painted over him.
+           * Without a picture the empty placeholder is the BACKGROUND (drawn
+           * first, lowest layer) and Preyas is drawn on top of it.
            *
-           * box-none: the gradient and the picture glyph ignore taps, but the
-           * "Change photo" button inside it still takes them, and it carries a
-           * higher zIndex than Preyas so it also shows on top of him.
+           * box-none: the placeholder ignores taps, but the "Change photo"
+           * button inside it still takes them, and it carries a higher zIndex
+           * than Preyas so it also shows on top of him.
            */
           <View style={styles.heroBack}>
-            <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable />
+            <ArtSlot slot="hero" radius={0} style={styles.heroSlot} editable editorCorner="top" />
           </View>
         )}
+        <HalftoneDisc size={218} style={styles.disc} />
+        <View style={[styles.levelBlock, hasHero ? styles.levelBlockOnPhoto : null]} pointerEvents="none">
+          <Text style={styles.lvLabel}>LV</Text>
+          <Text style={styles.levelNumber}>{snapshot.level}</Text>
+        </View>
         <View
           style={hasHero ? styles.heroCorner : styles.hero}
           pointerEvents={hasHero ? "auto" : "box-none"}
@@ -147,30 +150,20 @@ export function LevelCard() {
       </View>
 
       <View style={styles.info}>
-        <View style={styles.badgeRow}>
-          <View style={styles.badge}>
-            <Text style={styles.badgeLabel}>LV</Text>
-            <Text style={styles.badgeLevel}>{snapshot.level}</Text>
-          </View>
-          <View style={styles.nameBlock}>
-            <Text style={styles.name}>Preyas</Text>
-            <Text style={styles.rank}>
-              Rank {snapshot.rank.letter} · {snapshot.rank.name}
-            </Text>
-          </View>
+        <View style={styles.nameRow}>
+          <Text style={styles.name}>Preyas</Text>
+          <Text style={styles.rank}>
+            Rank {snapshot.rank.letter} · {snapshot.rank.name}
+          </Text>
         </View>
 
-        <View
-          style={styles.bar}
-          accessibilityRole="progressbar"
-          accessibilityValue={{ min: 0, max: snapshot.levelNeed, now: nowXp }}
-          accessibilityLabel={`${nowXp} of ${snapshot.levelNeed} XP`}
-        >
-          <View style={[styles.fill, { width: fillWidth }]} />
-        </View>
-        <View style={styles.fillStripe}>
-          <Stripe height={2} width={fillWidth} />
-        </View>
+        <PrintedBar
+          pct={fill}
+          min={0}
+          max={snapshot.levelNeed}
+          now={nowXp}
+          label={`${nowXp} of ${snapshot.levelNeed} XP`}
+        />
         <View style={styles.xpRow}>
           <Text style={styles.xpNumbers}>
             {snapshot.levelInto} / {snapshot.levelNeed} XP
@@ -195,21 +188,21 @@ export function LevelCard() {
 const styles = StyleSheet.create({
   card: { overflow: "hidden" },
   stage: {
-    aspectRatio: 300 / 214,
+    height: 224,
     width: "100%",
     overflow: "hidden",
   },
-  band: { width: "100%" },
   heroImage: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: "100%", height: "100%" },
   /** The hero picture fills the stage; its "Change photo" button sits in the
-   *  bottom-left corner. It is a later sibling of the level-up pill and XP
-   *  chips, so the button is never covered by them. */
+   *  top-left corner, because the printed level number owns the bottom-left.
+   *  It is a later sibling of the level-up pill and XP chips, so the button is
+   *  never covered by them. */
   heroSlot: { flex: 1, height: "100%", borderWidth: 0 },
   /**
-   * FIX-2: the empty placeholder sits UNDER Preyas. It has no zIndex, so the
-   * later sibling (the Preyas layer, zIndex 2) paints over it. Its own
-   * "Change photo" button is lifted to zIndex 3 by ArtSlot, so the button
-   * still shows and still takes taps on top of him.
+   * The empty placeholder sits UNDER Preyas. It has no zIndex, so the later
+   * sibling (the Preyas layer, zIndex 2) paints over it. Its own "Change
+   * photo" button is lifted to zIndex 3 by ArtSlot, so the button still
+   * shows and still takes taps on top of him.
    */
   heroBack: {
     position: "absolute",
@@ -219,8 +212,42 @@ const styles = StyleSheet.create({
     bottom: 0,
     zIndex: 0,
   },
-  /** Preyas on top of the placeholder (and of the empty stage). */
-  hero: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 2 },
+  /** The halftone disc behind Preyas, cropped by the stage's overflow. */
+  disc: { position: "absolute", right: -34, bottom: -38, zIndex: 1 },
+  /** The big printed level number, overlapped by Preyas from the right. */
+  levelBlock: { position: "absolute", left: 16, bottom: 12, zIndex: 1 },
+  /**
+   * Over a picture the numeral is printed on its own paper label. Ink on an
+   * arbitrary photo is not readable - a dark hero picture swallowed the level
+   * number completely - so with a picture the block becomes a pasted label:
+   * paper fill, ink rule. Without a picture it stays bare ink on the plate.
+   */
+  levelBlockOnPhoto: {
+    backgroundColor: theme.card,
+    borderWidth: 1,
+    borderColor: theme.lineStrong,
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 6,
+  },
+  lvLabel: {
+    fontFamily: theme.font.display,
+    fontWeight: "700",
+    fontSize: 13,
+    letterSpacing: 2,
+    textTransform: "uppercase",
+    color: theme.vermilion,
+    marginBottom: 2,
+  },
+  levelNumber: {
+    fontFamily: theme.font.display,
+    fontWeight: "700",
+    fontSize: theme.type.display.level,
+    lineHeight: 96,
+    color: theme.text,
+  },
+  /** Preyas on top of the placeholder, overlapping the level number. */
+  hero: { position: "absolute", left: "34%", right: 0, top: 0, bottom: 0, zIndex: 2 },
   /** With a hero picture the ball keeps the bottom-right half of the stage. */
   heroCorner: {
     position: "absolute",
@@ -228,17 +255,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: "50%",
     height: "100%",
-    shadowColor: theme.shadow,
-    shadowOpacity: 1,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
   },
   levelUpPill: {
     position: "absolute",
-    top: 14,
+    top: 12,
     alignSelf: "center",
     backgroundColor: theme.accent,
-    borderRadius: 12,
+    borderRadius: theme.radius.square,
     paddingVertical: 8,
     paddingHorizontal: 22,
   },
@@ -253,7 +276,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: 14,
+    bottom: 10,
     alignItems: "center",
     justifyContent: "flex-end",
     gap: 6,
@@ -261,8 +284,8 @@ const styles = StyleSheet.create({
   xpChip: {
     backgroundColor: theme.card,
     borderWidth: 1,
-    borderColor: theme.accent,
-    borderRadius: 13,
+    borderColor: theme.lineStrong,
+    borderRadius: theme.radius.square,
     paddingVertical: 4,
     paddingHorizontal: 10,
   },
@@ -271,50 +294,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
   },
-  info: { paddingVertical: 18, paddingHorizontal: 20 },
-  badgeRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 },
-  badge: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
-    backgroundColor: theme.accent,
-    alignItems: "center",
-    justifyContent: "center",
+  info: { paddingVertical: 16, paddingHorizontal: 18 },
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 10,
   },
-  badgeLabel: {
-    color: theme.onAccent,
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.4,
-    lineHeight: 12,
-  },
-  badgeLevel: {
-    color: theme.onAccent,
-    fontFamily: theme.font.display,
-    fontWeight: "700",
-    fontSize: 32,
-    lineHeight: 34,
-  },
-  nameBlock: { flex: 1 },
-  name: { color: theme.text, fontSize: 24, fontWeight: "800" },
+  name: { color: theme.text, fontSize: 22, fontWeight: "700" },
   rank: { color: theme.dim, fontSize: 13 },
-  bar: {
-    height: 8,
-    borderRadius: 99,
-    backgroundColor: theme.track,
-    borderWidth: 1,
-    borderColor: theme.accentLine,
-    overflow: "hidden",
-  },
-  fill: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: theme.accent,
-    borderRadius: 99,
-  },
-  fillStripe: { marginTop: 5 },
   xpRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -324,7 +313,7 @@ const styles = StyleSheet.create({
   xpNumbers: { color: theme.dim, fontSize: 12.5 },
   bubble: {
     backgroundColor: theme.cardSoft,
-    borderRadius: 12,
+    borderRadius: theme.radius.square,
     paddingVertical: 9,
     paddingHorizontal: 12,
   },

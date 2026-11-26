@@ -113,7 +113,7 @@ export function QuestList() {
   const done = snapshot.quests.filter((quest) => quest.done).length;
 
   return (
-    <Panel>
+    <Panel plate="PL. 04">
       <View style={styles.header}>
         <Text style={styles.heading} accessibilityRole="header">QUESTS</Text>
         <Text style={styles.count}>
@@ -163,13 +163,13 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingVertical: 9,
     paddingHorizontal: 8,
-    borderRadius: 10,
+    borderRadius: theme.radius.square,
   },
   rowHover: { backgroundColor: theme.cardSoft },
   box: {
     width: 20,
     height: 20,
-    borderRadius: 6,
+    borderRadius: theme.radius.square,
     borderWidth: 1.5,
     borderColor: theme.faint,
     alignItems: "center",
@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
   chip: {
     borderWidth: 1,
     borderColor: theme.lineStrong,
-    borderRadius: 999,
+    borderRadius: theme.radius.square,
     paddingVertical: 1,
     paddingHorizontal: 9,
   },
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 8,
+    borderRadius: theme.radius.square,
     borderWidth: 1,
     borderColor: theme.lineStrong,
   },

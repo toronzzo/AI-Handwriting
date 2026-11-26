@@ -21,8 +21,11 @@ import { BrainScreen } from "./src/brain/BrainScreen";
 import { MAIN_TABS, SETTINGS_ENTRY, type Section } from "./src/nav";
 import { chatPaneVisible, chatSectionFor, chatStaysMounted } from "./src/stage";
 import { theme } from "./src/theme";
+import { NIGHT } from "./src/palette";
 import { isWide, ROOT_ATTR, SHELL_ATTR, STAGE_ATTR, WEB_SHELL_CSS } from "./src/layout";
 import { Stripe } from "./src/ui/Stripe";
+import { NavMark } from "./src/ui/NavMark";
+import { Grain } from "./src/ui/Grain";
 import { useArt } from "./src/art/slots.ts";
 import { SHADE_BANDS, mixColour } from "./src/skyCss.ts";
 import { usePalette } from "./src/usePalette";
@@ -82,7 +85,7 @@ export default function App() {
               accessibilityRole="button"
               accessibilityLabel={tab.label}
             >
-              <Text style={[styles.railIcon, on && styles.railIconOn]}>{tab.icon}</Text>
+              <NavMark glyph={tab.glyph} size={20} colour={on ? palette.onAccent : palette.dim} />
               <Text style={[styles.railLabel, on && styles.railLabelOn]}>{tab.label}</Text>
             </Pressable>
           );
@@ -98,7 +101,11 @@ export default function App() {
           accessibilityRole="button"
           accessibilityLabel={SETTINGS_ENTRY.label}
         >
-          <Text style={[styles.railIcon, section === "settings" && !advanced && styles.railIconOn]}>{SETTINGS_ENTRY.icon}</Text>
+          <NavMark
+            glyph={SETTINGS_ENTRY.glyph}
+            size={20}
+            colour={section === "settings" && !advanced ? palette.onAccent : palette.dim}
+          />
           <Text style={[styles.railLabel, section === "settings" && !advanced && styles.railLabelOn]}>
             {SETTINGS_ENTRY.label}
           </Text>
@@ -124,7 +131,7 @@ export default function App() {
               accessibilityRole="button"
               accessibilityLabel={tab.label}
             >
-              <Text style={[styles.tabIcon, on && styles.tabIconOn]}>{tab.icon}</Text>
+              <NavMark glyph={tab.glyph} size={20} colour={on ? palette.onAccent : palette.dim} />
               <Text style={[styles.barLabel, on && styles.barLabelOn]}>{tab.label}</Text>
             </Pressable>
           );
@@ -140,14 +147,18 @@ export default function App() {
         accessibilityRole="button"
         accessibilityLabel="Settings"
       >
-        <Text style={[styles.gearIcon, section === "settings" && !advanced && styles.tabIconOn]}>{SETTINGS_ENTRY.icon}</Text>
+        <NavMark
+          glyph={SETTINGS_ENTRY.glyph}
+          size={20}
+          colour={section === "settings" && !advanced ? palette.onAccent : palette.text}
+        />
       </Pressable>
     </>
   );
 
   return (
     <SafeAreaView style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style={palette === NIGHT ? "light" : "dark"} />
       <View style={shellStyles.shell} {...webMark(SHELL_ATTR, ROOT_ATTR)}>
         {hasBg ? (
           // The user's own `bg` picture, behind everything, with a shade on
@@ -222,6 +233,12 @@ export default function App() {
       </View>
 
       {!wide ? <View style={[styles.tabbar, mobileBarStyles.bar]}>{bar}</View> : null}
+
+      {!isWeb ? (
+        <View style={styles.grain} pointerEvents="none" accessibilityElementsHidden>
+          <Grain />
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -245,6 +262,8 @@ const styles = StyleSheet.create({
   // Same reasoning as the shell row: the stage must shrink to its slot so the
   // Memory list scrolls inside it rather than growing the page.
   stage: { flex: 1, minHeight: 0, overflow: "hidden", backgroundColor: isWeb ? "transparent" : theme.bg },
+  /** The riso paper grain covers the whole phone screen, above everything. */
+  grain: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 20 },
   fill: { flex: 1 },
   hidden: { height: 0, overflow: "hidden", flex: 0 },
   /** Chat stays mounted here so a reply can finish while another tab is open. */
@@ -260,11 +279,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.space.xs,
     alignItems: "center",
     justifyContent: "space-between",
-    shadowColor: theme.shadow,
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
   },
   rail: { alignItems: "center", gap: theme.space.sm, width: "100%" },
   railFoot: { alignItems: "center", width: "100%" },
@@ -272,7 +286,7 @@ const styles = StyleSheet.create({
   brandBall: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: theme.radius.square,
     backgroundColor: theme.accent,
     borderWidth: 1,
     borderColor: theme.lineStrong,
@@ -284,11 +298,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: theme.space.xs,
     paddingVertical: theme.space.sm,
-    borderRadius: theme.radius.sm,
+    borderRadius: theme.radius.square,
   },
   railItemOn: { backgroundColor: theme.accent },
-  railIcon: { fontSize: theme.type.title, color: theme.dim },
-  railIconOn: { color: theme.onAccent },
   railLabel: { color: theme.dim, fontSize: theme.type.label, fontWeight: "600" },
   railLabelOn: { color: theme.onAccent },
 
@@ -303,7 +315,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.space.sm,
   },
   barTabs: { flex: 1, flexDirection: "row", minWidth: 0 },
-  barTab: { flex: 1, alignItems: "center", justifyContent: "center", gap: theme.space.xs / 2, minHeight: 44, paddingVertical: theme.space.xs / 2, borderRadius: theme.radius.sm },
+  barTab: { flex: 1, alignItems: "center", justifyContent: "center", gap: theme.space.xs / 2, minHeight: 44, paddingVertical: theme.space.xs / 2, borderRadius: theme.radius.square },
   barTabOn: { backgroundColor: theme.accent },
   barGear: {
     alignItems: "center",
@@ -312,14 +324,10 @@ const styles = StyleSheet.create({
     minWidth: 48,
     paddingHorizontal: theme.space.md,
     paddingVertical: theme.space.xs / 2,
-    borderRadius: theme.radius.sm,
+    borderRadius: theme.radius.square,
     opacity: 1,
   },
   barGearOn: { backgroundColor: theme.accent },
-  tabIcon: { fontSize: theme.type.title, color: theme.dim },
-  /** Settings gear stays full-opacity so it never looks disabled. */
-  gearIcon: { fontSize: theme.type.title, color: theme.text, opacity: 1 },
-  tabIconOn: { color: theme.onAccent },
   barLabel: { color: theme.dim, fontSize: theme.type.label, fontWeight: "600" },
   barLabelOn: { color: theme.onAccent },
 
@@ -333,11 +341,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.card,
     borderBottomWidth: 1,
     borderBottomColor: theme.accentLine,
-    shadowColor: theme.shadow,
-    shadowOpacity: 1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
   },
   advBack: { color: theme.accent, fontSize: theme.type.body, fontWeight: "700" },
   advTitle: { color: theme.text, fontSize: theme.type.body, fontWeight: "800" },

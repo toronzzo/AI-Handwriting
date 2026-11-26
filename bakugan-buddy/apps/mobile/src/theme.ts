@@ -20,6 +20,15 @@ export const theme = {
   bg: colour("bg"),
   card: colour("card"),
   cardSoft: colour("cardSoft"),
+  /** Risograph tokens (Today redesign): paper, ink and the two spot colours. */
+  paper: colour("paper"),
+  paperDeep: colour("paperDeep"),
+  ink: colour("ink"),
+  raised: colour("raised"),
+  cream: colour("cream"),
+  blue: colour("blue"),
+  vermilion: colour("vermilion"),
+  ochre: colour("ochre"),
   accent: colour("accent"),
   accentDim: colour("accentDim"),
   accentSoft: colour("accentSoft"),
@@ -68,9 +77,11 @@ export const theme = {
     title: 18,
     hero: 24,
     /** Display sizes for the RPG headings, clock and timer. */
-    display: { title: 32, level: 32, section: 26, clock: 24, timer: 20 },
+    /** Display sizes for the RPG headings, clock and timer. The riso
+     *  redesign prints the section titles at 40 and the level number at 96. */
+    display: { title: 32, level: 96, section: 40, clock: 24, timer: 20 },
   },
-  radius: { sm: 10, md: 14, lg: 20 },
+  radius: { sm: 10, md: 14, lg: 20, square: 2 },
   /** Layout sizes shared by the shell and the chat screen. */
   size: {
     /** Width of the Mac icon rail. */

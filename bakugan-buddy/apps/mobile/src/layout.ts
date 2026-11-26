@@ -77,9 +77,21 @@ export function listWidth(width: number, open: boolean): number {
 /** Narrow: the 4 tabs and the gear share the bottom bar evenly. */
 export const BAR_ITEMS = 5;
 
-/** Today dashboard columns: 3 from 1100px, 2 from 700px, 1 below. */
-export function todayColumns(width: number): 1 | 2 | 3 {
-  if (width >= 1100) return 3;
-  if (width >= 700) return 2;
-  return 1;
+/**
+ * Today dashboard: an asymmetric two-column print spread from 700 px — the
+ * level card and daily XP on the narrow journal column, the radar and quests
+ * on the wide content column — and one stacked column below. The old equal
+ * three-card grid is gone with the riso redesign.
+ */
+export function todayColumns(width: number): 1 | 2 {
+  return width >= 700 ? 2 : 1;
+}
+
+/**
+ * The riso page split: the left journal column takes 38% of the row and the
+ * content column takes the rest. Null when the dashboard is stacked, so a
+ * phone never gets a squeezed two-up layout.
+ */
+export function todaySplit(width: number): { leftPct: number; rightPct: number } | null {
+  return todayColumns(width) === 2 ? { leftPct: 38, rightPct: 62 } : null;
 }
